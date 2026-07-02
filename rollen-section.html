@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rollen-Section — Electro Train Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: rgb(18, 44, 67);
+    --navy-border: rgba(255, 195, 0, 0.16);
+    --gold: rgb(255, 195, 0);
+    --ink: rgb(245, 246, 248);
+    --ink-muted: rgba(245, 246, 248, 0.72);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: #0c1e2f;
+    font-family: "Manrope", sans-serif;
+    color: var(--ink);
+  }
+
+  .rollen {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 72px 24px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 22px;
+  }
+
+  @media (max-width: 980px) {
+    .rollen { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  @media (max-width: 560px) {
+    .rollen { grid-template-columns: 1fr; }
+  }
+
+  .rollen-card {
+    background: var(--navy);
+    border: 1px solid var(--navy-border);
+    border-radius: 18px;
+    padding: 32px 28px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  }
+
+  .rollen-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(255, 195, 0, 0.4);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rollen-card { transition: none; }
+    .rollen-card:hover { transform: none; }
+  }
+
+  .rollen-card__title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+
+  .rollen-card__lead {
+    margin: 0;
+    font-weight: 600;
+    font-size: 1.02rem;
+    line-height: 1.4;
+    color: var(--ink);
+  }
+
+  .rollen-card__figure {
+    margin: 4px 0 8px;
+    border-radius: 14px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .rollen-card__figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    transition: transform 0.35s ease;
+  }
+
+  .rollen-card:hover .rollen-card__figure img {
+    transform: scale(1.03);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rollen-card__figure img { transition: none; }
+    .rollen-card:hover .rollen-card__figure img { transform: none; }
+  }
+
+  .rollen-card__link {
+    margin-top: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-muted);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding-top: 4px;
+  }
+
+  .rollen-card__link svg {
+    transition: transform 0.2s ease;
+  }
+
+  .rollen-card__link:hover {
+    color: var(--gold);
+  }
+
+  .rollen-card__link:hover svg {
+    transform: translateX(3px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rollen-card__link svg,
+    .rollen-card__link:hover svg { transition: none; transform: none; }
+  }
+
+  .rollen-card__link:focus-visible,
+  .rollen-card:focus-within {
+    outline: 2px solid var(--gold);
+    outline-offset: 3px;
+  }
+</style>
+</head>
+<body>
+
+<section class="rollen">
+
+  <article class="rollen-card">
+    <h3 class="rollen-card__title">Betrieb</h3>
+    <p class="rollen-card__lead">Organisation, Pakete, Nutzer, Standorte und Ausbildungsstand im Überblick.</p>
+    <div class="rollen-card__figure">
+      <img src="https://media.clicksites.ai/clicksites/uploads/6937/1782737913771_12-betrieb-cockpit.webp" alt="">
+    </div>
+    <a href="#" class="rollen-card__link">Mehr erfahren
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </article>
+
+  <article class="rollen-card">
+    <h3 class="rollen-card__title">Ausbilder</h3>
+    <p class="rollen-card__lead">Unterricht, Abgaben, Feedback und Berichtsheftprüfung ohne Suchaufwand.</p>
+    <div class="rollen-card__figure">
+      <img src="https://media.clicksites.ai/clicksites/uploads/6937/1782737937850_20-ausbilder-abgaben-pruefen.webp" alt="">
+    </div>
+    <a href="#" class="rollen-card__link">Mehr erfahren
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </article>
+
+  <article class="rollen-card">
+    <h3 class="rollen-card__title">Azubi</h3>
+    <p class="rollen-card__lead">Aufgaben verstehen, bearbeiten, nachweisen und Rückmeldung erhalten.</p>
+    <div class="rollen-card__figure">
+      <img src="https://media.clicksites.ai/clicksites/uploads/6937/1782737950705_22-azubi-meine-aufgaben.webp" alt="">
+    </div>
+    <a href="#" class="rollen-card__link">Mehr erfahren
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </article>
+
+  <article class="rollen-card">
+    <h3 class="rollen-card__title">Eltern</h3>
+    <p class="rollen-card__lead">Freigegebene Informationen sehen, ohne in die Ausbildung einzugreifen.</p>
+    <div class="rollen-card__figure">
+      <img src="https://media.clicksites.ai/clicksites/uploads/6937/1782737965102_07-rolle-eltern-elternportal.webp" alt="">
+    </div>
+    <a href="#" class="rollen-card__link">Mehr erfahren
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </article>
+
+</section>
+
+</body>
+</html>
