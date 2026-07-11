@@ -81,10 +81,23 @@ model User {
   siteAccess   UserSite[]
   recordedRecords InspectionRecord[] @relation("recordedBy")
   accessLogs   AccessLog[]
+  sessions     Session[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
   @@map("users")
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
 }
 
 model Site {
