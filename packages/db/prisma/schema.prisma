@@ -1,0 +1,293 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Criticality {
+  LIFE_SAFETY
+  OPERATIONAL
+  NON_CRITICAL
+}
+
+enum Authority {
+  CIVIL_DEFENSE
+  SBC
+  MUNICIPALITY
+  MOMRA
+  CLIENT_CONTRACT
+  MANUFACTURER
+  INTERNAL
+}
+
+enum InspectionResult {
+  PASS
+  PASS_WITH_DEFECTS
+  FAIL
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  TECHNICIAN
+  VIEWER
+}
+
+enum DefectSeverity {
+  CRITICAL
+  MAJOR
+  MINOR
+}
+
+enum DefectStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  sites     Site[]
+  users     User[]
+  assets    Asset[]
+  duties    InspectionDuty[]
+  assetDuties AssetDuty[]
+  records   InspectionRecord[]
+  defects   Defect[]
+  files     FileObject[]
+  accessLogs AccessLog[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  email          String
+  name           String
+  passwordHash   String
+  role           Role
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  siteAccess   UserSite[]
+  recordedRecords InspectionRecord[] @relation("recordedBy")
+  accessLogs   AccessLog[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Site {
+  id                String   @id @default(cuid())
+  organizationId    String
+  name              String
+  address           String
+  client            String
+  responsiblePerson String
+  createdAt         DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assets       Asset[]
+  userAccess   UserSite[]
+
+  @@index([organizationId])
+  @@map("sites")
+}
+
+model UserSite {
+  userId String
+  siteId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@id([userId, siteId])
+  @@map("user_sites")
+}
+
+model Asset {
+  id             String      @id @default(cuid())
+  organizationId String
+  siteId         String
+  tag            String
+  name           String
+  assetType      String
+  manufacturer   String?
+  model          String?
+  serialNumber   String?
+  commissionedOn DateTime?   @db.Date
+  locationDetail String?
+  criticality    Criticality
+  createdAt      DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  site         Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  assetDuties  AssetDuty[]
+
+  @@unique([siteId, tag])
+  @@index([organizationId])
+  @@index([siteId])
+  @@map("assets")
+}
+
+/// Template rule. organizationId null = system-provided statutory template
+/// shared across tenants; non-null = a tenant's own (e.g. client-contract) rule.
+model InspectionDuty {
+  id                 String    @id @default(cuid())
+  organizationId     String?
+  assetType          String
+  titleEn            String
+  titleAr            String
+  authority          Authority
+  reference          String
+  intervalDays       Int
+  graceDays          Int
+  requiresCertificate Boolean  @default(false)
+  requiresThirdParty Boolean   @default(false)
+  isStatutory        Boolean   @default(false)
+  active             Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assetDuties  AssetDuty[]
+
+  @@index([organizationId])
+  @@index([assetType])
+  @@map("inspection_duties")
+}
+
+/// A duty instantiated for a specific asset. The duty definition is snapshotted
+/// here so later edits to the template never rewrite an asset's history.
+model AssetDuty {
+  id             String   @id @default(cuid())
+  organizationId String
+  assetId        String
+  sourceDutyId   String?
+
+  titleEn             String
+  titleAr             String
+  authority           Authority
+  reference           String
+  intervalDays        Int
+  graceDays           Int
+  requiresCertificate Boolean
+  requiresThirdParty  Boolean
+  isStatutory         Boolean
+
+  active             Boolean   @default(true)
+  deactivationReason String?
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  createdAt          DateTime  @default(now())
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  asset        Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  sourceDuty   InspectionDuty? @relation(fields: [sourceDutyId], references: [id], onDelete: SetNull)
+  records      InspectionRecord[]
+  defects      Defect[]
+
+  @@index([organizationId])
+  @@index([assetId])
+  @@map("asset_duties")
+}
+
+/// Immutable evidence. Never updated, never deleted (enforced by DB triggers).
+/// A mistake is corrected by inserting a new record with supersedesId set.
+model InspectionRecord {
+  id             String   @id @default(cuid())
+  organizationId String
+  assetDutyId    String
+
+  performedOn               DateTime @db.Date
+  performedBy               String
+  performedByCompany        String?
+  thirdPartyAccreditationRef String?
+  result                    InspectionResult
+  findings                  String?
+  nextAction                String?
+  certificateId             String?
+
+  recordedById   String
+  recordedAt     DateTime @default(now())
+
+  supersedesId     String?  @unique
+  correctionReason String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assetDuty    AssetDuty    @relation(fields: [assetDutyId], references: [id], onDelete: Cascade)
+  recordedBy   User         @relation("recordedBy", fields: [recordedById], references: [id])
+  certificate  FileObject?  @relation(fields: [certificateId], references: [id])
+  supersedes   InspectionRecord? @relation("supersedes", fields: [supersedesId], references: [id])
+  supersededBy InspectionRecord? @relation("supersedes")
+
+  raisedDefects  Defect[] @relation("raisedByRecord")
+  closedDefects  Defect[] @relation("closedByRecord")
+
+  @@index([organizationId])
+  @@index([assetDutyId])
+  @@map("inspection_records")
+}
+
+model Defect {
+  id             String   @id @default(cuid())
+  organizationId String
+  assetDutyId    String
+  raisedByRecordId String
+  severity       DefectSeverity
+  description    String
+  dueDate        DateTime?     @db.Date
+  status         DefectStatus  @default(OPEN)
+  closedByRecordId String?
+  createdAt      DateTime      @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assetDuty    AssetDuty    @relation(fields: [assetDutyId], references: [id], onDelete: Cascade)
+  raisedByRecord InspectionRecord @relation("raisedByRecord", fields: [raisedByRecordId], references: [id])
+  closedByRecord InspectionRecord? @relation("closedByRecord", fields: [closedByRecordId], references: [id])
+
+  @@index([organizationId])
+  @@index([assetDutyId])
+  @@map("defects")
+}
+
+model FileObject {
+  id             String   @id @default(cuid())
+  organizationId String
+  storageKey     String   @unique
+  filename       String
+  contentType    String
+  sizeBytes      Int
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  records      InspectionRecord[]
+
+  @@index([organizationId])
+  @@map("file_objects")
+}
+
+model AccessLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  entityType     String
+  entityId       String
+  at             DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, at])
+  @@map("access_logs")
+}
