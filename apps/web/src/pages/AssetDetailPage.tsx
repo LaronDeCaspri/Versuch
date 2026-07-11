@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, ApiError } from "../api/client.js";
 import type { AssetStatusView } from "../api/types.js";
 import { DateLabel } from "../components/DateLabel.js";
+import { RecordCapture } from "../components/RecordCapture.js";
 import { AuthorityLabel, CriticalityBadge, StatusBadge } from "../components/StatusBadge.js";
 import { Button, Spinner } from "../components/ui.js";
 import { useI18n } from "../i18n/index.js";
@@ -116,14 +117,7 @@ export function AssetDetailPage(): JSX.Element {
             </div>
           </section>
 
-          {/* M4: record capture will live here. Intentionally left empty for now. */}
-          <section
-            className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-slate-400"
-            aria-label={t("asset.records")}
-          >
-            <h2 className="text-base font-semibold text-slate-500">{t("asset.records")}</h2>
-            <p className="mt-1 text-sm">{t("asset.recordsSoon")}</p>
-          </section>
+          <RecordCapture asset={asset} onSynced={load} />
         </>
       )}
     </div>

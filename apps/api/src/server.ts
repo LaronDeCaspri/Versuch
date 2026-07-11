@@ -7,7 +7,17 @@ import { loadEnv } from "./env.js";
 import { AppError } from "./errors.js";
 import { assetRoutes } from "./routes/assets.js";
 import { authRoutes } from "./routes/auth.js";
+import { dossierRoutes } from "./routes/dossier.js";
+import { fileRoutes } from "./routes/files.js";
+import { recordRoutes } from "./routes/records.js";
 import { siteRoutes } from "./routes/sites.js";
+import { createStorage, type FileStorage } from "./storage/index.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    storage: FileStorage;
+  }
+}
 
 export async function buildServer(): Promise<FastifyInstance> {
   const env = loadEnv();
@@ -16,6 +26,7 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   await app.register(cookie, { secret: env.sessionSecret });
   await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024 } });
+  app.decorate("storage", await createStorage());
 
   app.decorateRequest("auth", null);
   app.addHook("onRequest", async (req) => {
@@ -41,6 +52,9 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(authRoutes);
   await app.register(siteRoutes);
   await app.register(assetRoutes);
+  await app.register(recordRoutes);
+  await app.register(fileRoutes);
+  await app.register(dossierRoutes);
 
   return app;
 }

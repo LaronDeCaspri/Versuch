@@ -1,4 +1,12 @@
-import type { Criticality, DutyStatus, IsoDate, InspectionResult, Role } from "@cmp/core";
+import type {
+  Criticality,
+  DefectSeverity,
+  DefectStatus,
+  DutyStatus,
+  IsoDate,
+  InspectionResult,
+  Role,
+} from "@cmp/core";
 
 export interface CurrentUser {
   id: string;
@@ -68,4 +76,49 @@ export interface ImportReport {
   results: ImportRowResult[];
 }
 
-export type { Criticality, DutyStatus, InspectionResult, Role };
+export interface InspectionRecord {
+  id: string;
+  performedOn: IsoDate;
+  performedBy: string;
+  performedByCompany: string | null;
+  thirdPartyAccreditationRef: string | null;
+  result: InspectionResult;
+  findings: string | null;
+  nextAction: string | null;
+  certificateId: string | null;
+  recordedAt: string;
+  supersedesId: string | null;
+  correctionReason: string | null;
+  supersededBy: { id: string } | null;
+  certificate: { id: string; filename: string } | null;
+}
+
+export interface Defect {
+  id: string;
+  severity: DefectSeverity;
+  description: string;
+  status: DefectStatus;
+  closedByRecordId: string | null;
+}
+
+export interface FileUploadResult {
+  id: string;
+}
+
+/**
+ * Fields common to a record submission and a supersede. `certificateId` is filled
+ * in at send time from an uploaded certificate File, so it is not part of the payload
+ * the form produces. `correctionReason` is only present on a supersede.
+ */
+export interface RecordPayload {
+  performedOn: string;
+  performedBy: string;
+  performedByCompany?: string;
+  thirdPartyAccreditationRef?: string;
+  result: InspectionResult;
+  findings?: string;
+  nextAction?: string;
+  correctionReason?: string;
+}
+
+export type { Criticality, DefectSeverity, DefectStatus, DutyStatus, InspectionResult, Role };
