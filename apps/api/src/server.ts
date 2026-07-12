@@ -6,11 +6,13 @@ import { resolveAuth, SESSION_COOKIE } from "./auth/session.js";
 import { loadEnv } from "./env.js";
 import { AppError } from "./errors.js";
 import { assetRoutes } from "./routes/assets.js";
+import { auditRoutes } from "./routes/audit.js";
 import { authRoutes } from "./routes/auth.js";
 import { dossierRoutes } from "./routes/dossier.js";
 import { fileRoutes } from "./routes/files.js";
 import { recordRoutes } from "./routes/records.js";
 import { siteRoutes } from "./routes/sites.js";
+import { userRoutes } from "./routes/users.js";
 import { createStorage, type FileStorage } from "./storage/index.js";
 
 declare module "fastify" {
@@ -55,6 +57,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(recordRoutes);
   await app.register(fileRoutes);
   await app.register(dossierRoutes);
+  await app.register(userRoutes);
+  await app.register(auditRoutes);
 
   return app;
 }
