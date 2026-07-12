@@ -34,6 +34,43 @@ describe("record capture", () => {
     expect(list.json()).toHaveLength(1);
   });
 
+  it("rejects a malformed performedOn date with 400 (not 500)", async () => {
+    const fx = await seedFixture();
+    const cookie = await login("owner@org.sa");
+    const dutyId = await createDuty(cookie, fx);
+    const res = await (await app()).inject({
+      method: "POST",
+      url: `/asset-duties/${dutyId}/records`,
+      headers: { cookie },
+      payload: record({ performedOn: "2026-13-40" }),
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("does not leak another site's defects (site-scoped)", async () => {
+    const fx = await seedFixture();
+    const owner = await login("owner@org.sa");
+    // Asset + failing record (raises a defect) on Site B.
+    const created = await (await app()).inject({
+      method: "POST",
+      url: "/assets",
+      headers: { cookie: owner },
+      payload: { siteId: fx.siteBId, tag: "FP-B", name: "Pump", assetType: "fire_pump", criticality: "LIFE_SAFETY" },
+    });
+    const dutyId = created.json().duties[0].assetDutyId as string;
+    await (await app()).inject({
+      method: "POST",
+      url: `/asset-duties/${dutyId}/records`,
+      headers: { cookie: owner },
+      payload: record({ result: "FAIL", findings: "leak" }),
+    });
+
+    // Technician is assigned to Site A only.
+    const tech = await login("tech@org.sa");
+    const res = await (await app()).inject({ method: "GET", url: `/asset-duties/${dutyId}/defects`, headers: { cookie: tech } });
+    expect(res.json()).toHaveLength(0);
+  });
+
   it("rejects a future performedOn date", async () => {
     const fx = await seedFixture();
     const cookie = await login("owner@org.sa");

@@ -77,6 +77,12 @@ describe("InspectionRecord immutability (enforced by DB trigger)", () => {
     expect(await prisma.inspectionRecord.count()).toBe(1);
   });
 
+  it("rejects TRUNCATE of inspection_records (statement-level guard)", async () => {
+    await expect(prisma.$executeRawUnsafe("TRUNCATE TABLE inspection_records")).rejects.toThrow(
+      /immutable|TRUNCATE/i,
+    );
+  });
+
   it("allows correction only by superseding — both records survive", async () => {
     const { orgId, userId, siteId } = await seedOrgUser();
     const asset = await makeAsset(orgId, siteId);

@@ -133,13 +133,18 @@ function daysAgo(days: number): Date {
 }
 
 async function main(): Promise<void> {
-  // TRUNCATE (not DELETE) so the reset bypasses the record-immutability trigger.
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE
-       access_logs, defects, inspection_records, asset_duties, assets,
-       user_sites, users, sites, file_objects, inspection_duties, organizations
-     RESTART IDENTITY CASCADE`,
-  );
+  // TRUNCATE is blocked on inspection_records by an immutability trigger; the
+  // seed runs as a superuser and bypasses it for a clean reset via replica role.
+  await prisma.$transaction([
+    prisma.$executeRawUnsafe(`SET session_replication_role = 'replica'`),
+    prisma.$executeRawUnsafe(
+      `TRUNCATE TABLE
+         access_logs, defects, inspection_records, asset_duties, assets,
+         user_sites, users, sites, file_objects, inspection_duties, organizations, sessions
+       RESTART IDENTITY CASCADE`,
+    ),
+    prisma.$executeRawUnsafe(`SET session_replication_role = 'origin'`),
+  ]);
 
   await prisma.inspectionDuty.createMany({
     data: DUTY_TEMPLATES.map((t) => ({ ...t, organizationId: null })),

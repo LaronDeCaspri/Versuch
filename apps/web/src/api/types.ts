@@ -60,6 +60,24 @@ export interface AssetTypeDef {
   ar: string;
 }
 
+export interface UserView {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  active: boolean;
+  siteIds: string[];
+}
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  userName: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+}
+
 export interface ImportRowResult {
   row: number;
   outcome: "created" | "error";

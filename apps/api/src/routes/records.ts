@@ -1,15 +1,18 @@
-import { INSPECTION_RESULT } from "@cmp/core";
+import { INSPECTION_RESULT, isIsoDate } from "@cmp/core";
 import { getPrisma } from "@cmp/db";
 import type { FastifyInstance } from "fastify";
 import { requireAuth, requireRole } from "../auth/guards.js";
+import { badRequest } from "../errors.js";
 import { logAccess } from "../services/audit.js";
 import { listRecords, submitRecord, supersedeRecord, type SubmitRecordInput } from "../services/records.js";
 import { asObject, oneOf, optStr, str } from "../validate.js";
 
 function readBody(req: { body: unknown }): SubmitRecordInput {
   const b = asObject(req.body);
+  const performedOn = str(b, "performedOn");
+  if (!isIsoDate(performedOn)) throw badRequest("performedOn must be a valid date (YYYY-MM-DD)");
   return {
-    performedOn: str(b, "performedOn"),
+    performedOn,
     performedBy: str(b, "performedBy", { max: 200 }),
     performedByCompany: optStr(b, "performedByCompany"),
     thirdPartyAccreditationRef: optStr(b, "thirdPartyAccreditationRef"),
@@ -53,7 +56,11 @@ export async function recordRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>("/asset-duties/:id/defects", async (req) => {
     const auth = requireAuth(req);
     return prisma.defect.findMany({
-      where: { assetDutyId: req.params.id, organizationId: auth.organizationId },
+      where: {
+        assetDutyId: req.params.id,
+        organizationId: auth.organizationId,
+        assetDuty: { asset: { siteId: { in: [...auth.siteIds] } } },
+      },
       orderBy: { createdAt: "desc" },
     });
   });

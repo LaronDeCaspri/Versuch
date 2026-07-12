@@ -14,10 +14,12 @@ import { recordRoutes } from "./routes/records.js";
 import { siteRoutes } from "./routes/sites.js";
 import { userRoutes } from "./routes/users.js";
 import { createStorage, type FileStorage } from "./storage/index.js";
+import type { Env } from "./env.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     storage: FileStorage;
+    config: Env;
   }
 }
 
@@ -29,6 +31,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(cookie, { secret: env.sessionSecret });
   await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024 } });
   app.decorate("storage", await createStorage());
+  app.decorate("config", env);
 
   app.decorateRequest("auth", null);
   app.addHook("onRequest", async (req) => {

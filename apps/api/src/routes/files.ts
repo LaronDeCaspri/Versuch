@@ -28,7 +28,10 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const file = await loadFile(prisma, app.storage, auth, req.params.id);
     await logAccess(prisma, auth, "DOWNLOAD", "FileObject", req.params.id);
     reply.header("content-type", file.contentType);
-    reply.header("content-disposition", `inline; filename="${encodeURIComponent(file.filename)}"`);
+    // Force download and forbid MIME sniffing so an uploaded file can never be
+    // executed as active content in the API origin.
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
     return reply.send(file.body);
   });
 }

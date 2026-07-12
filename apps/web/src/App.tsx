@@ -7,6 +7,7 @@ import { LoginPage } from "./pages/LoginPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { AssetDetailPage } from "./pages/AssetDetailPage.js";
 import { SitesPage } from "./pages/SitesPage.js";
+import { SiteDetailPage } from "./pages/SiteDetailPage.js";
 import { UsersPage } from "./pages/UsersPage.js";
 import { AuditPage } from "./pages/AuditPage.js";
 
@@ -38,6 +39,7 @@ export function App(): JSX.Element {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/assets/:id" element={<AssetDetailPage />} />
         <Route path="/sites" element={<SitesPage />} />
+        <Route path="/sites/:id" element={<SiteDetailPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

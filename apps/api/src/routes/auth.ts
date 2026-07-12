@@ -14,17 +14,28 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const email = str(body, "email").toLowerCase();
     const password = str(body, "password");
 
-    const user = await prisma.user.findFirst({ where: { email, active: true } });
-    // Verify against a dummy hash when the user is missing to keep timing uniform.
-    const stored = user?.passwordHash ?? "scrypt$00$00";
-    const ok = await verifyPassword(password, stored);
-    if (user === null || !ok) throw unauthorized("Invalid email or password");
+    // Email is unique per organization, so the same address may exist in more
+    // than one tenant. Verify against every candidate and select the account
+    // whose password matches, rather than an arbitrary first row.
+    const candidates = await prisma.user.findMany({ where: { email, active: true } });
+    let user: (typeof candidates)[number] | null = null;
+    for (const candidate of candidates) {
+      if (await verifyPassword(password, candidate.passwordHash)) {
+        user = candidate;
+        break;
+      }
+    }
+    // Keep timing uniform when no candidate matches (including unknown emails).
+    if (user === null) {
+      await verifyPassword(password, "scrypt$00$00");
+      throw unauthorized("Invalid email or password");
+    }
 
     const sessionId = await createSession(prisma, user.id);
     reply.setCookie(SESSION_COOKIE, sessionId, {
       httpOnly: true,
       sameSite: "strict",
-      secure: process.env["COOKIE_SECURE"] === "true",
+      secure: app.config.cookieSecure,
       path: "/",
       maxAge: 60 * 60 * 12,
     });

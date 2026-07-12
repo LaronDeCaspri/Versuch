@@ -27,4 +27,13 @@ describe("file storage", () => {
     const intruder: AuthContext = { userId: "x", organizationId: org2.id, role: "OWNER", siteIds: [] };
     await expect(loadFile(prisma, storage, intruder, id)).rejects.toThrow(/not found/i);
   });
+
+  it("rejects an executable/unsupported content type", async () => {
+    const fx = await seedFixture();
+    const storage = await createStorage();
+    const auth: AuthContext = { userId: fx.ownerId, organizationId: fx.orgId, role: "OWNER", siteIds: [fx.siteAId] };
+    await expect(
+      storeFile(prisma, storage, auth, { filename: "evil.html", contentType: "text/html", buffer: Buffer.from("<script>") }),
+    ).rejects.toThrow(/unsupported file type/i);
+  });
 });
