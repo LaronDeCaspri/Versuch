@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "installed": {
+    "product-manager-toolkit": {
+      "version": "1.0.0",
+      "domain": "product-team",
+      "target": "claude",
+      "path": ".claude/skills/product-manager-toolkit",
+      "files": [
+        "SKILL.md",
+        "references/frameworks.md",
+        "references/prd_templates.md",
+        "scripts/customer_interview_analyzer.py",
+        "scripts/rice_prioritizer.py"
+      ],
+      "installed_at": "2026-07-12T11:49:43.684Z"
+    },
+    "product-strategist": {
+      "version": "1.0.0",
+      "domain": "product-team",
+      "target": "claude",
+      "path": ".claude/skills/product-strategist",
+      "files": [
+        "SKILL.md",
+        "references/examples/sample_growth_okrs.json",
+        "references/okr_framework.md",
+        "references/strategy_types.md",
+        "scripts/okr_cascade_generator.py"
+      ],
+      "installed_at": "2026-07-12T11:49:45.170Z"
+    },
+    "agile-product-owner": {
+      "version": "1.0.0",
+      "domain": "product-team",
+      "target": "claude",
+      "path": ".claude/skills/agile-product-owner",
+      "files": [
+        "SKILL.md",
+        "references/sprint-planning-guide.md",
+        "references/user-story-templates.md",
+        "scripts/user_story_generator.py"
+      ],
+      "installed_at": "2026-07-12T11:49:46.579Z"
+    },
+    "ab-test-setup": {
+      "version": "1.0.0",
+      "domain": "marketing",
+      "target": "claude",
+      "path": ".claude/skills/ab-test-setup",
+      "files": [
+        "SKILL.md",
+        "examples/test_results.csv",
+        "references/ab-testing-guide.md",
+        "scripts/results_analyzer.py",
+        "scripts/sample_size_calculator.py",
+        "scripts/test_designer.py"
+      ],
+      "installed_at": "2026-07-12T11:49:48.157Z"
+    },
+    "senior-pm": {
+      "version": "2.0.0",
+      "domain": "project-management",
+      "target": "claude",
+      "path": ".claude/skills/senior-pm",
+      "files": [
+        "SKILL.md",
+        "assets/executive_report_template.md",
+        "assets/expected_output.json",
+        "assets/project_charter_template.md",
+        "assets/raci_matrix_template.md",
+        "assets/sample_project_data.json",
+        "assets/stakeholder_map_template.md",
+        "references/portfolio-prioritization-models.md",
+        "references/risk-management-framework.md",
+        "references/stakeholder-engagement-guide.md",
+        "scripts/project_health_dashboard.py",
+        "scripts/resource_capacity_planner.py",
+        "scripts/risk_matrix_analyzer.py",
+        "scripts/stakeholder_mapper.py"
+      ],
+      "installed_at": "2026-07-12T11:49:50.594Z"
+    },
+    "program-manager": {
+      "version": "1.0.0",
+      "domain": "project-management",
+      "target": "claude",
+      "path": ".claude/skills/program-manager",
+      "files": [
+        "SKILL.md",
+        "scripts/milestone_tracker.py",
+        "scripts/portfolio_dashboard.py",
+        "scripts/resource_allocator.py"
+      ],
+      "installed_at": "2026-07-12T11:49:52.034Z"
+    },
+    "delivery-manager": {
+      "version": "1.0.0",
+      "domain": "project-management",
+      "target": "claude",
+      "path": ".claude/skills/delivery-manager",
+      "files": [
+        "SKILL.md",
+        "scripts/delivery_metrics_tracker.py",
+        "scripts/dependency_mapper.py",
+        "scripts/risk_register.py"
+      ],
+      "installed_at": "2026-07-12T11:49:53.495Z"
+    },
+    "scrum-master": {
+      "version": "2.0.0",
+      "domain": "project-management",
+      "target": "claude",
+      "path": ".claude/skills/scrum-master",
+      "files": [
+        "SKILL.md",
+        "assets/expected_output.json",
+        "assets/expected_velocity_output.json",
+        "assets/sample_sprint_data.json",
+        "assets/sprint_plan_template.md",
+        "assets/sprint_report_template.md",
+        "assets/team_health_check_template.md",
+        "assets/user_story_template.md",
+        "references/retro-formats.md",
+        "references/sprint-planning-guide.md",
+        "references/team-dynamics-framework.md",
+        "references/velocity-forecasting-guide.md",
+        "scripts/retrospective_analyzer.py",
+        "scripts/sprint_capacity_calculator.py",
+        "scripts/sprint_health_scorer.py",
+        "scripts/velocity_analyzer.py"
+      ],
+      "installed_at": "2026-07-12T11:49:56.226Z"
+    }
+  }
+}
