@@ -1,0 +1,25 @@
+name: masar
+description: Masar – Navi für Saudi-Arabien mit Fahrspur-Assistent.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- Für M2/M3 später hinzufügen (heute bewusst weggelassen, damit es sofort baut):
+  # here_sdk: ^4.x.x          # HERE SDK for Flutter (Karten, Routing, Spur-Führung, Offline)
+  # flutter_tts: ^4.0.0       # Sprachansagen EN/AR
+  # geolocator: ^12.0.0       # echtes GPS
+  # supabase_flutter: ^2.0.0  # Community-Blitzer-Backend
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

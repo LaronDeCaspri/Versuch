@@ -1,0 +1,24 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# Von `flutter create` erzeugte Plattform-Ordner (lokal generieren)
+/android/
+/ios/
+/linux/
+/macos/
+/windows/
+/web/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# HERE-Zugangsdaten NIEMALS committen
+**/here_credentials.dart
+.env

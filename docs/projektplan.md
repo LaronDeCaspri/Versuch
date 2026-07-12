@@ -55,10 +55,15 @@ Flutter App (iOS/Android)
 - **M6 — Live-Verkehr & ETA-Feinschliff.**
 - **M7 — Feinschliff, Tests, Store-Veröffentlichung.**
 
-## Offene Punkte (klären wir als Nächstes)
-- App-**Name** & Logo/Branding
-- **Sprach-Ansagen**: HERE-eigene TTS vs. separater Anbieter (Stimmenqualität Arabisch)
-- **Backend**-Wahl für Community-Blitzer (Supabase vs. Firebase)
-- **Monetarisierung**: kostenlos / Werbung / Abo (relevant für API-Kosten)
-- **Geräte-Test**: hast du iPhone, Android oder beides zum Testen?
-- **Zusatzfunktionen**: Tankstellen/Preise, Parkplätze, Gebetszeiten-Hinweis, CarPlay/Android Auto?
+## Getroffene Entscheidungen (vom Nutzer delegiert)
+- **Name:** Arbeitstitel bleibt **Masar** (später leicht änderbar).
+- **Testgerät:** **Android** (Flutter baut iOS trotzdem mit; wir testen zuerst auf Android).
+- **Monetarisierung:** Start **kostenlos** auf HERE-Gratis-Kontingent. Später optional „Masar Pro" (Offline-Pakete/werbefrei), falls die API-Kosten steigen.
+- **Sprach-Ansagen:** Start mit systemeigener TTS (Android `flutter_tts`, EN/AR). HERE-eigene Ansagen später, wenn wir das SDK anbinden.
+- **Backend (Community-Blitzer):** **Supabase** (einfacher Start, Postgres + Auth + Realtime).
+- **Zusatzfunktionen:** Kern zuerst. Danach in dieser Reihenfolge: Tankstellen, **Android Auto** (passt zu Android), Gebetszeiten-Hinweis, Parkplätze. CarPlay erst mit iOS-Fokus.
+
+## Offene Punkte (später)
+- Logo/Branding-Feinschliff
+- Endgültiger Name
+- Preis-/Abo-Modell konkretisieren
