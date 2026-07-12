@@ -1,0 +1,465 @@
+<title>Masar — Fahrspur-Vorschau</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#070b16; --frame:#05070f;
+    --sky-top:#0a1120; --sky-bot:#12203c;
+    --panel:#0f1830; --panel-2:#0b1428;
+    --road:#17213d; --road-edge:#2a3a5e; --lane-line:#3a4d76;
+    --go:#25e39a; --go-ink:#04140d; --go-glow:rgba(37,227,154,.55);
+    --go-soft:rgba(37,227,154,.14);
+    --dim:#586a8d; --dim-soft:rgba(88,106,141,.16);
+    --warn:#ff4d5e; --warn-soft:rgba(255,77,94,.16);
+    --amber:#ffb02e;
+    --ink:#eaf1ff; --muted:#93a3c2; --hair:#1e2a45;
+    --accent:#25e39a;
+    --limit-red:#e2382f;
+    --shadow:0 24px 60px rgba(0,0,0,.55);
+    --r:22px;
+  }
+  .app.day{
+    --sky-top:#cfe0f4; --sky-bot:#a9c4e6;
+    --panel:#ffffff; --panel-2:#eef3fb;
+    --road:#c3cee0; --road-edge:#9fb0cc; --lane-line:#ffffff;
+    --dim:#7c8aa6; --dim-soft:rgba(124,138,166,.18);
+    --go-soft:rgba(22,163,110,.16);
+    --go:#12a56d; --go-ink:#ffffff; --go-glow:rgba(18,165,109,.4);
+    --ink:#12203c; --muted:#5a6b8a; --hair:#d7e0ee;
+  }
+  *{box-sizing:border-box}
+  .stage{
+    min-height:100%;
+    background:
+      radial-gradient(1200px 700px at 50% -10%, #16264a 0%, rgba(22,38,74,0) 60%),
+      linear-gradient(180deg,#070b16 0%,#04070f 100%);
+    color:#eaf1ff;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"Helvetica Neue",Arial,"Noto Sans Arabic",sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    padding:28px 16px 40px; gap:22px;
+  }
+  .kicker{
+    text-align:center; max-width:560px;
+  }
+  .kicker h1{
+    font-size:clamp(20px,4.5vw,30px); font-weight:800; letter-spacing:-.02em;
+    margin:0 0 6px; text-wrap:balance;
+  }
+  .kicker p{ margin:0; color:#9fb0cc; font-size:14.5px; line-height:1.5; }
+  .kicker .mark{ color:#25e39a; font-weight:700; }
+
+  /* ---- phone frame ---- */
+  .phone{
+    width:min(390px,94vw); border-radius:44px; padding:12px;
+    background:linear-gradient(160deg,#1a2440,#05070f 60%);
+    box-shadow:var(--shadow), inset 0 0 0 1px rgba(255,255,255,.06);
+    position:relative;
+  }
+  .phone::before{
+    content:""; position:absolute; top:20px; left:50%; transform:translateX(-50%);
+    width:120px; height:26px; border-radius:0 0 16px 16px; background:#05070f; z-index:6;
+  }
+  .app{
+    border-radius:34px; overflow:hidden; position:relative;
+    background:linear-gradient(180deg,var(--sky-top),var(--sky-bot));
+    display:flex; flex-direction:column; min-height:660px;
+    transition:background .5s ease;
+  }
+
+  /* ---- top maneuver banner ---- */
+  .banner{
+    background:var(--panel); backdrop-filter:blur(6px);
+    padding:26px 18px 16px; display:flex; align-items:center; gap:16px;
+    border-bottom:1px solid var(--hair); position:relative; z-index:2;
+    transition:background .4s ease;
+  }
+  .app.rtl .banner{ direction:rtl; }
+  .man-arrow{
+    flex:0 0 auto; width:58px; height:58px; border-radius:16px;
+    background:var(--go-soft); display:grid; place-items:center;
+  }
+  .man-arrow svg{ width:38px; height:38px; }
+  .man-arrow path,.man-arrow polyline{ stroke:var(--go); }
+  .man-text{ min-width:0; flex:1; }
+  .man-dist{ font-size:34px; font-weight:800; letter-spacing:-.02em; line-height:1;
+    font-variant-numeric:tabular-nums; }
+  .man-dist small{ font-size:16px; font-weight:600; color:var(--muted); margin-left:4px;}
+  .man-road{ margin-top:5px; font-size:15px; color:var(--ink); font-weight:600;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:.92;}
+  .man-sub{ font-size:12.5px; color:var(--muted); margin-top:2px;
+    text-transform:uppercase; letter-spacing:.08em; }
+
+  /* countdown bar to the maneuver */
+  .count{ height:5px; background:rgba(255,255,255,.08); position:relative; z-index:2;}
+  .count > i{ display:block; height:100%; width:0%;
+    background:linear-gradient(90deg,var(--go),#7bffcf);
+    box-shadow:0 0 12px var(--go-glow); transition:width .12s linear; }
+
+  /* ---- camera / hazard chip ---- */
+  .chip{
+    margin:12px 14px 0; padding:11px 13px; border-radius:14px;
+    background:var(--warn-soft); border:1px solid rgba(255,77,94,.4);
+    display:flex; align-items:center; gap:11px; position:relative; z-index:3;
+    opacity:0; transform:translateY(-6px); transition:opacity .3s, transform .3s;
+    pointer-events:none;
+  }
+  .chip.on{ opacity:1; transform:none; }
+  .app.rtl .chip{ direction:rtl; }
+  .chip .cam{ width:34px;height:34px;border-radius:9px;background:var(--warn);
+    display:grid;place-items:center;flex:0 0 auto;}
+  .chip .cam svg{width:20px;height:20px;stroke:#fff;fill:none;}
+  .chip .ct{flex:1;min-width:0;}
+  .chip .ct b{display:block;font-size:14px;font-weight:700;color:var(--ink);}
+  .chip .ct span{font-size:12px;color:var(--muted);}
+  .chip .cd{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--warn);}
+
+  /* ---- junction / road perspective ---- */
+  .road-wrap{ position:relative; flex:1; min-height:230px; }
+  canvas#road{ display:block; width:100%; height:100%; }
+
+  /* exit badge floating on ramp */
+  .exit-badge{
+    position:absolute; top:14px; right:16px; z-index:3;
+    background:#1d7a3f; color:#eafff2; border:2px solid #eafff2;
+    border-radius:9px; padding:5px 9px; text-align:center; line-height:1.05;
+    box-shadow:0 6px 18px rgba(0,0,0,.4); font-weight:800;
+    opacity:0; transition:opacity .4s;
+  }
+  .exit-badge.on{opacity:1;}
+  .exit-badge small{display:block;font-size:9px;font-weight:700;letter-spacing:.1em;opacity:.85;}
+  .exit-badge b{font-size:19px;}
+
+  /* ---- lane assist row (the hero) ---- */
+  .lanes-panel{
+    background:var(--panel); border-top:1px solid var(--hair);
+    padding:14px 12px 10px; position:relative; z-index:2;
+    transition:background .4s ease;
+  }
+  .lanes-label{ text-align:center; font-size:11px; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:10px; font-weight:700;}
+  .lanes{ display:flex; gap:8px; justify-content:center; }
+  .lane{
+    flex:1; max-width:70px; aspect-ratio:1/1.15; border-radius:12px;
+    background:var(--dim-soft); display:grid; place-items:center;
+    position:relative; transition:all .35s ease;
+  }
+  .lane svg{ width:60%; height:60%; }
+  .lane .p{ fill:none; stroke:var(--dim); stroke-width:7;
+    stroke-linecap:round; stroke-linejoin:round; transition:stroke .35s; }
+  .lane.go{ background:var(--go-soft); box-shadow:0 0 0 1.5px var(--go), 0 0 20px var(--go-glow);}
+  .lane.go .p{ stroke:var(--go); }
+  .lane.go.pulse{ animation:pulse 1s ease-in-out infinite; }
+  @keyframes pulse{ 50%{ box-shadow:0 0 0 2px var(--go), 0 0 30px var(--go-glow);} }
+
+  /* ---- bottom dashboard ---- */
+  .dash{
+    background:var(--panel);
+    display:flex; align-items:center; gap:12px; padding:14px 16px 18px;
+    border-top:1px solid var(--hair); position:relative; z-index:2;
+    transition:background .4s ease;
+  }
+  .app.rtl .dash{ direction:rtl; }
+  .speed{ text-align:center; }
+  .speed .v{ font-size:32px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums;}
+  .speed .u{ font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.1em;}
+  .limit{
+    width:52px;height:52px;border-radius:50%;background:#fff;border:5px solid var(--limit-red);
+    display:grid;place-items:center;flex:0 0 auto;
+    font-size:20px;font-weight:800;color:#111;font-variant-numeric:tabular-nums;
+  }
+  .eta{ margin-left:auto; text-align:right; }
+  .app.rtl .eta{ margin-left:0; margin-right:auto; text-align:left; }
+  .eta .t{ font-size:20px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+  .eta .s{ font-size:12px;color:var(--muted); margin-top:3px;}
+  .eta .s b{color:var(--go);}
+
+  /* ---- controls ---- */
+  .controls{
+    width:min(390px,94vw); display:flex; gap:10px; flex-wrap:wrap; justify-content:center;
+  }
+  .btn{
+    appearance:none; border:1px solid rgba(255,255,255,.14); cursor:pointer;
+    background:#0f1830; color:#eaf1ff; padding:11px 16px; border-radius:12px;
+    font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:8px;
+    transition:transform .12s, background .2s, border-color .2s;
+  }
+  .btn:hover{ background:#16224a; }
+  .btn:active{ transform:translateY(1px); }
+  .btn.primary{ background:var(--accent); color:#04140d; border-color:transparent; font-weight:800;}
+  .btn:focus-visible{ outline:2px solid #25e39a; outline-offset:2px; }
+  .seg{ display:inline-flex; border:1px solid rgba(255,255,255,.14); border-radius:12px; overflow:hidden;}
+  .seg button{ background:#0f1830;color:#93a3c2;border:0;padding:11px 14px;font-size:13px;
+    font-weight:700;cursor:pointer;}
+  .seg button.active{ background:#25e39a;color:#04140d;}
+  .note{ width:min(390px,94vw); color:#7f90ae; font-size:12.5px; text-align:center; line-height:1.5;}
+
+  @media (prefers-reduced-motion: reduce){
+    .lane.go.pulse{ animation:none; }
+  }
+</style>
+
+<div class="stage">
+  <div class="kicker">
+    <h1>Masar · <span class="mark">Fahrspur-Vorschau</span></h1>
+    <p>Genau das, was Maps &amp; Radarbot nicht zeigen: <span class="mark">welche Spur</span> du nehmen musst und <span class="mark">wann</span> du abfährst. Tippe auf <b>Fahrt simulieren</b>.</p>
+  </div>
+
+  <div class="phone">
+    <div class="app" id="app">
+      <!-- maneuver banner -->
+      <div class="banner">
+        <div class="man-arrow" id="manArrow">
+          <svg viewBox="0 0 40 40" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 34 L14 18 Q14 10 22 10 L30 10"/>
+            <polyline points="24 4 32 10 24 16"/>
+          </svg>
+        </div>
+        <div class="man-text">
+          <div class="man-dist"><span id="dist">1200</span><small id="distUnit">m</small></div>
+          <div class="man-road" id="road">Ausfahrt 12 · King Fahd Rd</div>
+          <div class="man-sub" id="sub">dann rechts halten</div>
+        </div>
+      </div>
+      <div class="count"><i id="countBar"></i></div>
+
+      <!-- camera warning -->
+      <div class="chip" id="chip">
+        <div class="cam">
+          <svg viewBox="0 0 24 24"><path d="M3 8h4l2-2h6l2 2h4v11H3z"/><circle cx="12" cy="13" r="3.4"/></svg>
+        </div>
+        <div class="ct"><b id="chipT">Saher-Blitzer</b><span id="chipS">Tempolimit 120 km/h</span></div>
+        <div class="cd" id="chipD">500</div>
+      </div>
+
+      <!-- road perspective -->
+      <div class="road-wrap">
+        <canvas id="road"></canvas>
+        <div class="exit-badge" id="exitBadge"><small>EXIT</small><b id="exitNum">12</b></div>
+      </div>
+
+      <!-- lane assist -->
+      <div class="lanes-panel">
+        <div class="lanes-label" id="lanesLabel">Fahrspuren</div>
+        <div class="lanes" id="lanes"></div>
+      </div>
+
+      <!-- dashboard -->
+      <div class="dash">
+        <div class="speed"><div class="v" id="spd">104</div><div class="u" id="spdU">km/h</div></div>
+        <div class="limit" id="limit">120</div>
+        <div class="eta">
+          <div class="t" id="eta">14:32</div>
+          <div class="s"><b id="etaMin">18 Min</b> · <span id="etaKm">24 km</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn primary" id="play">▶ Fahrt simulieren</button>
+    <div class="seg" id="lang">
+      <button data-l="de" class="active">DE</button>
+      <button data-l="en">EN</button>
+      <button data-l="ar">AR</button>
+    </div>
+    <button class="btn" id="mode">☀ Tag/Nacht</button>
+  </div>
+  <div class="note" id="note">Prototyp — Beispiel­route. Später mit echten HERE-Karten- &amp; Spurdaten, Live-Verkehr und Saher-Blitzern.</div>
+</div>
+
+<script>
+(function(){
+  const $ = s => document.querySelector(s);
+  const app = $('#app');
+
+  // ---- arrow glyphs per lane type ----
+  const glyph = {
+    through:  '<path class="p" d="M30 52 L30 12"/><path class="p" d="M20 22 L30 12 L40 22"/>',
+    right:    '<path class="p" d="M18 52 L18 30 Q18 16 34 16 L44 16"/><path class="p" d="M36 8 L46 16 L36 24"/>',
+    slightR:  '<path class="p" d="M22 52 L22 30 Q22 18 40 12"/><path class="p" d="M30 8 L44 10 L38 22"/>',
+    left:     '<path class="p" d="M42 52 L42 30 Q42 16 26 16 L16 16"/><path class="p" d="M24 8 L14 16 L24 24"/>'
+  };
+  const manGlyph = {
+    right:'<path d="M14 34 L14 18 Q14 10 22 10 L30 10"/><polyline points="24 4 32 10 24 16"/>',
+    slightR:'<path d="M13 34 L13 18 Q13 9 30 6"/><polyline points="22 3 33 5 28 16"/>',
+    left:'<path d="M26 34 L26 18 Q26 10 18 10 L10 10"/><polyline points="16 4 8 10 16 16"/>'
+  };
+
+  // ---- route script (3 maneuvers, loops) ----
+  const routes = [
+    { start:1200, type:'right', exit:'12',
+      lanes:['through','through','right','right'], go:[2,3],
+      cameraAt:500, limit:120,
+      road:{de:'Ausfahrt 12 · King Fahd Rd', en:'Exit 12 · King Fahd Rd', ar:'المخرج 12 · طريق الملك فهد'},
+      sub:{de:'dann rechts halten', en:'then keep right', ar:'ثم ابقَ يمينًا'} },
+    { start:900, type:'slightR', exit:'8A',
+      lanes:['through','through','slightR'], go:[2],
+      cameraAt:0, limit:100,
+      road:{de:'Ausfahrt 8A · Al Olaya', en:'Exit 8A · Al Olaya', ar:'المخرج 8أ · العليا'},
+      sub:{de:'leicht rechts einordnen', en:'take slight right', ar:'انعطف يمينًا قليلًا'} },
+    { start:700, type:'left', exit:null,
+      lanes:['left','left','through','through'], go:[0,1],
+      cameraAt:400, limit:80,
+      road:{de:'King Abdullah Rd', en:'King Abdullah Rd', ar:'طريق الملك عبدالله'},
+      sub:{de:'links halten', en:'keep left', ar:'ابقَ يسارًا'} },
+  ];
+
+  const T = {
+    lanes:{de:'Fahrspuren', en:'Lanes', ar:'المسارات'},
+    cam:{de:'Saher-Blitzer', en:'Saher speed camera', ar:'كاميرا ساهر'},
+    limitTxt:l=>({de:'Tempolimit '+l+' km/h', en:'Speed limit '+l+' km/h', ar:'حد السرعة '+l+' كم/س'}),
+    kmh:{de:'km/h', en:'km/h', ar:'كم/س'},
+    min:v=>({de:v+' Min', en:v+' min', ar:v+' دقيقة'}),
+    unit:{de:'m', en:'m', ar:'م'},
+    km:v=>({de:v+' km', en:v+' km', ar:v+' كم'}),
+    play:{de:'▶ Fahrt simulieren', en:'▶ Simulate drive', ar:'▶ محاكاة القيادة'},
+    pause:{de:'⏸ Pause', en:'⏸ Pause', ar:'⏸ إيقاف'},
+    mode:{de:'☀ Tag/Nacht', en:'☀ Day/Night', ar:'☀ نهار/ليل'},
+  };
+
+  let lang='de', ri=0, dist=routes[0].start, speed=104, running=false, mode='night';
+  let etaMin=18, etaKm=24;
+
+  function renderLanes(){
+    const r=routes[ri];
+    const box=$('#lanes'); box.innerHTML='';
+    r.lanes.forEach((t,i)=>{
+      const on=r.go.includes(i);
+      const close = dist<220 && on;
+      const el=document.createElement('div');
+      el.className='lane'+(on?' go':'')+(close?' pulse':'');
+      el.innerHTML='<svg viewBox="0 0 60 60">'+glyph[t]+'</svg>';
+      box.appendChild(el);
+    });
+  }
+
+  function setLang(l){
+    lang=l; const r=routes[ri];
+    app.classList.toggle('rtl', l==='ar');
+    $('#lanesLabel').textContent=T.lanes[l];
+    $('#road').textContent=r.road[l];
+    $('#sub').textContent=r.sub[l];
+    $('#distUnit').textContent=T.unit[l];
+    $('#spdU').textContent=T.kmh[l];
+    $('#chipT').textContent=T.cam[l];
+    $('#chipS').textContent=T.limitTxt(r.limit)[l];
+    $('#etaMin').textContent=T.min(etaMin)[l];
+    $('#etaKm').textContent=T.km(etaKm)[l];
+    $('#play').textContent=(running?T.pause:T.play)[l];
+    $('#mode').textContent=T.mode[l];
+    [...$('#lang').children].forEach(b=>b.classList.toggle('active',b.dataset.l===l));
+  }
+
+  function loadManeuver(){
+    const r=routes[ri];
+    dist=r.start;
+    $('#manArrow').querySelector('svg').innerHTML=manGlyph[r.type];
+    $('#exitNum').textContent=r.exit||'';
+    $('#exitBadge').classList.toggle('on', !!r.exit);
+    renderLanes();
+    setLang(lang);
+    drawRoad();
+  }
+
+  function update(){
+    const r=routes[ri];
+    $('#dist').textContent=Math.max(0,Math.round(dist/10)*10);
+    const pct=100*(1-dist/r.start);
+    $('#countBar').style.width=pct.toFixed(1)+'%';
+    // camera
+    const camDist = r.cameraAt>0 ? dist-r.cameraAt : dist; // camera at exit if 0
+    const showCam = r.cameraAt>0 ? (dist>r.cameraAt && dist<r.cameraAt+650)
+                                 : (dist<650);
+    $('#chip').classList.toggle('on', showCam);
+    if(showCam){ $('#chipD').textContent=Math.max(0,Math.round(camDist/10)*10); }
+    // speed react to limit
+    speed = Math.round(r.limit + (dist<300? -8 : 4) + Math.sin(dist/40)*2);
+    $('#spd').textContent=speed;
+    $('#limit').textContent=r.limit;
+    renderLanes();
+    drawRoad();
+  }
+
+  // ---- canvas road ----
+  const cv=$('#road'), ctx=cv.getContext('2d');
+  function fit(){ const b=cv.getBoundingClientRect(), d=window.devicePixelRatio||1;
+    cv.width=b.width*d; cv.height=b.height*d; ctx.setTransform(d,0,0,d,0,0);
+    cv._w=b.width; cv._h=b.height; }
+  function css(v){ return getComputedStyle(app).getPropertyValue(v).trim(); }
+
+  function drawRoad(){
+    const w=cv._w||cv.width, h=cv._h||cv.height;
+    ctx.clearRect(0,0,w,h);
+    const r=routes[ri];
+    const cx=w/2, hx=w/2, hy=h*0.06;      // horizon point
+    const baseHalf=w*0.42, topHalf=w*0.03;
+    // main road polygon
+    ctx.fillStyle=css('--road');
+    ctx.beginPath();
+    ctx.moveTo(cx-baseHalf,h); ctx.lineTo(hx-topHalf,hy);
+    ctx.lineTo(hx+topHalf,hy); ctx.lineTo(cx+baseHalf,h); ctx.closePath(); ctx.fill();
+    // edges
+    ctx.strokeStyle=css('--road-edge'); ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(cx-baseHalf,h); ctx.lineTo(hx-topHalf,hy);
+    ctx.moveTo(cx+baseHalf,h); ctx.lineTo(hx+topHalf,hy); ctx.stroke();
+
+    const nLanes=r.lanes.length;
+    // dashed lane dividers
+    ctx.strokeStyle=css('--lane-line'); ctx.setLineDash([16,16]); ctx.lineWidth=2.5;
+    for(let i=1;i<nLanes;i++){
+      const f=i/nLanes;
+      const bx=(cx-baseHalf)+f*baseHalf*2;
+      const tx=(hx-topHalf)+f*topHalf*2;
+      ctx.beginPath(); ctx.moveTo(bx,h); ctx.lineTo(tx,hy); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // highlighted guidance path over the "go" lanes
+    const near = Math.min(1, Math.max(0, 1-(dist/r.start)));
+    const goCenter = r.go.reduce((a,b)=>a+b,0)/r.go.length;
+    const gf=(goCenter+0.5)/nLanes;
+    const gbx=(cx-baseHalf)+gf*baseHalf*2;
+    const gtx=(hx-topHalf)+gf*topHalf*2;
+    // ramp curve if exit-right/left
+    ctx.lineWidth=Math.max(10, baseHalf*2/nLanes*0.5);
+    ctx.strokeStyle=css('--go'); ctx.lineCap='round';
+    ctx.shadowColor=css('--go'); ctx.shadowBlur=18;
+    ctx.beginPath(); ctx.moveTo(gbx,h);
+    if(r.type==='right'||r.type==='slightR'){
+      const midY=h*0.5, cpX=gbx+w*0.16*near;
+      ctx.quadraticCurveTo(cpX, midY, gtx+ (r.type==='slightR'? w*0.05:w*0.12)*near, hy+ (r.type==='right'?h*0.14:h*0.05));
+    } else if(r.type==='left'){
+      const midY=h*0.5, cpX=gbx-w*0.16*near;
+      ctx.quadraticCurveTo(cpX, midY, gtx-w*0.1*near, hy+h*0.1);
+    } else {
+      ctx.lineTo(gtx,hy);
+    }
+    ctx.stroke(); ctx.shadowBlur=0;
+  }
+
+  // ---- loop ----
+  let last=0;
+  function tick(ts){
+    if(running){
+      if(!last) last=ts;
+      const dt=(ts-last)/1000; last=ts;
+      const mps=speed/3.6, scale=4.2;
+      dist-=mps*dt*scale;
+      if(dist<=0){ ri=(ri+1)%routes.length; loadManeuver(); }
+      update();
+    } else { last=0; }
+    requestAnimationFrame(tick);
+  }
+
+  // ---- events ----
+  $('#play').addEventListener('click',()=>{ running=!running;
+    $('#play').classList.toggle('primary', !running);
+    $('#play').textContent=(running?T.pause:T.play)[lang]; });
+  $('#lang').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) setLang(b.dataset.l); });
+  $('#mode').addEventListener('click',()=>{ mode=mode==='night'?'day':'night';
+    app.classList.toggle('day', mode==='day'); drawRoad(); });
+
+  window.addEventListener('resize',()=>{ fit(); drawRoad(); });
+  fit(); loadManeuver(); update();
+  requestAnimationFrame(tick);
+})();
+</script>
