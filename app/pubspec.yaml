@@ -23,3 +23,16 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Gebündelte Schriften: DejaVu Sans (Latein/Ziffern) + Noto Naskh Arabic (Arabisch).
+  # Wichtig, weil das System-Roboto keine arabischen Glyphen enthält – so ist
+  # Arabisch auf allen Geräten und offline garantiert. Später gegen z. B. Cairo tauschbar.
+  fonts:
+    - family: AppSans
+      fonts:
+        - asset: assets/fonts/DejaVuSans.ttf
+        - asset: assets/fonts/DejaVuSans-Bold.ttf
+          weight: 700
+    - family: NotoArabic
+      fonts:
+        - asset: assets/fonts/NotoNaskhArabic-Regular.ttf

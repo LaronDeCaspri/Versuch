@@ -20,7 +20,9 @@ class MasarApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
-        fontFamily: 'Roboto',
+        fontFamily: 'AppSans',
+        // Arabisch fällt automatisch auf Noto Naskh Arabic zurück.
+        fontFamilyFallback: const ['NotoArabic'],
       ),
       home: const LaneGuidanceScreen(),
     );

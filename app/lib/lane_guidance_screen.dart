@@ -97,7 +97,7 @@ class _LaneGuidanceScreenState extends State<LaneGuidanceScreen> {
             width: 58,
             height: 58,
             decoration: BoxDecoration(
-              color: p.go.withOpacity(0.14),
+              color: p.go.withValues(alpha:0.14),
               borderRadius: BorderRadius.circular(16),
             ),
             child: CustomPaint(
@@ -164,14 +164,14 @@ class _LaneGuidanceScreenState extends State<LaneGuidanceScreen> {
     final double pct = (1 - _dist / _m.startDistance).clamp(0.0, 1.0).toDouble();
     return Container(
       height: 5,
-      color: Colors.white.withOpacity(0.08),
+      color: Colors.white.withValues(alpha:0.08),
       alignment: _rtl ? Alignment.centerRight : Alignment.centerLeft,
       child: FractionallySizedBox(
         widthFactor: pct,
         child: Container(
           decoration: BoxDecoration(
             color: p.go,
-            boxShadow: [BoxShadow(color: p.go.withOpacity(0.6), blurRadius: 10)],
+            boxShadow: [BoxShadow(color: p.go.withValues(alpha:0.6), blurRadius: 10)],
           ),
         ),
       ),
@@ -195,9 +195,9 @@ class _LaneGuidanceScreenState extends State<LaneGuidanceScreen> {
       margin: const EdgeInsets.fromLTRB(14, 12, 14, 0),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
       decoration: BoxDecoration(
-        color: p.warn.withOpacity(0.16),
+        color: p.warn.withValues(alpha:0.16),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: p.warn.withOpacity(0.4)),
+        border: Border.all(color: p.warn.withValues(alpha:0.4)),
       ),
       child: Row(
         children: [
@@ -291,7 +291,11 @@ class _LaneGuidanceScreenState extends State<LaneGuidanceScreen> {
                 fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 10),
-          Row(
+          // Spuren sind physische Positionen auf der Straße – niemals mit der
+          // Textrichtung spiegeln, sonst zeigt die Leiste in RTL die falsche Seite.
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(_m.lanes.length, (i) {
               final on = _m.highlight.contains(i);
@@ -301,11 +305,11 @@ class _LaneGuidanceScreenState extends State<LaneGuidanceScreen> {
                   width: 60,
                   height: 68,
                   decoration: BoxDecoration(
-                    color: on ? p.go.withOpacity(0.14) : p.dim.withOpacity(0.16),
+                    color: on ? p.go.withValues(alpha:0.14) : p.dim.withValues(alpha:0.16),
                     borderRadius: BorderRadius.circular(12),
                     border: on ? Border.all(color: p.go, width: 1.5) : null,
                     boxShadow: on
-                        ? [BoxShadow(color: p.go.withOpacity(0.5), blurRadius: 18)]
+                        ? [BoxShadow(color: p.go.withValues(alpha:0.5), blurRadius: 18)]
                         : null,
                   ),
                   child: Padding(
@@ -321,6 +325,7 @@ class _LaneGuidanceScreenState extends State<LaneGuidanceScreen> {
                 ),
               );
             }),
+            ),
           ),
         ],
       ),
