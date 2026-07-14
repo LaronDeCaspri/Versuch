@@ -398,66 +398,72 @@
     const w=cv._w||cv.width, h=cv._h||cv.height;
     ctx.clearRect(0,0,w,h);
     const r=routes[ri];
-    const cx=w/2, hy=h*0.06;               // Horizont
-    const baseHalf=w*0.42;
-    const nLanes=r.lanes.length;
+    const cx=w/2;
+    const n=r.lanes.length;
+    const day = app.classList.contains('day');
+    const C = day ? {
+      asphalt:'#c9d2e0', edge:'#ffffff', divider:'rgba(255,255,255,0.9)',
+      go:'#14b277', goCore:'#5fe6b0'
+    } : {
+      asphalt:'#242e47', edge:'rgba(233,240,255,0.85)', divider:'rgba(198,212,240,0.7)',
+      go:'#1c7e5b', goCore:'#3ce9a6'
+    };
 
-    // x am unteren Rand für Spur-Anteil f (0..1)
-    const bottomX = f => (cx-baseHalf)+f*baseHalf*2;
-    const midY = h + (hy-h)*0.45;          // bis hier fahren alle Spuren gerade hoch
+    const laneW = Math.min((Math.min(w,540)*0.9)/Math.max(n,3), 46);
+    const botY = h*0.99, topY = h*0.08, splitT = 0.40;
 
-    // Wohin "verschwindet" eine Spur je nach Richtung (Fluchtpunkt)
-    function target(type){
-      switch(type){
-        case 'right':   return {x: cx + baseHalf*1.95, y: hy + h*0.11};
-        case 'slightR': return {x: cx + baseHalf*0.95, y: hy + h*0.02};
-        case 'left':    return {x: cx - baseHalf*1.95, y: hy + h*0.11};
-        case 'uTurn':   return {x: cx - baseHalf*1.75, y: h*0.60};
-        default:        return {x: cx, y: hy};   // through
-      }
+    // Mittelpunkt einer Spur bei Tiefe t (0=unten, 1=oben)
+    function center(i,t){
+      const x0 = cx + (i-(n-1)/2)*laneW;
+      const type = r.lanes[i];
+      const s = t<splitT ? 0 : (t-splitT)/(1-splitT);
+      const e = s*s*(3-2*s);                 // smoothstep: erst gerade, dann sanft abbiegen
+      let x=x0, y=botY+(topY-botY)*t;
+      if(type==='right')        x = x0 + laneW*2.6*e;
+      else if(type==='slightR') x = x0 + laneW*1.4*e;
+      else if(type==='left')    x = x0 - laneW*2.6*e;
+      else if(type==='uTurn'){  x = x0 - laneW*3.0*e;
+        y = botY + (topY-botY)*(splitT + (1-splitT)*Math.sin(s*Math.PI)*0.9); } // hoch & zurück
+      return {x,y};
     }
-    // Spur-Grenze f als quadratische Bezierkurve (erst gerade hoch, dann in Richtung)
-    function edge(f, type){
-      const p0x=bottomX(f);
-      const cxp=p0x+(cx-p0x)*0.45, cyp=midY;   // Kontrollpunkt: geradeaus bis midY
-      const t=target(type);
-      return {p0x, p0y:h, cxp, cyp, ex:t.x, ey:t.y};
-    }
-    const trace = e => { ctx.moveTo(e.p0x,e.p0y); ctx.quadraticCurveTo(e.cxp,e.cyp,e.ex,e.ey); };
+    const dir = t => t==='through'?0 : (t==='left'||t==='uTurn'?-1:1);
+    function stroke(fn,steps){ steps=steps||24; ctx.beginPath();
+      for(let k=0;k<=steps;k++){ const p=fn(k/steps); k?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);} ctx.stroke(); }
+    const laneFn   = i => (t=>center(i,t));
+    const bound    = i => (t=>{ const a=center(i,t),b=center(i+1,t); return {x:(a.x+b.x)/2,y:(a.y+b.y)/2}; });
+    const edgeL    = ()=>(t=>{ const a=center(0,t);      return {x:a.x-laneW/2,y:a.y}; });
+    const edgeR    = ()=>(t=>{ const a=center(n-1,t);    return {x:a.x+laneW/2,y:a.y}; });
 
-    // 1) Jede Fahrspur als Band füllen -> Straße gabelt sich automatisch
-    for(let i=0;i<nLanes;i++){
-      const type=r.lanes[i], on=r.go.includes(i);
-      const eL=edge(i/nLanes, type), eR=edge((i+1)/nLanes, type);
-      ctx.beginPath();
-      ctx.moveTo(eL.p0x,eL.p0y);
-      ctx.quadraticCurveTo(eL.cxp,eL.cyp,eL.ex,eL.ey);
-      ctx.lineTo(eR.ex,eR.ey);
-      ctx.quadraticCurveTo(eR.cxp,eR.cyp,eR.p0x,eR.p0y);
-      ctx.closePath();
-      if(on){
-        const g=ctx.createLinearGradient(0,h,0,hy);
-        g.addColorStop(0,'rgba(37,227,154,0.60)');
-        g.addColorStop(1,'rgba(37,227,154,0.16)');
-        ctx.fillStyle=g;
-      } else { ctx.fillStyle=css('--road'); }
-      ctx.fill();
+    ctx.lineJoin='round'; ctx.lineCap='round';
+
+    // Schatten unter der Straße (Tiefe)
+    ctx.save();
+    ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=14; ctx.shadowOffsetY=7;
+    ctx.strokeStyle=C.asphalt; ctx.lineWidth=laneW+2;
+    for(let i=0;i<n;i++) stroke(laneFn(i));
+    ctx.restore();
+
+    // Asphalt-Fahrbahnen (benachbarte gleiche Bänder verschmelzen zur Straße)
+    ctx.strokeStyle=C.asphalt; ctx.lineWidth=laneW;
+    for(let i=0;i<n;i++) stroke(laneFn(i));
+
+    // Zu nehmende Spur(en) grün + weicher Glow + heller Kern
+    for(let i=0;i<n;i++){ if(!r.go.includes(i)) continue;
+      ctx.save(); ctx.shadowColor=C.goCore; ctx.shadowBlur=20;
+      ctx.strokeStyle=C.go;     ctx.lineWidth=laneW;       stroke(laneFn(i));
+      ctx.strokeStyle=C.goCore; ctx.lineWidth=laneW*0.30;  ctx.globalAlpha=0.85; stroke(laneFn(i));
+      ctx.restore();
     }
 
-    // 2) Spur-Trennlinien (gestrichelt) – zeigen an der Gabelung beide Kanten
-    ctx.strokeStyle=css('--lane-line'); ctx.setLineDash([16,16]); ctx.lineWidth=2.5;
-    ctx.lineDashOffset = phase % 32;
-    for(let i=1;i<nLanes;i++){
-      const tl=r.lanes[i-1], tr=r.lanes[i];
-      ctx.beginPath(); trace(edge(i/nLanes, tr)); ctx.stroke();
-      if(tl!==tr){ ctx.beginPath(); trace(edge(i/nLanes, tl)); ctx.stroke(); }
-    }
+    // Fahrbahnstriche: gestrichelt zwischen gleichgerichteten Spuren (laufen = Speed)
+    ctx.strokeStyle=C.divider; ctx.setLineDash([16,20]); ctx.lineWidth=3;
+    ctx.lineDashOffset = -(phase % 36);
+    for(let i=0;i<n-1;i++){ if(dir(r.lanes[i])===dir(r.lanes[i+1])) stroke(bound(i)); }
     ctx.setLineDash([]); ctx.lineDashOffset=0;
 
-    // 3) Äußere Straßenränder (durchgezogen)
-    ctx.strokeStyle=css('--road-edge'); ctx.lineWidth=3;
-    ctx.beginPath(); trace(edge(0, r.lanes[0])); ctx.stroke();
-    ctx.beginPath(); trace(edge(1, r.lanes[nLanes-1])); ctx.stroke();
+    // Äußere Ränder durchgezogen
+    ctx.strokeStyle=C.edge; ctx.lineWidth=3;
+    stroke(edgeL()); stroke(edgeR());
   }
 
   // ---- loop ----
