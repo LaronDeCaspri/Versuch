@@ -276,12 +276,14 @@
     through:  '<path class="p" d="M30 52 L30 12"/><path class="p" d="M20 22 L30 12 L40 22"/>',
     right:    '<path class="p" d="M18 52 L18 30 Q18 16 34 16 L44 16"/><path class="p" d="M36 8 L46 16 L36 24"/>',
     slightR:  '<path class="p" d="M22 52 L22 30 Q22 18 40 12"/><path class="p" d="M30 8 L44 10 L38 22"/>',
-    left:     '<path class="p" d="M42 52 L42 30 Q42 16 26 16 L16 16"/><path class="p" d="M24 8 L14 16 L24 24"/>'
+    left:     '<path class="p" d="M42 52 L42 30 Q42 16 26 16 L16 16"/><path class="p" d="M24 8 L14 16 L24 24"/>',
+    uTurn:    '<path class="p" d="M40 52 L40 26 Q40 12 27 12 Q14 12 14 26 L14 40"/><path class="p" d="M6 32 L14 42 L22 32"/>'
   };
   const manGlyph = {
     right:'<path d="M14 34 L14 18 Q14 10 22 10 L30 10"/><polyline points="24 4 32 10 24 16"/>',
     slightR:'<path d="M13 34 L13 18 Q13 9 30 6"/><polyline points="22 3 33 5 28 16"/>',
-    left:'<path d="M26 34 L26 18 Q26 10 18 10 L10 10"/><polyline points="16 4 8 10 16 16"/>'
+    left:'<path d="M26 34 L26 18 Q26 10 18 10 L10 10"/><polyline points="16 4 8 10 16 16"/>',
+    uTurn:'<path d="M27 34 L27 16 Q27 8 19 8 Q11 8 11 16 L11 26"/><polyline points="5 20 11 28 17 20"/>'
   };
 
   // ---- route script (3 maneuvers, loops) ----
@@ -301,6 +303,11 @@
       cameraAt:400, limit:80,
       road:{de:'King Abdullah Rd', en:'King Abdullah Rd', ar:'طريق الملك عبدالله'},
       sub:{de:'links halten', en:'keep left', ar:'ابقَ يسارًا'} },
+    { start:600, type:'uTurn', exit:null,
+      lanes:['uTurn','through','through'], go:[0],
+      cameraAt:null, limit:60,
+      road:{de:'Wenden · Olaya St', en:'U-turn · Olaya St', ar:'در للخلف · شارع العليا'},
+      sub:{de:'wenden (U-Turn)', en:'make a U-turn', ar:'قم بالدوران'} },
   ];
 
   const T = {
@@ -366,9 +373,10 @@
     const pct=100*(1-dist/r.start);
     $('#countBar').style.width=pct.toFixed(1)+'%';
     // camera
+    const hasCam = r.cameraAt!=null;
     const camDist = r.cameraAt>0 ? dist-r.cameraAt : dist; // camera at exit if 0
-    const showCam = r.cameraAt>0 ? (dist>r.cameraAt && dist<r.cameraAt+650)
-                                 : (dist<650);
+    const showCam = hasCam && (r.cameraAt>0 ? (dist>r.cameraAt && dist<r.cameraAt+650)
+                                            : (dist<650));
     $('#chip').classList.toggle('on', showCam);
     if(showCam){ $('#chipD').textContent=Math.max(0,Math.round(camDist/10)*10); }
     // speed react to limit
@@ -390,47 +398,66 @@
     const w=cv._w||cv.width, h=cv._h||cv.height;
     ctx.clearRect(0,0,w,h);
     const r=routes[ri];
-    const cx=w/2, hx=w/2, hy=h*0.06;      // horizon point
-    const baseHalf=w*0.42, topHalf=w*0.03;
-    // main road polygon
-    ctx.fillStyle=css('--road');
-    ctx.beginPath();
-    ctx.moveTo(cx-baseHalf,h); ctx.lineTo(hx-topHalf,hy);
-    ctx.lineTo(hx+topHalf,hy); ctx.lineTo(cx+baseHalf,h); ctx.closePath(); ctx.fill();
-    // edges
-    ctx.strokeStyle=css('--road-edge'); ctx.lineWidth=3;
-    ctx.beginPath(); ctx.moveTo(cx-baseHalf,h); ctx.lineTo(hx-topHalf,hy);
-    ctx.moveTo(cx+baseHalf,h); ctx.lineTo(hx+topHalf,hy); ctx.stroke();
-
+    const cx=w/2, hy=h*0.06;               // Horizont
+    const baseHalf=w*0.42;
     const nLanes=r.lanes.length;
-    // dashed lane dividers
+
+    // x am unteren Rand für Spur-Anteil f (0..1)
+    const bottomX = f => (cx-baseHalf)+f*baseHalf*2;
+    const midY = h + (hy-h)*0.45;          // bis hier fahren alle Spuren gerade hoch
+
+    // Wohin "verschwindet" eine Spur je nach Richtung (Fluchtpunkt)
+    function target(type){
+      switch(type){
+        case 'right':   return {x: cx + baseHalf*1.95, y: hy + h*0.11};
+        case 'slightR': return {x: cx + baseHalf*0.95, y: hy + h*0.02};
+        case 'left':    return {x: cx - baseHalf*1.95, y: hy + h*0.11};
+        case 'uTurn':   return {x: cx - baseHalf*1.75, y: h*0.60};
+        default:        return {x: cx, y: hy};   // through
+      }
+    }
+    // Spur-Grenze f als quadratische Bezierkurve (erst gerade hoch, dann in Richtung)
+    function edge(f, type){
+      const p0x=bottomX(f);
+      const cxp=p0x+(cx-p0x)*0.45, cyp=midY;   // Kontrollpunkt: geradeaus bis midY
+      const t=target(type);
+      return {p0x, p0y:h, cxp, cyp, ex:t.x, ey:t.y};
+    }
+    const trace = e => { ctx.moveTo(e.p0x,e.p0y); ctx.quadraticCurveTo(e.cxp,e.cyp,e.ex,e.ey); };
+
+    // 1) Jede Fahrspur als Band füllen -> Straße gabelt sich automatisch
+    for(let i=0;i<nLanes;i++){
+      const type=r.lanes[i], on=r.go.includes(i);
+      const eL=edge(i/nLanes, type), eR=edge((i+1)/nLanes, type);
+      ctx.beginPath();
+      ctx.moveTo(eL.p0x,eL.p0y);
+      ctx.quadraticCurveTo(eL.cxp,eL.cyp,eL.ex,eL.ey);
+      ctx.lineTo(eR.ex,eR.ey);
+      ctx.quadraticCurveTo(eR.cxp,eR.cyp,eR.p0x,eR.p0y);
+      ctx.closePath();
+      if(on){
+        const g=ctx.createLinearGradient(0,h,0,hy);
+        g.addColorStop(0,'rgba(37,227,154,0.60)');
+        g.addColorStop(1,'rgba(37,227,154,0.16)');
+        ctx.fillStyle=g;
+      } else { ctx.fillStyle=css('--road'); }
+      ctx.fill();
+    }
+
+    // 2) Spur-Trennlinien (gestrichelt) – zeigen an der Gabelung beide Kanten
     ctx.strokeStyle=css('--lane-line'); ctx.setLineDash([16,16]); ctx.lineWidth=2.5;
-    // Streifen laufen auf den Fahrer zu -> vermittelt Geschwindigkeit
     ctx.lineDashOffset = phase % 32;
     for(let i=1;i<nLanes;i++){
-      const f=i/nLanes;
-      const bx=(cx-baseHalf)+f*baseHalf*2;
-      const tx=(hx-topHalf)+f*topHalf*2;
-      ctx.beginPath(); ctx.moveTo(bx,h); ctx.lineTo(tx,hy); ctx.stroke();
+      const tl=r.lanes[i-1], tr=r.lanes[i];
+      ctx.beginPath(); trace(edge(i/nLanes, tr)); ctx.stroke();
+      if(tl!==tr){ ctx.beginPath(); trace(edge(i/nLanes, tl)); ctx.stroke(); }
     }
     ctx.setLineDash([]); ctx.lineDashOffset=0;
 
-    // --- Einfach die richtige(n) Fahrbahn(en) grün einfärben ---
-    const laneX = (f,t)=>{ const bx=(cx-baseHalf)+f*baseHalf*2, tx=(cx-topHalf)+f*topHalf*2; return bx+(tx-bx)*t; };
-    const laneY = t => h + (hy-h)*t;
-    const grd=ctx.createLinearGradient(0,h,0,hy);
-    grd.addColorStop(0,'rgba(37,227,154,0.45)');
-    grd.addColorStop(1,'rgba(37,227,154,0.12)');
-    ctx.fillStyle=grd;
-    r.go.forEach(i=>{
-      const fL=i/nLanes, fR=(i+1)/nLanes;
-      ctx.beginPath();
-      ctx.moveTo(laneX(fL,0), laneY(0));
-      ctx.lineTo(laneX(fL,1), laneY(1));
-      ctx.lineTo(laneX(fR,1), laneY(1));
-      ctx.lineTo(laneX(fR,0), laneY(0));
-      ctx.closePath(); ctx.fill();
-    });
+    // 3) Äußere Straßenränder (durchgezogen)
+    ctx.strokeStyle=css('--road-edge'); ctx.lineWidth=3;
+    ctx.beginPath(); trace(edge(0, r.lanes[0])); ctx.stroke();
+    ctx.beginPath(); trace(edge(1, r.lanes[nLanes-1])); ctx.stroke();
   }
 
   // ---- loop ----
