@@ -123,7 +123,7 @@
   <button class="btn" data-view="3d" id="v3d">⛰ 3D</button>
 </div>
 
-<div class="hint" id="hint">Echte Karte (OpenFreeMap) · Route über OSRM · Demo</div>
+<div class="hint" id="hint">Echte OpenStreetMap-Karte · 2D / 3D · Demo-Route in Riad</div>
 <div class="toast" id="toast"></div>
 
 <script>/**
@@ -198,10 +198,17 @@ return maplibregl$1;
 
   // Start/Ziel in Riad (Olaya-Gegend -> Nordosten)
   const A=[46.6853,24.6905], B=[46.7020,24.7290];
-  const style='https://tiles.openfreemap.org/styles/liberty';
+  // OpenStreetMap-Rasterkacheln (breit erreichbar). MapLibre kann sie auch kippen (3D).
+  const style={ version:8,
+    sources:{ osm:{ type:'raster', tileSize:256, maxzoom:19,
+      tiles:['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+             'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+             'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      attribution:'© OpenStreetMap-Mitwirkende' } },
+    layers:[{ id:'osm', type:'raster', source:'osm' }] };
 
   const map=new maplibregl.Map({container:'map',style,center:A,zoom:15.5,pitch:0,bearing:0,
-    attributionControl:{compact:true}});
+    maxPitch:70, attributionControl:{compact:true}});
 
   let view='fahrt'; // nord | fahrt | 3d
   function pitchFor(v){ return v==='3d'?58:0; }
@@ -257,18 +264,31 @@ return maplibregl$1;
     car.setLngLat(posAt(0)).addTo(map);
   }
 
-  async function loadRoute(){
+  let styleReady=false, routeReady=false, drawn=false;
+  function maybeDraw(){ if(!styleReady||!routeReady||drawn) return;
+    try{
+      drawRoute();
+      map.jumpTo({center:posAt(0),zoom:16.5,bearing:headingAt(0),pitch:pitchFor(view)});
+      $('#mRoad').textContent='Bereit – „Fahrt" tippen';
+      drawn=true;
+    }catch(e){ map.once('idle',maybeDraw); }
+  }
+  map.on('load',()=>{ styleReady=true; maybeDraw(); });
+  map.on('error',()=>{}); // Kachel-Fehler nicht fatal
+
+  async function loadRouteData(){
+    $('#mRoad').textContent='Route wird berechnet …';
     try{
       const u='https://router.project-osrm.org/route/v1/driving/'+A[0]+','+A[1]+';'+B[0]+','+B[1]+'?overview=full&geometries=geojson';
-      const r=await fetch(u); const j=await r.json();
-      if(j&&j.routes&&j.routes[0]){ coords=j.routes[0].geometry.coordinates; }
-      else coords=fallback.slice();
-    }catch(e){ coords=fallback.slice(); toast('Routing offline – Ersatzroute'); }
-    buildCum(); placeFeatures(); drawRoute();
-    map.jumpTo({center:posAt(0),zoom:16.5,bearing:headingAt(0),pitch:pitchFor(view)});
-    $('#mRoad').textContent='Bereit – „Fahrt" tippen';
+      const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),6000);
+      const r=await fetch(u,{signal:ctrl.signal}); clearTimeout(to); const j=await r.json();
+      coords=(j&&j.routes&&j.routes[0])?j.routes[0].geometry.coordinates:fallback.slice();
+    }catch(e){ coords=fallback.slice(); toast('Routing offline – Ersatzroute genutzt'); }
+    buildCum(); placeFeatures(); routeReady=true; maybeDraw();
   }
-  if(map.loaded()) loadRoute(); else map.on('load',loadRoute);
+  loadRouteData();
+  // Sicherheitsnetz: falls das Karten-Ereignis ausbleibt, trotzdem starten
+  setTimeout(()=>{ if(!styleReady){ styleReady=true; try{maybeDraw();}catch(e){} } }, 5000);
 
   function toast(t){ const e=$('#toast'); e.textContent=t; e.style.display='block'; setTimeout(()=>e.style.display='none',2600); }
 
@@ -337,7 +357,7 @@ return maplibregl$1;
   function hideLanes(){ $('#lanes').classList.remove('on'); $('#lanes').dataset.k=''; }
 
   // ---- Steuerung ----
-  $('#play').addEventListener('click',()=>{ if(total===0){toast('Route lädt noch …');return;} enableAudio(); running=!running;
+  $('#play').addEventListener('click',()=>{ if(!routeReady){toast('Route lädt noch …');return;} enableAudio(); running=!running;
     $('#play').textContent=running?'⏸ Pause':'▶ Fahrt'; $('#play').classList.toggle('primary',!running);
     if(running){ chime(); speak('Route gestartet.'); } });
   $('#sound').addEventListener('click',()=>{ enableAudio(); muted=!muted; $('#sound').textContent=muted?'🔇 Ton':'🔊 Ton';
