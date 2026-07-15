@@ -54,10 +54,8 @@
     box-shadow:var(--shadow), inset 0 0 0 1px rgba(255,255,255,.06);
     position:relative;
   }
-  .phone::before{
-    content:""; position:absolute; top:20px; left:50%; transform:translateX(-50%);
-    width:120px; height:26px; border-radius:0 0 16px 16px; background:#05070f; z-index:6;
-  }
+  /* Notch entfernt – lag über der Anweisung */
+  .phone::before{ content:none; }
   .app{
     border-radius:34px; overflow:hidden; position:relative;
     background:linear-gradient(180deg,var(--sky-top),var(--sky-bot));
@@ -111,6 +109,13 @@
   .chip .ct b{display:block;font-size:14px;font-weight:700;color:var(--ink);}
   .chip .ct span{font-size:12px;color:var(--muted);}
   .chip .cd{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--warn);}
+  /* Prominente Blitzer-Warnung beim Näherkommen */
+  .chip.near{ background:var(--warn); border-color:#fff; }
+  .chip.near .ct b, .chip.near .ct span{ color:#fff; }
+  .chip.near .cd{ color:#fff; font-size:27px; }
+  .chip.near .cam{ background:#fff; } .chip.near .cam svg{ stroke:var(--warn); }
+  .chip.near{ animation:camPulse .8s ease-in-out infinite; }
+  @keyframes camPulse{ 0%,100%{ box-shadow:0 0 10px rgba(255,77,94,.5);} 50%{ box-shadow:0 0 30px rgba(255,77,94,.95);} }
 
   /* ---- junction / road perspective ---- */
   .road-wrap{ position:relative; flex:1; min-height:230px; }
@@ -158,9 +163,15 @@
     transition:background .4s ease;
   }
   .app.rtl .dash{ direction:rtl; }
-  .speed{ text-align:center; }
-  .speed .v{ font-size:32px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums;}
-  .speed .u{ font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.1em;}
+  /* Tacho (Radarbot-inspiriert, eigene Umsetzung) */
+  .speed{ position:relative; width:76px; height:76px; border-radius:50%; flex:0 0 auto;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 38%, rgba(255,255,255,.07), rgba(255,255,255,0) 70%);
+    border:3px solid var(--go); box-shadow:0 0 0 1px rgba(255,255,255,.05) inset;
+    transition:border-color .3s, box-shadow .3s; }
+  .speed.over{ border-color:var(--warn); box-shadow:0 0 20px rgba(255,77,94,.55); }
+  .speed .v{ font-size:30px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; color:var(--ink);}
+  .speed .u{ font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.09em; margin-top:2px;}
   .limit{
     width:52px;height:52px;border-radius:50%;background:#fff;border:5px solid var(--limit-red);
     display:grid;place-items:center;flex:0 0 auto;
@@ -390,14 +401,19 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
     const showCam = hasCam && (r.cameraAt>0 ? (dist>r.cameraAt && dist<r.cameraAt+650)
                                             : (dist<650));
     $('#chip').classList.toggle('on', showCam);
+    $('#chip').classList.toggle('near', showCam && camDist<300);
     if(showCam){ $('#chipD').textContent=Math.max(0,Math.round(camDist/10)*10); }
     // akustische Ansagen
     if(dist<160 && !spokeNear){ spokeNear=true; chime(); speak(sayNear(r)); }
     if(showCam && !camBeeped){ camBeeped=true; warnBeep(); speak(sayCam(r)); }
-    // speed react to limit
-    speed = Math.round(r.limit + (dist<300? -8 : 4) + Math.sin(dist/40)*2);
+    // Tempo pendelt um das Limit (Radarbot-artige Übertretungswarnung)
+    speed = Math.round(r.limit + Math.sin(dist/26)*8 + (dist<250? -6 : 0));
     $('#spd').textContent=speed;
     $('#limit').textContent=r.limit;
+    const over = speed > r.limit+1;
+    document.querySelector('.speed').classList.toggle('over', over);
+    if(over && !warnedOver){ warnedOver=true; beep(520,0.10,0.22); }
+    if(!over) warnedOver=false;
     renderLanes();
     drawRoad();
   }
@@ -435,16 +451,23 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
     RN.setSize(b.width,b.height,false); CAM.aspect=b.width/b.height; CAM.updateProjectionMatrix(); }
 
   function center(i,u,type,n){
-    const x0=(i-(n-1)/2)*laneW, z=zNear+(zFar-zNear)*u;
+    const x0=(i-(n-1)/2)*laneW;
+    if(type==='uTurn'){                   // echte Wende-Schleife (Hairpin)
+      const R=laneW*1.7, zT=-8;
+      if(u<0.30) return {x:x0, z:zNear+(zT-zNear)*(u/0.30)};
+      if(u<0.70){ const th=Math.PI*((u-0.30)/0.40);
+        return {x:(x0-R)+R*Math.cos(th), z:zT-R*Math.sin(th)}; }
+      return {x:x0-2*R, z:zT+(zNear-zT)*((u-0.70)/0.30)};
+    }
+    const z=zNear+(zFar-zNear)*u;
     const s=u<uSplit?0:(u-uSplit)/(1-uSplit), e=s*s*(3-2*s);
     let x=x0;
     if(type==='right')        x=x0+laneW*4.2*e;
     else if(type==='slightR') x=x0+laneW*2.2*e;
     else if(type==='left')    x=x0-laneW*4.2*e;
-    // uTurn bleibt gerade – Wende-Info kommt übers Pfeil-Symbol
     return {x,z};
   }
-  function ribbon(fn,half,N){ N=N||60; const pos=[],uv=[],idx=[];
+  function ribbon(fn,half,N){ N=N||90; const pos=[],uv=[],idx=[];
     for(let k=0;k<=N;k++){ const u=k/N, c=fn(u), c2=fn(Math.min(1,u+0.002));
       let tx=c2.x-c.x, tz=c2.z-c.z; const L=Math.hypot(tx,tz)||1; tx/=L; tz/=L;
       const nx=tz, nz=-tx;
@@ -482,7 +505,7 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
   function drawRoad(){ if(!RN) return; if(dtex) dtex.offset.y = -(phase*0.02); RN.render(SC,CAM); }
 
   // ---- Ton & Sprachausgabe ----
-  let muted=false, AC=null, spokeNear=false, camBeeped=false;
+  let muted=false, AC=null, spokeNear=false, camBeeped=false, warnedOver=false;
   function enableAudio(){ try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)();
     if(AC.state==='suspended') AC.resume(); }catch(e){} }
   function beep(freq,dur,vol){ if(muted) return; try{ enableAudio(); if(!AC) return;
