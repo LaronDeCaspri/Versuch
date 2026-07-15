@@ -116,6 +116,13 @@
   .chip.near .cam{ background:#fff; } .chip.near .cam svg{ stroke:var(--warn); }
   .chip.near{ animation:camPulse .8s ease-in-out infinite; }
   @keyframes camPulse{ 0%,100%{ box-shadow:0 0 10px rgba(255,77,94,.5);} 50%{ box-shadow:0 0 30px rgba(255,77,94,.95);} }
+  .chip{ padding-bottom:14px; }
+  .chip-bar{ position:absolute; left:10px; right:10px; bottom:7px; height:4px;
+    background:rgba(255,255,255,.22); border-radius:3px; overflow:hidden; }
+  .chip-bar > b{ display:block; height:100%; width:0%; background:var(--warn);
+    border-radius:3px; transition:width .12s linear; }
+  .chip.near .chip-bar{ background:rgba(255,255,255,.35); }
+  .chip.near .chip-bar > b{ background:#fff; }
 
   /* ---- junction / road perspective ---- */
   .road-wrap{ position:relative; flex:1; min-height:230px; }
@@ -239,6 +246,7 @@
         </div>
         <div class="ct"><b id="chipT">Saher-Blitzer</b><span id="chipS">Tempolimit 120 km/h</span></div>
         <div class="cd" id="chipD">500</div>
+        <div class="chip-bar"><b id="chipBar"></b></div>
       </div>
 
       <!-- road perspective -->
@@ -310,17 +318,17 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
   const routes = [
     { start:1200, type:'right', exit:'12',
       lanes:['through','through','right','right'], go:[2,3],
-      cameraAt:500, limit:120,
+      cameraAt:500, camType:'fest', limit:120,
       road:{de:'Ausfahrt 12 · King Fahd Rd', en:'Exit 12 · King Fahd Rd', ar:'المخرج 12 · طريق الملك فهد'},
       sub:{de:'dann rechts halten', en:'then keep right', ar:'ثم ابقَ يمينًا'} },
     { start:900, type:'slightR', exit:'8A',
       lanes:['through','through','slightR'], go:[2],
-      cameraAt:0, limit:100,
+      cameraAt:0, camType:'mobil', limit:100,
       road:{de:'Ausfahrt 8A · Al Olaya', en:'Exit 8A · Al Olaya', ar:'المخرج 8أ · العليا'},
       sub:{de:'leicht rechts einordnen', en:'take slight right', ar:'انعطف يمينًا قليلًا'} },
     { start:700, type:'left', exit:null,
       lanes:['left','left','through','through'], go:[0,1],
-      cameraAt:400, limit:80,
+      cameraAt:400, camType:'rotlicht', limit:80,
       road:{de:'King Abdullah Rd', en:'King Abdullah Rd', ar:'طريق الملك عبدالله'},
       sub:{de:'links halten', en:'keep left', ar:'ابقَ يسارًا'} },
     { start:600, type:'uTurn', exit:null,
@@ -333,6 +341,11 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
   const T = {
     lanes:{de:'Fahrspuren', en:'Lanes', ar:'المسارات'},
     cam:{de:'Saher-Blitzer', en:'Saher speed camera', ar:'كاميرا ساهر'},
+    camType:{
+      fest:{de:'Fester Blitzer', en:'Fixed camera', ar:'كاميرا ثابتة'},
+      mobil:{de:'Mobiler Blitzer', en:'Mobile camera', ar:'كاميرا متنقلة'},
+      rotlicht:{de:'Rotlicht-Blitzer', en:'Red-light camera', ar:'كاميرا إشارة'},
+    },
     limitTxt:l=>({de:'Tempolimit '+l+' km/h', en:'Speed limit '+l+' km/h', ar:'حد السرعة '+l+' كم/س'}),
     kmh:{de:'km/h', en:'km/h', ar:'كم/س'},
     min:v=>({de:v+' Min', en:v+' min', ar:v+' دقيقة'}),
@@ -367,7 +380,7 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
     $('#sub').textContent=r.sub[l];
     $('#distUnit').textContent=T.unit[l];
     $('#spdU').textContent=T.kmh[l];
-    $('#chipT').textContent=T.cam[l];
+    $('#chipT').textContent = r.camType ? T.camType[r.camType][l] : T.cam[l];
     $('#chipS').textContent=T.limitTxt(r.limit)[l];
     $('#etaMin').textContent=T.min(etaMin)[l];
     $('#etaKm').textContent=T.km(etaKm)[l];
@@ -402,7 +415,8 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
                                             : (dist<650));
     $('#chip').classList.toggle('on', showCam);
     $('#chip').classList.toggle('near', showCam && camDist<300);
-    if(showCam){ $('#chipD').textContent=Math.max(0,Math.round(camDist/10)*10); }
+    if(showCam){ $('#chipD').textContent=Math.max(0,Math.round(camDist/10)*10);
+      $('#chipBar').style.width = Math.max(0,Math.min(100,(1-camDist/650)*100)).toFixed(0)+'%'; }
     // akustische Ansagen
     if(dist<160 && !spokeNear){ spokeNear=true; chime(); speak(sayNear(r)); }
     if(showCam && !camBeeped){ camBeeped=true; warnBeep(); speak(sayCam(r)); }
