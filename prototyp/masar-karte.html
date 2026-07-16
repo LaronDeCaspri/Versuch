@@ -128,6 +128,25 @@
   .arr-card{background:#0e1730;border-radius:18px;padding:24px;text-align:center;width:min(300px,86%);box-shadow:0 20px 50px rgba(0,0,0,.5)}
   .arr-ic{width:60px;height:60px;border-radius:50%;background:var(--go);color:#04140d;font-size:32px;font-weight:800;display:grid;place-items:center;margin:0 auto 12px}
   .arr-card h3{margin:0 0 16px;font-size:20px}
+  .onb{position:fixed;inset:0;z-index:11;background:linear-gradient(180deg,#0a1122,#0e1830);display:none;align-items:center;justify-content:center;padding:22px}
+  .onb.on{display:flex}
+  .onb-card{width:min(360px,100%);text-align:center}
+  .onb-logo{font-size:38px;font-weight:800;letter-spacing:-.02em;color:var(--go);margin-bottom:22px}
+  .onb-list{list-style:none;margin:0 0 24px;padding:0;text-align:left;display:flex;flex-direction:column;gap:16px}
+  .onb-list li{display:flex;gap:12px;align-items:flex-start;font-size:15px;line-height:1.4}
+  .onb-list li span{font-size:22px;flex:0 0 auto}
+  .onb-list li b{font-weight:600}
+  .onb-card .btn{width:100%;text-align:center;justify-content:center;padding:14px}
+  .turnlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+  .turnlist li{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid rgba(255,255,255,.07)}
+  .turnlist li:last-child{border-bottom:0}
+  .turnlist .ti{width:40px;height:40px;border-radius:11px;background:rgba(37,227,154,.14);display:grid;place-items:center;flex:0 0 auto}
+  .turnlist .ti svg{width:26px;height:26px;fill:none;stroke:var(--go);stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+  .turnlist .tt{flex:1;min-width:0}
+  .turnlist .tt b{display:block;font-size:15px}
+  .turnlist .tt span{font-size:12.5px;color:var(--muted)}
+  .turnlist .td{font-size:14px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+  .maneuver{cursor:pointer}
   .favs{display:flex;flex-wrap:wrap;gap:7px;margin:4px 0 2px}
   .favs button{pointer-events:auto;border:1px solid rgba(255,255,255,.14);background:#0a1428;color:var(--ink);border-radius:20px;
     padding:8px 13px;font-size:13px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -210,6 +229,23 @@
 <div class="arrive" id="arrive"><div class="arr-card">
   <div class="arr-ic">✓</div><h3 id="arrTitle">Ziel erreicht</h3>
   <button class="btn primary" id="arrNew"><span id="tNewRoute">Neue Route</span></button>
+</div></div>
+
+<!-- Onboarding (erster Start) -->
+<div class="onb" id="onb"><div class="onb-card">
+  <div class="onb-logo">Masar</div>
+  <ul class="onb-list">
+    <li><span>🛣️</span><b id="onb1"></b></li>
+    <li><span>📷</span><b id="onb2"></b></li>
+    <li><span>🗺️</span><b id="onb3"></b></li>
+  </ul>
+  <button class="btn primary" id="onbGo"><span id="tOnbGo"></span></button>
+</div></div>
+
+<!-- Manöver-Liste -->
+<div class="sheet" id="turnSheet"><div class="card">
+  <h3><span id="tTurns">Abbiegungen</span><button class="x" data-close>✕</button></h3>
+  <ul class="turnlist" id="turnList"></ul>
 </div></div>
 <div class="hint" id="hint">Masar · echte OpenStreetMap-Karte</div>
 <div class="toast" id="toast"></div>
@@ -364,6 +400,13 @@ return maplibregl$1;
     reroute:{de:'Route wird neu berechnet …',en:'Rerouting …',ar:'إعادة حساب المسار …'},
     offRoute:{de:'Abseits der Route – neu berechnet',en:'Off route – recalculating',ar:'خارج المسار – إعادة الحساب'},
     fast:{de:'Schnellste',en:'Fastest',ar:'الأسرع'}, alt:{de:'Alternative',en:'Alternative',ar:'بديل'},
+    onbT:{de:'Willkommen bei Masar',en:'Welcome to Masar',ar:'مرحبًا بك في مسار'},
+    onb1:{de:'Fahrspur-genaue Führung – du siehst rechtzeitig, welche Spur.',en:'Lane-accurate guidance – see which lane in time.',ar:'إرشاد دقيق للمسار – اعرف مسارك في الوقت المناسب.'},
+    onb2:{de:'Echte Blitzer-Warnung (Saher) mit Countdown.',en:'Real speed-camera alerts with countdown.',ar:'تنبيهات ساهر الحقيقية مع العد التنازلي.'},
+    onb3:{de:'2D/3D-Karte, Sprachansagen, Alternativrouten – kostenlos.',en:'2D/3D map, voice guidance, alternate routes – free.',ar:'خريطة 2D/3D، إرشاد صوتي، مسارات بديلة – مجانًا.'},
+    onbGo:{de:'Los geht’s',en:'Get started',ar:'لنبدأ'},
+    turns:{de:'Abbiegungen',en:'Turn list',ar:'قائمة المنعطفات'}, showTurns:{de:'Alle Abbiegungen',en:'All turns',ar:'كل المنعطفات'},
+    noTurns:{de:'Keine Abbiegungen – der Straße folgen.',en:'No turns – follow the road.',ar:'لا منعطفات – اتبع الطريق.'},
   };
   // Manöver-Texte
   const MAN={
@@ -706,7 +749,22 @@ return maplibregl$1;
     $('#tSearchNote').textContent=L.searchNote[l]; $('#tSetNote').textContent=L.setNote[l];
     $('#from').placeholder=L.fromP[l]; $('#to').placeholder=L.toP[l];
     $('#tRecenter').textContent=L.recenterT[l]; $('#tNewRoute').textContent=L.newRoute[l]; renderFavs(); updateViewBtn();
+    $('#onb1').textContent=L.onb1[l]; $('#onb2').textContent=L.onb2[l]; $('#onb3').textContent=L.onb3[l];
+    $('#tOnbGo').textContent=L.onbGo[l]; $('#tTurns').textContent=L.turns[l];
   }
+  // ---- Onboarding (erster Start) ----
+  function maybeOnboard(){ try{ if(!localStorage.getItem('masar_onb')) $('#onb').classList.add('on'); }catch(e){} }
+  $('#onbGo').addEventListener('click',()=>{ $('#onb').classList.remove('on'); try{localStorage.setItem('masar_onb','1');}catch(e){} enableAudio(); });
+  // ---- Manöver-Liste ----
+  function renderTurns(){ const ul=$('#turnList'); ul.innerHTML='';
+    const list=(maneuvers||[]).filter(m=>m.at>=d-15);
+    if(!list.length){ const li=document.createElement('li'); li.className='tt'; li.textContent=L.noTurns[S.lang]; ul.appendChild(li); return; }
+    list.forEach(m=>{ const li=document.createElement('li'); const rem=Math.max(0,Math.round((m.at-d)/10)*10);
+      li.innerHTML='<div class="ti"><svg viewBox="0 0 40 40">'+(manArrowSvg[m.key]||manArrowSvg.through)+'</svg></div>'+
+        '<div class="tt"><b>'+(MAN[m.key]?MAN[m.key][S.lang]:'')+'</b><span>'+(m.name||'')+'</span></div>'+
+        '<div class="td">'+(rem>=1000?(rem/1000).toFixed(1)+' km':rem+' m')+'</div>';
+      ul.appendChild(li); }); }
+  document.querySelector('.maneuver').addEventListener('click',()=>{ renderTurns(); openSheet('#turnSheet'); });
 
   // ---- Favoriten (Zuhause/Arbeit/Verlauf) + Routenübersicht ----
   function loadJSON(k,def){ try{ return JSON.parse(localStorage.getItem(k))||def; }catch(e){ return def; } }
@@ -800,7 +858,7 @@ return maplibregl$1;
     $('#rechip').innerHTML=IC.gps+'<span id="tRecenter"></span>';
     document.querySelectorAll('[data-close]').forEach(b=>b.innerHTML=IC.close);
   }
-  initIcons(); applyLang(); updateUI(); computeRoute(A,B); requestAnimationFrame(frame);
+  initIcons(); applyLang(); maybeOnboard(); updateUI(); computeRoute(A,B); requestAnimationFrame(frame);
 })();
 </script>
 </body>
