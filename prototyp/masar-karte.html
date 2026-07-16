@@ -71,7 +71,8 @@
   .eta .t{font-size:17px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
   .eta .s{font-size:11px;color:var(--muted);margin-top:2px}.eta .s b{color:var(--go)}
 
-  .ctrls{position:fixed;left:0;right:0;bottom:0;z-index:3;display:flex;gap:7px;justify-content:center;padding:0 8px 8px}
+  .ctrls{position:fixed;left:0;right:0;bottom:0;z-index:3;display:flex;flex-wrap:wrap;gap:7px;justify-content:center;padding:0 8px 8px}
+  #viewBtn span{font-weight:700}
   .btn{pointer-events:auto;border:1px solid rgba(255,255,255,.16);background:rgba(12,20,38,.96);color:var(--ink);
     padding:11px 15px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
   .btn.primary{background:var(--go);color:#04140d;border-color:transparent}
@@ -107,7 +108,7 @@
     background:var(--go);color:#04140d;border:0;border-radius:20px;padding:9px 15px;font-size:13.5px;font-weight:800;
     box-shadow:0 8px 24px rgba(0,0,0,.45);cursor:pointer}
   .rechip.on{display:inline-flex}
-  .altbar{position:fixed;left:0;right:0;top:118px;z-index:5;display:none;gap:8px;padding:0 8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .altbar{margin:8px 8px 0;display:none;gap:8px;overflow-x:auto;pointer-events:auto;-webkit-overflow-scrolling:touch}
   .altbar.on{display:flex}
   .altbar button{pointer-events:auto;flex:0 0 auto;border:1px solid rgba(255,255,255,.16);background:rgba(12,20,38,.96);color:var(--ink);
     border-radius:12px;padding:8px 13px;font-size:12.5px;font-weight:700;cursor:pointer;line-height:1.25;text-align:left}
@@ -175,6 +176,7 @@
     </div>
   </div>
 
+  <div class="altbar" id="altbar"></div>
   <div class="spacer"></div>
 
   <div class="lanes" id="lanes"></div>
@@ -185,12 +187,11 @@
   </div>
 </div>
 
-<div class="altbar" id="altbar"></div>
-
 <div class="ctrls">
   <button class="btn primary" id="play">▶</button>
   <button class="btn icon" id="openSearch">🔎</button>
   <button class="btn icon" id="openSettings">⚙</button>
+  <button class="btn" id="viewBtn">🧭 <span>Fahrt</span></button>
   <button class="btn icon" id="reroute" title="Neu berechnen">⤳</button>
   <button class="btn icon" id="recenter">⌖</button>
 </div>
@@ -360,14 +361,35 @@ return maplibregl$1;
     through:'<path d="M20 34 L20 8"/><polyline points="12 16 20 8 28 16"/>', arrive:'<circle cx="20" cy="20" r="8"/>' };
 
   const S={ lang:'de', voice:true, tones:true, lanes:true, cams:true, fuel:false, traffic:false, view:'fahrt' };
-  function pitchFor(v){ return v==='3d'?60:0; }
+  // Ansichten (7): Reihenfolge zum Durchschalten
+  const VIEWS=['fahrt','nord','3d','3dsteil','ueber','sat','nacht'];
+  const VIEWICON={fahrt:'🧭',nord:'⬆',3:'',['3d']:'⛰',['3dsteil']:'🏔',ueber:'🗺',sat:'🛰',nacht:'🌙'};
+  const VIEWNAME={ fahrt:{de:'Fahrt',en:'Drive',ar:'قيادة'}, nord:{de:'Nord',en:'North',ar:'شمال'},
+    ['3d']:{de:'3D',en:'3D',ar:'ثلاثي'}, ['3dsteil']:{de:'3D steil',en:'3D steep',ar:'ثلاثي حاد'},
+    ueber:{de:'Übersicht',en:'Overview',ar:'نظرة'}, sat:{de:'Satellit',en:'Satellite',ar:'قمر صناعي'}, nacht:{de:'Nacht',en:'Night',ar:'ليل'} };
+  function pitchFor(v){ return v==='3d'?60:(v==='3dsteil'?74:0); }
+  function northUp(v){ return v==='nord'||v==='ueber'||v==='sat'; }
+  function basemapFor(v){ return v==='sat'?'sat':(v==='nacht'?'dark':'osm'); }
 
   // ---- Karte (OSM-Raster) ----
   let A=[46.6853,24.6905], B=[46.7020,24.7290];
-  const style={ version:8, sources:{ osm:{ type:'raster', tileSize:256, maxzoom:19,
-      tiles:['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png','https://b.tile.openstreetmap.org/{z}/{x}/{y}.png','https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      attribution:'© OpenStreetMap-Mitwirkende' } }, layers:[{id:'osm',type:'raster',source:'osm'}] };
-  const map=new maplibregl.Map({container:'map',style,center:A,zoom:15.5,pitch:0,bearing:0,maxPitch:70,attributionControl:{compact:true}});
+  const style={ version:8, sources:{
+      osm:{ type:'raster', tileSize:256, maxzoom:19,
+        tiles:['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png','https://b.tile.openstreetmap.org/{z}/{x}/{y}.png','https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        attribution:'© OpenStreetMap-Mitwirkende' },
+      sat:{ type:'raster', tileSize:256, maxzoom:19,
+        tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        attribution:'© Esri, Maxar, Earthstar' },
+      dark:{ type:'raster', tileSize:256, maxzoom:19,
+        tiles:['https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png','https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png','https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
+        attribution:'© CARTO © OpenStreetMap' }
+    }, layers:[
+      {id:'osm',type:'raster',source:'osm'},
+      {id:'sat',type:'raster',source:'sat',layout:{visibility:'none'}},
+      {id:'dark',type:'raster',source:'dark',layout:{visibility:'none'}}
+    ] };
+  const map=new maplibregl.Map({container:'map',style,center:A,zoom:15.5,pitch:0,bearing:0,maxPitch:75,attributionControl:{compact:true}});
+  function setBasemap(n){ ['osm','sat','dark'].forEach(id=>{ try{ map.setLayoutProperty(id,'visibility', id===n?'visible':'none'); }catch(e){} }); }
 
   // ---- Geo ----
   const R=6371000, rad=x=>x*Math.PI/180;
@@ -562,12 +584,19 @@ return maplibregl$1;
   function setRecenter(v){ const c=$('#rechip'); if(c) c.classList.toggle('on',v); }
   function autoZoom(){ return Math.max(15.3, 17.3 - speed/45); }   // schneller = weiter raus
   function frameCenter(dd,instant){ const p=posAt(dd); car.setLngLat(p).setRotation(headingAt(dd));
+    if(S.view==='ueber'){ if(instant){ follow=false; setRecenter(true); fitRoute(); } return; }
     if(!follow && !instant) return;                                // Nutzer hat Karte verschoben
-    const tb=S.view==='nord'?0:headingAt(dd);
+    const tb=northUp(S.view)?0:headingAt(dd);
     let diff=((tb-showBearing+540)%360)-180; showBearing=(showBearing+diff*(instant?1:0.18)+360)%360;
     if(instant){ follow=true; setRecenter(false); map.jumpTo({center:p,bearing:showBearing,pitch:pitchFor(S.view),zoom:16.6}); }
     else map.jumpTo({center:p,bearing:showBearing,pitch:pitchFor(S.view),zoom:running?autoZoom():map.getZoom()});
   }
+  function applyView(v){ S.view=v; setBasemap(basemapFor(v));
+    if(v==='ueber'){ follow=false; setRecenter(true); fitRoute(); }
+    else { map.easeTo({pitch:pitchFor(v),bearing:northUp(v)?0:showBearing,duration:450}); follow=true; setRecenter(false); frameCenter(d,true); }
+    updateViewBtn(); }
+  function cycleView(){ const i=VIEWS.indexOf(S.view); applyView(VIEWS[(i+1)%VIEWS.length]); }
+  function updateViewBtn(){ const b=$('#viewBtn'); if(b) b.innerHTML=(VIEWICON[S.view]||'🧭')+' <span>'+VIEWNAME[S.view][S.lang]+'</span>'; }
   ['dragstart','rotatestart','pitchstart','zoomstart'].forEach(ev=>map.on(ev,e=>{ if(e&&e.originalEvent){ follow=false; setRecenter(true); } }));
 
   let wakeLock=null;
@@ -653,7 +682,7 @@ return maplibregl$1;
     $('#tLoc').textContent=L.loc[l]; $('#tCalc').textContent=L.calc[l];
     $('#tSearchNote').textContent=L.searchNote[l]; $('#tSetNote').textContent=L.setNote[l];
     $('#from').placeholder=L.fromP[l]; $('#to').placeholder=L.toP[l];
-    $('#tRecenter').textContent=L.recenterT[l]; $('#tNewRoute').textContent=L.newRoute[l]; renderFavs();
+    $('#tRecenter').textContent=L.recenterT[l]; $('#tNewRoute').textContent=L.newRoute[l]; renderFavs(); updateViewBtn();
   }
 
   // ---- Favoriten (Zuhause/Arbeit/Verlauf) + Routenübersicht ----
@@ -713,8 +742,9 @@ return maplibregl$1;
   // Einstellungen: Segmente + Toggles
   $('#segLang').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; S.lang=b.dataset.v;
     [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b)); applyLang(); updateUI(); });
-  $('#segView').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; S.view=b.dataset.v;
-    [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b)); map.easeTo({pitch:pitchFor(S.view),bearing:S.view==='nord'?0:showBearing,duration:400}); });
+  $('#segView').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
+    [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b)); applyView(b.dataset.v); });
+  $('#viewBtn').addEventListener('click',cycleView);
   $('#tgVoice').addEventListener('change',e=>{ S.voice=e.target.checked; if(!S.voice&&'speechSynthesis'in window)speechSynthesis.cancel(); });
   $('#tgTones').addEventListener('change',e=>{ S.tones=e.target.checked; enableAudio(); });
   $('#tgLanes').addEventListener('change',e=>{ S.lanes=e.target.checked; if(!S.lanes)hideLanes(); });
