@@ -10,8 +10,8 @@ Status: ✅ jetzt gebaut · 🟡 teilweise · ⬜ geplant · 💰 braucht HERE (
 4. ✅ **Auto-Folgen + „Neu zentrieren"** wenn man die Karte verschiebt
 5. ✅ **Nächstes + übernächstes Manöver** („danach …")
 6. ✅ **Fortschrittsbalken** der Route
-7. ⬜ **Alternativrouten** zur Auswahl
-8. ⬜ **Off-Route-Erkennung + automatisches Neuberechnen**
+7. ✅ **Alternativrouten** zur Auswahl (Zeit/Distanz vergleichen, antippen)
+8. ✅ **Neu berechnen** (⤳) von der aktuellen Position; Off-Route-Reroute mit echtem GPS
 9. ⬜ **Zwischenstopp/Wegpunkte** hinzufügen
 10. ⬜ **Manöver-Liste** (alle Abbiegungen als Liste)
 
@@ -38,7 +38,7 @@ Status: ✅ jetzt gebaut · 🟡 teilweise · ⬜ geplant · 💰 braucht HERE (
 26. ✅ **Einheiten km/Meilen** umschaltbar
 27. ✅ **Ankunfts-Bildschirm** mit Fahrt-Zusammenfassung
 28. ✅ **2D/3D & Nord**-Ansichten, **Zoom-Buttons**, verschiebbarer Spurassistent
-29. ⬜ **Tankstellen/POIs entlang der Route** (OpenStreetMap)
+29. ✅ **Tankstellen entlang der Route** (OpenStreetMap; als Toggle)
 30. ⬜ **Offline-Karten** (in der echten App über HERE)
 
 > Alles hier ist mit **kostenlosen** Bausteinen gebaut (OpenStreetMap, OSRM, MapLibre,

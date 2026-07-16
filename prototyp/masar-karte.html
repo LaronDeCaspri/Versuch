@@ -107,6 +107,14 @@
     background:var(--go);color:#04140d;border:0;border-radius:20px;padding:9px 15px;font-size:13.5px;font-weight:800;
     box-shadow:0 8px 24px rgba(0,0,0,.45);cursor:pointer}
   .rechip.on{display:inline-flex}
+  .altbar{position:fixed;left:0;right:0;top:118px;z-index:5;display:none;gap:8px;padding:0 8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .altbar.on{display:flex}
+  .altbar button{pointer-events:auto;flex:0 0 auto;border:1px solid rgba(255,255,255,.16);background:rgba(12,20,38,.96);color:var(--ink);
+    border-radius:12px;padding:8px 13px;font-size:12.5px;font-weight:700;cursor:pointer;line-height:1.25;text-align:left}
+  .altbar button b{display:block;font-size:14px}
+  .altbar button.on{border-color:var(--go);color:var(--go)}
+  .altbar button small{color:var(--muted);font-weight:600}
+  .fuel-mark{width:24px;height:24px;border-radius:7px;background:#2b83ff;border:2px solid #fff;display:grid;place-items:center;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.5)}
   .arrive{position:fixed;inset:0;z-index:9;background:rgba(4,7,15,.6);display:none;align-items:center;justify-content:center}
   .arrive.on{display:flex}
   .arr-card{background:#0e1730;border-radius:18px;padding:24px;text-align:center;width:min(300px,86%);box-shadow:0 20px 50px rgba(0,0,0,.5)}
@@ -177,10 +185,13 @@
   </div>
 </div>
 
+<div class="altbar" id="altbar"></div>
+
 <div class="ctrls">
   <button class="btn primary" id="play">▶</button>
   <button class="btn icon" id="openSearch">🔎</button>
   <button class="btn icon" id="openSettings">⚙</button>
+  <button class="btn icon" id="reroute" title="Neu berechnen">⤳</button>
   <button class="btn icon" id="recenter">⌖</button>
 </div>
 
@@ -217,6 +228,7 @@
   <label class="tg"><span class="lab" id="tTones">Warntöne</span><span class="sw"><input type="checkbox" id="tgTones" checked><i></i></span></label>
   <label class="tg"><span class="lab" id="tLanes">Fahrspur-Anzeige</span><span class="sw"><input type="checkbox" id="tgLanes" checked><i></i></span></label>
   <label class="tg"><span class="lab" id="tCams">Blitzer-Warnung <small id="tCamsSub">echte Blitzer aus OpenStreetMap</small></span><span class="sw"><input type="checkbox" id="tgCams" checked><i></i></span></label>
+  <label class="tg"><span class="lab" id="tFuel">Tankstellen <small id="tFuelSub">entlang der Route (OpenStreetMap)</small></span><span class="sw"><input type="checkbox" id="tgFuel"><i></i></span></label>
   <label class="tg"><span class="lab" id="tTraffic">Live-Verkehr / Staus <small id="tTrafficSub">braucht HERE (kommt in der App)</small></span><span class="sw"><input type="checkbox" id="tgTraffic"><i></i></span></label>
   <div class="note" id="tSetNote">Alle Optionen wirken sofort. Sprachansagen nutzen die Stimmen deines Handys.</div>
 </div></div>
@@ -322,6 +334,12 @@ return maplibregl$1;
     favHint:{de:'Erst ein Ziel wählen, dann 🏠/💼 zum Speichern.',en:'Pick a destination first, then tap 🏠/💼 to save.',ar:'اختر وجهة أولًا ثم اضغط 🏠/💼 للحفظ.'},
     recenterT:{de:'Neu zentrieren',en:'Recenter',ar:'إعادة التوسيط'}, newRoute:{de:'Neue Route',en:'New route',ar:'مسار جديد'},
     saved:{de:'Gespeichert',en:'Saved',ar:'تم الحفظ'},
+    fuel:{de:'Tankstellen',en:'Fuel stations',ar:'محطات الوقود'},
+    fuelSub:{de:'entlang der Route (OpenStreetMap)',en:'along the route (OpenStreetMap)',ar:'على طول المسار (OpenStreetMap)'},
+    fuelN:n=>({de:n+' Tankstellen',en:n+' fuel stations',ar:n+' محطات'}),
+    reroute:{de:'Route wird neu berechnet …',en:'Rerouting …',ar:'إعادة حساب المسار …'},
+    offRoute:{de:'Abseits der Route – neu berechnet',en:'Off route – recalculating',ar:'خارج المسار – إعادة الحساب'},
+    fast:{de:'Schnellste',en:'Fastest',ar:'الأسرع'}, alt:{de:'Alternative',en:'Alternative',ar:'بديل'},
   };
   // Manöver-Texte
   const MAN={
@@ -341,7 +359,7 @@ return maplibregl$1;
     uTurn:'<path d="M27 34 L27 16 Q27 8 19 8 Q11 8 11 16 L11 26"/><polyline points="5 20 11 28 17 20"/>',
     through:'<path d="M20 34 L20 8"/><polyline points="12 16 20 8 28 16"/>', arrive:'<circle cx="20" cy="20" r="8"/>' };
 
-  const S={ lang:'de', voice:true, tones:true, lanes:true, cams:true, traffic:false, view:'fahrt' };
+  const S={ lang:'de', voice:true, tones:true, lanes:true, cams:true, fuel:false, traffic:false, view:'fahrt' };
   function pitchFor(v){ return v==='3d'?60:0; }
 
   // ---- Karte (OSM-Raster) ----
@@ -378,6 +396,23 @@ return maplibregl$1;
       el.innerHTML='<svg viewBox="0 0 24 24"><path d="M3 8h4l2-2h6l2 2h4v11H3z"/><circle cx="12" cy="13" r="3.4"/></svg>';
       camMarkers.push(new maplibregl.Marker({element:el}).setLngLat(c.ll).addTo(map)); }); }
 
+  // Tankstellen entlang der Route (OpenStreetMap)
+  let fuels=[], fuelMarkers=[];
+  function clearFuelMarkers(){ fuelMarkers.forEach(m=>m.remove()); fuelMarkers=[]; }
+  function addFuelMarkers(){ clearFuelMarkers(); if(!S.fuel) return;
+    fuels.forEach(f=>{ const el=document.createElement('div'); el.className='fuel-mark'; el.textContent='⛽';
+      fuelMarkers.push(new maplibregl.Marker({element:el}).setLngLat(f.ll).addTo(map)); }); }
+  async function fetchFuel(){ fuels=[]; if(!S.fuel){ clearFuelMarkers(); return; }
+    try{ let mnLat=90,mxLat=-90,mnLng=180,mxLng=-180;
+      coords.forEach(c=>{ mnLng=Math.min(mnLng,c[0]);mxLng=Math.max(mxLng,c[0]);mnLat=Math.min(mnLat,c[1]);mxLat=Math.max(mxLat,c[1]); });
+      const q='[out:json][timeout:20];node["amenity"="fuel"]('+mnLat+','+mnLng+','+mxLat+','+mxLng+');out;';
+      const ctrl=new AbortController(),to=setTimeout(()=>ctrl.abort(),12000);
+      const r=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:'data='+encodeURIComponent(q),signal:ctrl.signal}); clearTimeout(to);
+      const j=await r.json();
+      fuels=(j.elements||[]).map(n=>({ll:[n.lon,n.lat]})).filter(f=>nearestAlong(f.ll).dist<400);
+      addFuelMarkers(); if(fuels.length) toast(L.fuelN(fuels.length)[S.lang]);
+    }catch(e){ fuels=[]; } }
+
   let styleReady=false, routeReady=false, drawn=false;
   function line(cs){ return {type:'Feature',geometry:{type:'LineString',coordinates:cs}}; }
   function splitAt(dd){ let i=0; while(i<coords.length-2&&cum[i+1]<dd)i++; const p=posAt(dd);
@@ -387,6 +422,8 @@ return maplibregl$1;
   function drawRoute(){ const full=line(coords); const s=splitAt(d);
     if(map.getSource('route')){ map.getSource('route').setData(full); map.getSource('rdone').setData(line(s.done)); map.getSource('rahead').setData(line(s.ahead)); }
     else{
+      map.addSource('alts',{type:'geojson',data:{type:'Feature',geometry:{type:'MultiLineString',coordinates:[]}}});
+      map.addLayer({id:'alts-ln',type:'line',source:'alts',paint:{'line-color':'#8090ad','line-width':6,'line-opacity':.5,'line-dasharray':[2,2]},layout:{'line-join':'round','line-cap':'round'}});
       map.addSource('route',{type:'geojson',data:full});
       map.addSource('rdone',{type:'geojson',data:line(s.done)});
       map.addSource('rahead',{type:'geojson',data:line(s.ahead)});
@@ -394,7 +431,7 @@ return maplibregl$1;
       map.addLayer({id:'route-done',type:'line',source:'rdone',paint:{'line-color':'#8090ad','line-width':7,'line-opacity':.9},layout:{'line-join':'round','line-cap':'round'}});
       map.addLayer({id:'route-ahead',type:'line',source:'rahead',paint:{'line-color':'#25e39a','line-width':9},layout:{'line-join':'round','line-cap':'round'}});
     }
-    car.setLngLat(posAt(0)).addTo(map); addCamMarkers();
+    car.setLngLat(posAt(0)).addTo(map); addCamMarkers(); addFuelMarkers(); updateAlts();
   }
   function maybeDraw(){ if(!styleReady||!routeReady) return;
     try{ drawRoute(); if(!drawn){ drawn=true; if(running) frameCenter(d,true); else fitRoute(); } }
@@ -460,17 +497,32 @@ return maplibregl$1;
   function lanesAt(ll){ let best=0,bd=45; for(const w of laneWays){ for(const p of w.pts){ const dd=hav(ll,p); if(dd<bd){bd=dd;best=w.lanes;} } } return best; }
   let liveLaneN=0, lastLaneCalc=0;
 
-  async function computeRoute(a,b){ routeReady=false; drawn=false; $('#mRoad').textContent=L.calcing[S.lang];
-    let steps=null;
-    try{ const u='https://router.project-osrm.org/route/v1/driving/'+a[0]+','+a[1]+';'+b[0]+','+b[1]+'?overview=full&geometries=geojson&steps=true';
-      const ctrl=new AbortController(),to=setTimeout(()=>ctrl.abort(),8000);
+  let ALT=[], activeAlt=0;
+  async function computeRoute(a,b){ routeReady=false; drawn=false; $('#mRoad').textContent=L.calcing[S.lang]; ALT=[];
+    try{ const u='https://router.project-osrm.org/route/v1/driving/'+a[0]+','+a[1]+';'+b[0]+','+b[1]+'?overview=full&geometries=geojson&steps=true&alternatives=3';
+      const ctrl=new AbortController(),to=setTimeout(()=>ctrl.abort(),9000);
       const r=await fetch(u,{signal:ctrl.signal}); clearTimeout(to); const j=await r.json();
-      if(j&&j.routes&&j.routes[0]){ coords=j.routes[0].geometry.coordinates; steps=(j.routes[0].legs&&j.routes[0].legs[0]&&j.routes[0].legs[0].steps)||null; }
-      else coords=fallback.slice();
-    }catch(e){ coords=fallback.slice(); toast(L.routing[S.lang]); }
-    buildCum(); buildManeuvers(steps); await fetchCams(); fetchLanes(); routeReady=true; d=0; running=false; setPlay();
+      if(j&&j.routes&&j.routes.length) ALT=j.routes.map(rt=>({coords:rt.geometry.coordinates,steps:(rt.legs&&rt.legs[0]&&rt.legs[0].steps)||null,dur:rt.duration||0,dist:rt.distance||0}));
+    }catch(e){ toast(L.routing[S.lang]); }
+    if(!ALT.length) ALT=[{coords:fallback.slice(),steps:null,dur:0,dist:0}];
+    await selectAltInternal(0); renderAltChooser();
+  }
+  async function selectAltInternal(i){ activeAlt=i; coords=ALT[i].coords;
+    buildCum(); buildManeuvers(ALT[i].steps); await fetchCams(); fetchLanes(); if(S.fuel) fetchFuel();
+    routeReady=true; d=0; running=false; setPlay();
     maybeDraw(); follow=false; setRecenter(true); fitRoute(); updateUI(); toast(routeSummary());
   }
+  function selectAlt(i){ if(running||i===activeAlt) return; selectAltInternal(i).then(renderAltChooser); }
+  function renderAltChooser(){ const bar=$('#altbar'); bar.innerHTML='';
+    if(ALT.length<2 || running){ bar.classList.remove('on'); return; }
+    ALT.forEach((rt,i)=>{ const b=document.createElement('button'); if(i===activeAlt)b.classList.add('on');
+      const min=Math.max(1,Math.round((rt.dur||0)/60)), km=((rt.dist||0)/1000).toFixed(1);
+      b.innerHTML='<b>'+min+' '+L.min[S.lang]+'</b><small>'+km+' km · '+(i===0?L.fast[S.lang]:L.alt[S.lang]+' '+i)+'</small>';
+      b.addEventListener('click',()=>selectAlt(i)); bar.appendChild(b); });
+    bar.classList.add('on');
+  }
+  function updateAlts(){ try{ if(!map.getSource('alts'))return; const others=ALT.filter((_,i)=>i!==activeAlt).map(rt=>rt.coords);
+    map.getSource('alts').setData({type:'Feature',geometry:{type:'MultiLineString',coordinates:others}}); }catch(e){} }
 
   function toast(t){ const e=$('#toast'); e.textContent=t; e.style.display='block'; clearTimeout(e._t); e._t=setTimeout(()=>e.style.display='none',2600); }
 
@@ -596,6 +648,7 @@ return maplibregl$1;
     $('#tVoice').firstChild.textContent=L.voice[l]; $('#tTones').firstChild.textContent=L.tones[l];
     $('#tLanes').firstChild.textContent=L.lanes[l];
     $('#tCams').firstChild.textContent=L.cams[l]+' '; $('#tCamsSub').textContent=L.camsSub[l];
+    $('#tFuel').firstChild.textContent=L.fuel[l]+' '; $('#tFuelSub').textContent=L.fuelSub[l];
     $('#tTraffic').firstChild.textContent=L.traffic[l]+' '; $('#tTrafficSub').textContent=L.trafficSub[l];
     $('#tLoc').textContent=L.loc[l]; $('#tCalc').textContent=L.calc[l];
     $('#tSearchNote').textContent=L.searchNote[l]; $('#tSetNote').textContent=L.setNote[l];
@@ -625,8 +678,12 @@ return maplibregl$1;
   function routeSummary(){ const km=(total/1000).toFixed(1), min=Math.max(1,Math.round(total/1000/50*60)); return km+' km · '+min+' '+L.min[S.lang]; }
 
   // ---- Steuerung ----
-  $('#play').addEventListener('click',()=>{ if(!routeReady){toast(L.calcing[S.lang]);return;} enableAudio(); running=!running; setPlay();
+  $('#play').addEventListener('click',()=>{ if(!routeReady){toast(L.calcing[S.lang]);return;} enableAudio(); running=!running; setPlay(); renderAltChooser();
     keepAwake(running); if(running){ $('#arrive').classList.remove('on'); frameCenter(d,true); chime(); speak(L.started[S.lang]); } });
+  async function rerouteFromHere(){ if(!routeReady)return; const wr=running; running=false; const from=posAt(d);
+    toast(L.reroute[S.lang]); speak(L.reroute[S.lang]); A=from; await computeRoute(from,B);
+    if(wr){ running=true; setPlay(); renderAltChooser(); keepAwake(true); frameCenter(d,true); } }
+  $('#reroute').addEventListener('click',rerouteFromHere);
   $('#recenter').addEventListener('click',()=>frameCenter(d,true));
   $('#rechip').addEventListener('click',()=>frameCenter(d,true));
   $('#zin').addEventListener('click',()=>{ follow=false; setRecenter(true); map.zoomIn(); });
@@ -662,6 +719,7 @@ return maplibregl$1;
   $('#tgTones').addEventListener('change',e=>{ S.tones=e.target.checked; enableAudio(); });
   $('#tgLanes').addEventListener('change',e=>{ S.lanes=e.target.checked; if(!S.lanes)hideLanes(); });
   $('#tgCams').addEventListener('change',e=>{ S.cams=e.target.checked; if(!S.cams){cams=[];clearCamMarkers();$('#cam').classList.remove('on','near');} else fetchCams().then(addCamMarkers); });
+  $('#tgFuel').addEventListener('change',e=>{ S.fuel=e.target.checked; if(!S.fuel) clearFuelMarkers(); else fetchFuel(); });
   $('#tgTraffic').addEventListener('change',e=>{ if(e.target.checked){ toast(L.trafficMsg[S.lang]); e.target.checked=false; } });
 
   $('#doRoute').addEventListener('click',async()=>{ enableAudio();
