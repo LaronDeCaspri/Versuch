@@ -95,6 +95,22 @@
   .hint{position:fixed;top:0;left:0;right:0;z-index:4;text-align:center;font-size:11.5px;color:#cfe0f4;background:rgba(10,17,34,.5);padding:3px;pointer-events:none}
   .toast{position:fixed;top:54%;left:50%;transform:translateX(-50%);z-index:9;background:rgba(12,20,38,.96);border:1px solid rgba(255,255,255,.15);
     border-radius:12px;padding:11px 15px;font-size:13px;max-width:82%;text-align:center;display:none}
+  .m-then{margin-top:3px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prog{height:4px;margin:6px 8px 0;background:rgba(255,255,255,.12);border-radius:3px;overflow:hidden}
+  .prog>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--go),#7bffcf);box-shadow:0 0 10px rgba(37,227,154,.6)}
+  .rechip{position:fixed;left:50%;bottom:66px;transform:translateX(-50%);z-index:5;display:none;align-items:center;gap:6px;
+    background:var(--go);color:#04140d;border:0;border-radius:20px;padding:9px 15px;font-size:13.5px;font-weight:800;
+    box-shadow:0 8px 24px rgba(0,0,0,.45);cursor:pointer}
+  .rechip.on{display:inline-flex}
+  .arrive{position:fixed;inset:0;z-index:9;background:rgba(4,7,15,.6);display:none;align-items:center;justify-content:center}
+  .arrive.on{display:flex}
+  .arr-card{background:#0e1730;border-radius:18px;padding:24px;text-align:center;width:min(300px,86%);box-shadow:0 20px 50px rgba(0,0,0,.5)}
+  .arr-ic{width:60px;height:60px;border-radius:50%;background:var(--go);color:#04140d;font-size:32px;font-weight:800;display:grid;place-items:center;margin:0 auto 12px}
+  .arr-card h3{margin:0 0 16px;font-size:20px}
+  .favs{display:flex;flex-wrap:wrap;gap:7px;margin:4px 0 2px}
+  .favs button{pointer-events:auto;border:1px solid rgba(255,255,255,.14);background:#0a1428;color:var(--ink);border-radius:20px;
+    padding:8px 13px;font-size:13px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .favs button b{color:var(--go)}
 
   /* Panels (Suche + Einstellungen) */
   .sheet{position:fixed;inset:0;z-index:8;background:rgba(4,7,15,.55);display:none;align-items:flex-end}
@@ -136,8 +152,9 @@
   <div class="top">
     <div class="maneuver">
       <div class="m-arrow" id="mArrow"><svg viewBox="0 0 40 40"><path d="M14 34 L14 18 Q14 10 22 10 L30 10"/><polyline points="24 4 32 10 24 16"/></svg></div>
-      <div class="m-txt"><div class="m-dist"><span id="mDist">–</span><small>m</small></div><div class="m-road" id="mRoad">…</div></div>
+      <div class="m-txt"><div class="m-dist"><span id="mDist">–</span><small>m</small></div><div class="m-road" id="mRoad">…</div><div class="m-then" id="mThen" style="display:none"></div></div>
     </div>
+    <div class="prog"><i id="prog"></i></div>
     <div class="cam" id="cam">
       <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 8h4l2-2h6l2 2h4v11H3z"/><circle cx="12" cy="13" r="3.4"/></svg></div>
       <div class="c-txt"><b id="camT">Blitzer</b><span id="camS">–</span></div>
@@ -163,6 +180,11 @@
 </div>
 
 <div class="zoom"><button id="zin" aria-label="Zoom in">＋</button><button id="zout" aria-label="Zoom out">－</button></div>
+<button class="rechip" id="rechip">⌖ <span id="tRecenter">Neu zentrieren</span></button>
+<div class="arrive" id="arrive"><div class="arr-card">
+  <div class="arr-ic">✓</div><h3 id="arrTitle">Ziel erreicht</h3>
+  <button class="btn primary" id="arrNew"><span id="tNewRoute">Neue Route</span></button>
+</div></div>
 <div class="hint" id="hint">Masar · echte OpenStreetMap-Karte</div>
 <div class="toast" id="toast"></div>
 
@@ -175,6 +197,7 @@
   <ul class="sug" id="sugTo"></ul>
   <div class="row"><button class="btn" id="useLoc" style="flex:0 0 auto">📍 <span id="tLoc">Standort</span></button>
     <button class="btn primary" id="doRoute"><span id="tCalc">Route berechnen</span></button></div>
+  <div class="favs" id="favs"></div>
   <div class="note" id="tSearchNote">Adresse oder Ort eingeben (z. B. „Kingdom Centre, Riyadh"). Suche über OpenStreetMap.</div>
 </div></div>
 
@@ -290,6 +313,10 @@ return maplibregl$1;
       en:'Live traffic needs HERE (paid) – coming in the full app.',ar:'حركة المرور تتطلب HERE – في التطبيق الكامل.'},
     camGeneric:{de:'Blitzer',en:'Speed camera',ar:'كاميرا سرعة'},
     kmh:{de:'km/h',en:'km/h',ar:'كم/س'}, min:{de:'Min',en:'min',ar:'دقيقة'},
+    home:{de:'Zuhause',en:'Home',ar:'المنزل'}, work:{de:'Arbeit',en:'Work',ar:'العمل'},
+    favHint:{de:'Erst ein Ziel wählen, dann 🏠/💼 zum Speichern.',en:'Pick a destination first, then tap 🏠/💼 to save.',ar:'اختر وجهة أولًا ثم اضغط 🏠/💼 للحفظ.'},
+    recenterT:{de:'Neu zentrieren',en:'Recenter',ar:'إعادة التوسيط'}, newRoute:{de:'Neue Route',en:'New route',ar:'مسار جديد'},
+    saved:{de:'Gespeichert',en:'Saved',ar:'تم الحفظ'},
   };
   // Manöver-Texte
   const MAN={
@@ -355,7 +382,7 @@ return maplibregl$1;
     car.setLngLat(posAt(0)).addTo(map); addCamMarkers();
   }
   function maybeDraw(){ if(!styleReady||!routeReady) return;
-    try{ drawRoute(); if(!drawn){ frameCenter(0,true); drawn=true; } $('#mRoad').textContent=L.ready[S.lang]; }
+    try{ drawRoute(); if(!drawn){ drawn=true; if(running) frameCenter(d,true); else fitRoute(); } }
     catch(e){ map.once('idle',maybeDraw); } }
   map.on('load',()=>{ styleReady=true; setPad(); maybeDraw(); });
   map.on('error',()=>{});
@@ -412,7 +439,7 @@ return maplibregl$1;
       else coords=fallback.slice();
     }catch(e){ coords=fallback.slice(); toast(L.routing[S.lang]); }
     buildCum(); buildManeuvers(steps); await fetchCams(); routeReady=true; d=0; running=false; setPlay();
-    maybeDraw(); frameCenter(0,true);
+    maybeDraw(); follow=false; setRecenter(true); fitRoute(); updateUI(); toast(routeSummary());
   }
 
   function toast(t){ const e=$('#toast'); e.textContent=t; e.style.display='block'; clearTimeout(e._t); e._t=setTimeout(()=>e.style.display='none',2600); }
@@ -425,33 +452,66 @@ return maplibregl$1;
     g.gain.exponentialRampToValueAtTime(v||0.25,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+(d2||0.16));o.start(t);o.stop(t+(d2||0.18));}catch(e){} }
   function chime(){beep(880,0.14,0.22);setTimeout(()=>beep(1320,0.16,0.2),120);}
   function warnB(){beep(640,0.12,0.3);setTimeout(()=>beep(640,0.12,0.3),170);}
+  // Beste installierte Stimme je Sprache wählen (kostenlos, Gerät)
+  let VOICE=null;
+  function pickVoice(){ try{ const vs=speechSynthesis.getVoices()||[]; const code=S.lang==='ar'?'ar':(S.lang==='en'?'en':'de');
+    const cand=vs.filter(v=>(v.lang||'').toLowerCase().indexOf(code)===0);
+    const pref=['google','natural','neural','enhanced','premium','wavenet'];
+    const score=v=>{ const n=(v.name||'').toLowerCase(); let s=0; pref.forEach((p,i)=>{ if(n.indexOf(p)>=0) s=Math.max(s,pref.length-i); }); if(v.localService===false)s+=1; return s; };
+    cand.sort((a,b)=>score(b)-score(a)); VOICE=cand[0]||null; }catch(e){} }
+  if('speechSynthesis'in window){ pickVoice(); try{ speechSynthesis.onvoiceschanged=pickVoice; }catch(e){} }
   function speak(t){ if(!S.voice||!('speechSynthesis'in window)||!t)return; try{const u=new SpeechSynthesisUtterance(t);
-    u.lang=S.lang==='ar'?'ar-SA':(S.lang==='en'?'en-US':'de-DE');u.rate=1.02;speechSynthesis.cancel();speechSynthesis.speak(u);}catch(e){} }
+    u.lang=S.lang==='ar'?'ar-SA':(S.lang==='en'?'en-US':'de-DE');
+    if(VOICE&&(VOICE.lang||'').toLowerCase().indexOf(S.lang.slice(0,2))===0)u.voice=VOICE;
+    u.rate=1.0;u.pitch=1;speechSynthesis.cancel();speechSynthesis.speak(u);}catch(e){} }
+  function vibrate(p){ try{ if(navigator.vibrate) navigator.vibrate(p); }catch(e){} }
+  function distWord(m){ if(m>=1000){ const km=m/1000; return km.toFixed(km<10?1:0)+(S.lang==='ar'?' كم':' km'); }
+    return (Math.round(m/10)*10)+(S.lang==='ar'?' م':(S.lang==='en'?' meters':' Meter')); }
+  function sayIn(m,i){ return S.lang==='ar'?('بعد '+distWord(m)+'، '+i):(S.lang==='en'?('In '+distWord(m)+', '+i):('In '+distWord(m)+' '+i)); }
+  function sayNow(i){ return S.lang==='ar'?('الآن '+i):(S.lang==='en'?('Now, '+i):('Jetzt '+i)); }
+  const thenW={de:'danach',en:'then',ar:'ثم'};
 
   // ---- Simulation ----
   let d=0, speed=0, running=false, last=0, showBearing=0;
   function curLimit(){ let lim=100; for(const c of cams){ if(c.limit&&c.at>=d-40){ lim=c.limit; break; } } return lim; }
   function setPlay(){ $('#play').textContent=running?'⏸':'▶'; $('#play').classList.toggle('primary',!running); }
 
-  function frameCenter(dd,instant){ const p=posAt(dd); const tb=S.view==='nord'?0:headingAt(dd);
+  let follow=true;
+  function setRecenter(v){ const c=$('#rechip'); if(c) c.classList.toggle('on',v); }
+  function autoZoom(){ return Math.max(15.3, 17.3 - speed/45); }   // schneller = weiter raus
+  function frameCenter(dd,instant){ const p=posAt(dd); car.setLngLat(p).setRotation(headingAt(dd));
+    if(!follow && !instant) return;                                // Nutzer hat Karte verschoben
+    const tb=S.view==='nord'?0:headingAt(dd);
     let diff=((tb-showBearing+540)%360)-180; showBearing=(showBearing+diff*(instant?1:0.18)+360)%360;
-    const opts={center:p,bearing:showBearing,pitch:pitchFor(S.view),zoom:instant?16.8:map.getZoom()};
-    if(instant) map.jumpTo(opts); else map.jumpTo({center:p,bearing:showBearing,pitch:pitchFor(S.view)});
-    car.setLngLat(p).setRotation(headingAt(dd)); }
+    if(instant){ follow=true; setRecenter(false); map.jumpTo({center:p,bearing:showBearing,pitch:pitchFor(S.view),zoom:16.6}); }
+    else map.jumpTo({center:p,bearing:showBearing,pitch:pitchFor(S.view),zoom:running?autoZoom():map.getZoom()});
+  }
+  ['dragstart','rotatestart','pitchstart','zoomstart'].forEach(ev=>map.on(ev,e=>{ if(e&&e.originalEvent){ follow=false; setRecenter(true); } }));
 
+  let wakeLock=null;
+  async function keepAwake(on){ try{ if(on){ if('wakeLock'in navigator && !wakeLock){ wakeLock=await navigator.wakeLock.request('screen');
+        if(wakeLock&&wakeLock.addEventListener) wakeLock.addEventListener('release',()=>{wakeLock=null;}); } }
+      else if(wakeLock){ wakeLock.release(); wakeLock=null; } }catch(e){} }
+  function onArrive(){ keepAwake(false); vibrate([120,80,120]); chime(); speak(L.arrived[S.lang]);
+    $('#arrTitle').textContent=L.arrived[S.lang]; $('#arrive').classList.add('on'); }
   function frame(ts){ if(running&&total>0){ if(!last)last=ts; const dt=Math.min(0.05,(ts-last)/1000); last=ts;
       const lim=curLimit(); speed+=((lim+Math.sin(d/120)*7)-speed)*Math.min(1,dt*1.4); d+=(speed/3.6)*dt;
-      if(d>=total){ d=total; running=false; setPlay(); toast(L.arrived[S.lang]); }
+      if(d>=total){ d=total; running=false; setPlay(); onArrive(); }
       frameCenter(d,false); updateUI(); } else last=0; requestAnimationFrame(frame); }
 
   function updateUI(){
-    let nm=null; for(const m of maneuvers){ if(m.at>=d-15){ nm=m; break; } }
-    if(nm){ const toM=Math.max(0,nm.at-d); $('#mDist').textContent=Math.round(toM/10)*10;
-      const nmName=nm.name?(' · '+nm.name):''; $('#mRoad').textContent=(MAN[nm.key]?MAN[nm.key][S.lang]:'')+nmName;
+    let nm=null,nmIdx=-1; for(let i=0;i<maneuvers.length;i++){ if(maneuvers[i].at>=d-15){ nm=maneuvers[i]; nmIdx=i; break; } }
+    if(nm){ const toM=Math.max(0,nm.at-d); const instr=(MAN[nm.key]?MAN[nm.key][S.lang]:'');
+      $('#mDist').textContent=Math.round(toM/10)*10; $('#mRoad').textContent=instr+(nm.name?(' · '+nm.name):'');
       $('#mArrow').querySelector('svg').innerHTML=manArrowSvg[nm.key]||manArrowSvg.through;
-      if(S.lanes && nm.lanes && toM<300) showLanes(nm); else hideLanes();
-      if(!nm.spoke && toM<170 && toM>0){ nm.spoke=true; chime(); speak(MAN[nm.key]?MAN[nm.key][S.lang]:''); }
-    } else { $('#mDist').textContent='0'; $('#mRoad').textContent=L.goal[S.lang]; hideLanes(); }
+      const nx=maneuvers[nmIdx+1], mt=$('#mThen');
+      if(nx && toM<900){ mt.textContent=thenW[S.lang]+' '+(MAN[nx.key]?MAN[nx.key][S.lang]:''); mt.style.display=''; } else mt.style.display='none';
+      if(S.lanes && nm.lanes && toM<320) showLanes(nm); else hideLanes();
+      if(!nm.s1 && toM<820 && toM>420){ nm.s1=true; speak(sayIn(toM,instr)); }
+      if(!nm.s2 && toM<340 && toM>110){ nm.s2=true; chime(); speak(sayIn(toM,instr)); }
+      if(!nm.s3 && toM<70 && toM>0){ nm.s3=true; chime(); vibrate([80,50,80]); speak(sayNow(instr)); }
+    } else { $('#mDist').textContent='0'; $('#mRoad').textContent=L.goal[S.lang]; $('#mThen').style.display='none'; hideLanes(); }
+    if(total>0) $('#prog').style.width=Math.min(100,d/total*100).toFixed(1)+'%';
 
     const sp=Math.round(speed); $('#spd').textContent=sp; const lim=curLimit(); $('#limit').textContent=lim||'–';
     $('#speedo').classList.toggle('over', lim && sp>lim+1);
@@ -461,7 +521,7 @@ return maplibregl$1;
     if(shown){ const dd=Math.max(0,sd); cam.classList.add('on'); cam.classList.toggle('near',dd<300);
       $('#camT').textContent=shown.type||L.camGeneric[S.lang]; $('#camS').textContent=shown.limit?('Limit '+shown.limit+' '+L.kmh[S.lang]):'';
       $('#camD').textContent=Math.round(dd/10)*10; $('#camBar').style.width=Math.min(100,(1-dd/700)*100)+'%';
-      if(!shown.done&&dd<650){ shown.done=true; warnB(); speak((L.camGeneric[S.lang])+(shown.limit?(', '+shown.limit):'')); } }
+      if(!shown.done&&dd<650){ shown.done=true; warnB(); vibrate(180); speak((L.camGeneric[S.lang])+(shown.limit?(', '+shown.limit):'')); } }
     else cam.classList.remove('on','near');
 
     const remKm=(total-d)/1000, min=Math.max(1,Math.round(remKm/50*60)), now=new Date(Date.now()+min*60000);
@@ -499,14 +559,38 @@ return maplibregl$1;
     $('#tLoc').textContent=L.loc[l]; $('#tCalc').textContent=L.calc[l];
     $('#tSearchNote').textContent=L.searchNote[l]; $('#tSetNote').textContent=L.setNote[l];
     $('#from').placeholder=L.fromP[l]; $('#to').placeholder=L.toP[l];
+    $('#tRecenter').textContent=L.recenterT[l]; $('#tNewRoute').textContent=L.newRoute[l]; renderFavs();
   }
+
+  // ---- Favoriten (Zuhause/Arbeit/Verlauf) + Routenübersicht ----
+  function loadJSON(k,def){ try{ return JSON.parse(localStorage.getItem(k))||def; }catch(e){ return def; } }
+  function saveJSON(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+  let FAV=loadJSON('masar_fav',{}), RECENT=loadJSON('masar_recent',[]);
+  function shortName(n){ return (n||'').split(',')[0].slice(0,20); }
+  function renderFavs(){ const box=$('#favs'); if(!box)return; box.innerHTML='';
+    const mk=(html,fn)=>{ const b=document.createElement('button'); b.innerHTML=html; b.addEventListener('click',fn); box.appendChild(b); };
+    mk('🏠 '+(FAV.home?('<b>'+shortName(FAV.home.name)+'</b>'):L.home[S.lang]), ()=>favClick('home'));
+    mk('💼 '+(FAV.work?('<b>'+shortName(FAV.work.name)+'</b>'):L.work[S.lang]), ()=>favClick('work'));
+    RECENT.slice(0,3).forEach(r=>mk('🕘 '+shortName(r.name), ()=>routeTo(r.coord,r.name)));
+  }
+  function favClick(key){ if(FAV[key]) routeTo(FAV[key].coord,FAV[key].name);
+    else if(toCoord){ FAV[key]={name:$('#to').value||L[key][S.lang],coord:toCoord}; saveJSON('masar_fav',FAV); renderFavs(); toast(L.saved[S.lang]); }
+    else toast(L.favHint[S.lang]); }
+  function addRecent(coord,name){ if(!name)return; RECENT=RECENT.filter(r=>r.name!==name); RECENT.unshift({coord,name}); RECENT=RECENT.slice(0,5); saveJSON('masar_recent',RECENT); renderFavs(); }
+  async function routeTo(coord,name){ enableAudio(); toCoord=coord; B=coord; if(name)$('#to').value=name; $('#sugTo').innerHTML='';
+    closeSheet($('#searchSheet')); map.jumpTo({center:coord,zoom:14,pitch:0,bearing:0}); await computeRoute(A,coord); addRecent(coord,name); }
+  function fitRoute(){ try{ let mnx=180,mny=90,mxx=-180,mxy=-90; coords.forEach(c=>{mnx=Math.min(mnx,c[0]);mxx=Math.max(mxx,c[0]);mny=Math.min(mny,c[1]);mxy=Math.max(mxy,c[1]);});
+    map.fitBounds([[mnx,mny],[mxx,mxy]],{padding:{top:140,bottom:120,left:50,right:50},bearing:0,pitch:0,duration:600}); }catch(e){} }
+  function routeSummary(){ const km=(total/1000).toFixed(1), min=Math.max(1,Math.round(total/1000/50*60)); return km+' km · '+min+' '+L.min[S.lang]; }
 
   // ---- Steuerung ----
   $('#play').addEventListener('click',()=>{ if(!routeReady){toast(L.calcing[S.lang]);return;} enableAudio(); running=!running; setPlay();
-    if(running){ chime(); speak(L.started[S.lang]); } });
+    keepAwake(running); if(running){ $('#arrive').classList.remove('on'); frameCenter(d,true); chime(); speak(L.started[S.lang]); } });
   $('#recenter').addEventListener('click',()=>frameCenter(d,true));
-  $('#zin').addEventListener('click',()=>map.zoomIn());
-  $('#zout').addEventListener('click',()=>map.zoomOut());
+  $('#rechip').addEventListener('click',()=>frameCenter(d,true));
+  $('#zin').addEventListener('click',()=>{ follow=false; setRecenter(true); map.zoomIn(); });
+  $('#zout').addEventListener('click',()=>{ follow=false; setRecenter(true); map.zoomOut(); });
+  $('#arrNew').addEventListener('click',()=>{ $('#arrive').classList.remove('on'); openSheet('#searchSheet'); });
 
   // ---- Adress-Vorschläge (Autocomplete via OpenStreetMap) ----
   let fromCoord=null, toCoord=null;
@@ -546,6 +630,7 @@ return maplibregl$1;
       if(fromCoord) a=fromCoord; else if(f) a=await geocode(f);
       A=a; B=b; $('#sugFrom').innerHTML=''; $('#sugTo').innerHTML=''; closeSheet($('#searchSheet'));
       map.jumpTo({center:a,zoom:15.5,pitch:0,bearing:0}); await computeRoute(a,b);
+      if(t) addRecent(b, $('#to').value);
     }catch(e){ toast(L.notFound[S.lang]); } });
   $('#useLoc').addEventListener('click',()=>{ if(!navigator.geolocation){toast(L.gpsHint[S.lang]);return;}
     navigator.geolocation.getCurrentPosition(
