@@ -45,10 +45,9 @@ cd Versuch/app
 
 ## Schritt 3: App vorbereiten
 
-Die Android-Projektdateien werden lokal erzeugt (sie sind bewusst nicht im Repo).
-Das überschreibt unseren Code in `lib/` **nicht**:
+Der Android-Ordner ist bereits dabei (mit den nötigen **Standort-Berechtigungen**),
+du musst also nichts erzeugen. Nur die Pakete holen:
 ```bash
-flutter create --org com.masar --project-name masar .
 flutter pub get
 ```
 
@@ -70,7 +69,20 @@ flutter pub get
    flutter run
    ```
    Beim ersten Mal dauert es ein paar Minuten. Danach öffnet sich **Masar** auf dem Handy.
-   Tippe auf **„Fahrt simulieren"**.
+
+### So benutzt du die App
+1. Beim ersten Start fragt das Handy nach der **Standort-Berechtigung** → **Zulassen**
+   (am besten „Beim Verwenden der App"). Ohne sie kann das Navi dich nicht orten.
+2. Die Karte zentriert auf deinen **echten Standort** (blauer Pfeil zeigt die Blickrichtung).
+3. Oben ins Suchfeld ein **Ziel** eingeben → aus den Vorschlägen tippen. Die Route
+   wird als grüne Linie gezeichnet, unten stehen Distanz und Fahrzeit.
+4. Auf den grünen **Start-Knopf** (unten rechts) tippen → die **Sprachansagen** beginnen
+   („In 300 Metern rechts abbiegen …"), die Karte folgt dir automatisch.
+5. Rechts: **+/–** zum Zoomen, das **Fadenkreuz** zentriert wieder auf dich.
+
+> Hinweis: GPS, Karte und Ansagen funktionieren nur auf dem **echten Handy** (nicht im
+> Browser/Emulator ohne Standort). Zum Testen ohne Fahrt kannst du in den
+> Entwickleroptionen einen „simulierten Standort" setzen.
 
 ### Lieber eine feste App-Datei (APK) statt Kabel?
 ```bash
