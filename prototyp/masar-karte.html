@@ -47,9 +47,12 @@
 
   .spacer{flex:1}
 
-  .lanes{margin:0 8px 8px;background:var(--panel);border-radius:14px;padding:8px;display:none;justify-content:center;gap:6px;
-    box-shadow:0 10px 30px rgba(0,0,0,.45)}
-  .lanes.on{display:flex}
+  .lanes{position:fixed;left:50%;bottom:150px;transform:translateX(-50%);margin:0;background:var(--panel);border-radius:14px;
+    padding:8px;display:none;box-shadow:0 12px 34px rgba(0,0,0,.55);pointer-events:auto;touch-action:none;cursor:grab;z-index:6;user-select:none}
+  .lanes.on{display:block}
+  .lanes.drag{cursor:grabbing}
+  .lanes .grip{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.4);margin:0 auto 8px}
+  .lanes .lrow{display:flex;gap:6px;justify-content:center}
   .lane{width:44px;height:50px;border-radius:10px;background:rgba(120,140,175,.16);display:grid;place-items:center}
   .lane.go{background:rgba(37,227,154,.16);box-shadow:0 0 0 1.5px var(--go),0 0 16px rgba(37,227,154,.5)}
   .lane svg{width:62%;height:62%;fill:none;stroke:#5a6a8d;stroke-width:6.5;stroke-linecap:round;stroke-linejoin:round}
@@ -73,6 +76,15 @@
     padding:11px 15px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
   .btn.primary{background:var(--go);color:#04140d;border-color:transparent}
   .btn.icon{padding:11px 13px}
+  .zoom{position:fixed;right:8px;top:44%;transform:translateY(-50%);z-index:5;display:flex;flex-direction:column;gap:1px;border-radius:12px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+  .zoom button{pointer-events:auto;border:0;background:rgba(12,20,38,.96);color:var(--ink);width:44px;height:44px;font-size:22px;font-weight:700;cursor:pointer}
+  .zoom button:active{background:#16224a}
+  .sug{list-style:none;margin:0 0 9px;padding:0;max-height:180px;overflow:auto;border-radius:10px}
+  .sug li{background:#0a1428;border:1px solid rgba(255,255,255,.08);border-top:0;padding:10px 12px;font-size:13.5px;cursor:pointer;line-height:1.35}
+  .sug li:first-child{border-top:1px solid rgba(255,255,255,.08);border-radius:10px 10px 0 0}
+  .sug li:last-child{border-radius:0 0 10px 10px}
+  .sug li:active{background:#16224a}
+  .sug:empty{display:none}
 
   /* Marker */
   .car-arrow{width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;
@@ -150,14 +162,17 @@
   <button class="btn icon" id="recenter">⌖</button>
 </div>
 
+<div class="zoom"><button id="zin" aria-label="Zoom in">＋</button><button id="zout" aria-label="Zoom out">－</button></div>
 <div class="hint" id="hint">Masar · echte OpenStreetMap-Karte</div>
 <div class="toast" id="toast"></div>
 
 <!-- Suche / Ziel -->
 <div class="sheet" id="searchSheet"><div class="card">
   <h3><span id="tSearch">Route</span><button class="x" data-close>✕</button></h3>
-  <div class="field"><span class="dot" style="background:#25e39a"></span><input id="from" placeholder="Start"></div>
-  <div class="field"><span class="dot" style="background:#ff4d5e"></span><input id="to" placeholder="Ziel"></div>
+  <div class="field"><span class="dot" style="background:#25e39a"></span><input id="from" placeholder="Start" autocomplete="off"></div>
+  <ul class="sug" id="sugFrom"></ul>
+  <div class="field"><span class="dot" style="background:#ff4d5e"></span><input id="to" placeholder="Ziel" autocomplete="off"></div>
+  <ul class="sug" id="sugTo"></ul>
   <div class="row"><button class="btn" id="useLoc" style="flex:0 0 auto">📍 <span id="tLoc">Standort</span></button>
     <button class="btn primary" id="doRoute"><span id="tCalc">Route berechnen</span></button></div>
   <div class="note" id="tSearchNote">Adresse oder Ort eingeben (z. B. „Kingdom Centre, Riyadh"). Suche über OpenStreetMap.</div>
@@ -268,6 +283,9 @@ return maplibregl$1;
     routing:{de:'Routing offline – Ersatzroute',en:'Routing offline – fallback route',ar:'التوجيه غير متصل – مسار بديل'},
     notFound:{de:'Ort nicht gefunden',en:'Place not found',ar:'المكان غير موج. '},
     locOff:{de:'Standort nicht verfügbar',en:'Location unavailable',ar:'الموقع غير متاح'},
+    gpsHint:{de:'Kein GPS-Zugriff. Heruntergeladene Dateien sperren oft den Standort – in der echten App klappt es. Tipp: Ort oben eintippen.',
+      en:'No GPS access. Downloaded files often block location – it works in the full app. Tip: type a place above.',
+      ar:'لا يوجد وصول إلى GPS. الملفات المحمّلة غالبًا تمنع الموقع – سيعمل في التطبيق. نصيحة: اكتب مكانًا بالأعلى.'},
     trafficMsg:{de:'Live-Verkehr braucht HERE (kostenpflichtig) – kommt in der echten App.',
       en:'Live traffic needs HERE (paid) – coming in the full app.',ar:'حركة المرور تتطلب HERE – في التطبيق الكامل.'},
     camGeneric:{de:'Blitzer',en:'Speed camera',ar:'كاميرا سرعة'},
@@ -359,7 +377,8 @@ return maplibregl$1;
   function buildManeuvers(steps){ maneuvers=[]; if(!steps){ maneuvers=[
       {at:total*0.5,key:'right',name:''},{at:total*0.85,key:'left',name:''}].map(m=>{const l=laneFor(m.key)||{};return Object.assign(m,l,{spoke:false});}); return; }
     let at=0; steps.forEach(st=>{ const key=modToKey(st); const name=st.name||'';
-      if(key!=='depart'&&key!=='through'){ const l=laneFor(key); maneuvers.push(Object.assign({at,key,name,spoke:false},l||{})); }
+      // nur echte Abbiegungen ankündigen (keine "leicht links/rechts", kein geradeaus)
+      if(key==='right'||key==='left'||key==='uTurn'){ const l=laneFor(key); maneuvers.push(Object.assign({at,key,name,spoke:false},l||{})); }
       at+=st.distance||0; }); }
 
   // ---- Routing + Geocoding ----
@@ -449,10 +468,24 @@ return maplibregl$1;
     $('#eta').textContent=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
     $('#etaMin').textContent=min+' '+L.min[S.lang]; $('#etaKm').textContent=remKm.toFixed(1)+' km';
   }
-  function showLanes(m){ const box=$('#lanes'); if(box.dataset.k!==m.key+m.at){ box.dataset.k=m.key+m.at; box.innerHTML='';
+  function showLanes(m){ const box=$('#lanes'); if(box.dataset.k!==m.key+m.at){ box.dataset.k=m.key+m.at;
+      box.innerHTML='<div class="grip"></div><div class="lrow"></div>'; const row=box.querySelector('.lrow');
       m.lanes.forEach((t,i)=>{ const on=m.go.includes(i); const el=document.createElement('div'); el.className='lane'+(on?' go':'');
-        el.innerHTML='<svg viewBox="0 0 60 60">'+(glyph[t]||glyph.through)+'</svg>'; box.appendChild(el); }); }
+        el.innerHTML='<svg viewBox="0 0 60 60">'+(glyph[t]||glyph.through)+'</svg>'; row.appendChild(el); }); }
     box.classList.add('on'); }
+  // Spur-Anzeige frei verschiebbar (Ziehen)
+  (function(){ const box=$('#lanes'); let dragging=false,ox=0,oy=0,moved=false;
+    function down(e){ dragging=true;moved=false; const t=e.touches?e.touches[0]:e; const r=box.getBoundingClientRect();
+      ox=t.clientX-r.left; oy=t.clientY-r.top; box.style.transform='none'; box.style.left=r.left+'px'; box.style.top=r.top+'px'; box.style.bottom='auto';
+      box.classList.add('drag'); e.preventDefault(); }
+    function move(e){ if(!dragging)return; const t=e.touches?e.touches[0]:e; moved=true;
+      let x=t.clientX-ox, y=t.clientY-oy; const w=box.offsetWidth,h=box.offsetHeight;
+      x=Math.max(4,Math.min(innerWidth-w-4,x)); y=Math.max(4,Math.min(innerHeight-h-4,y));
+      box.style.left=x+'px'; box.style.top=y+'px'; e.preventDefault(); }
+    function up(){ dragging=false; box.classList.remove('drag'); }
+    box.addEventListener('mousedown',down); window.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+    box.addEventListener('touchstart',down,{passive:false}); window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',up);
+  })();
   function hideLanes(){ $('#lanes').classList.remove('on'); $('#lanes').dataset.k=''; }
 
   // ---- UI-Texte anwenden ----
@@ -472,6 +505,23 @@ return maplibregl$1;
   $('#play').addEventListener('click',()=>{ if(!routeReady){toast(L.calcing[S.lang]);return;} enableAudio(); running=!running; setPlay();
     if(running){ chime(); speak(L.started[S.lang]); } });
   $('#recenter').addEventListener('click',()=>frameCenter(d,true));
+  $('#zin').addEventListener('click',()=>map.zoomIn());
+  $('#zout').addEventListener('click',()=>map.zoomOut());
+
+  // ---- Adress-Vorschläge (Autocomplete via OpenStreetMap) ----
+  let fromCoord=null, toCoord=null;
+  function debounce(fn,ms){ let t; return function(){ clearTimeout(t); const a=arguments; t=setTimeout(()=>fn.apply(null,a),ms); }; }
+  async function suggest(q, listEl, pick){ if(!q||q.length<3){ listEl.innerHTML=''; return; }
+    try{ const u='https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&q='+encodeURIComponent(q);
+      const r=await fetch(u,{headers:{'Accept':'application/json'}}); const j=await r.json(); listEl.innerHTML='';
+      (j||[]).forEach(it=>{ const li=document.createElement('li'); li.textContent=it.display_name;
+        li.addEventListener('click',()=>{ pick([parseFloat(it.lon),parseFloat(it.lat)], it.display_name); listEl.innerHTML=''; });
+        listEl.appendChild(li); });
+    }catch(e){ listEl.innerHTML=''; } }
+  const sugFrom=debounce(v=>suggest(v,$('#sugFrom'),(c,n)=>{fromCoord=c;$('#from').value=n;}),380);
+  const sugTo=debounce(v=>suggest(v,$('#sugTo'),(c,n)=>{toCoord=c;$('#to').value=n;}),380);
+  $('#from').addEventListener('input',e=>{ fromCoord=null; sugFrom(e.target.value.trim()); });
+  $('#to').addEventListener('input',e=>{ toCoord=null; sugTo(e.target.value.trim()); });
   function openSheet(id){ $(id).classList.add('on'); } function closeSheet(el){ el.classList.remove('on'); }
   $('#openSearch').addEventListener('click',()=>openSheet('#searchSheet'));
   $('#openSettings').addEventListener('click',()=>openSheet('#setSheet'));
@@ -491,12 +541,18 @@ return maplibregl$1;
 
   $('#doRoute').addEventListener('click',async()=>{ enableAudio();
     const f=$('#from').value.trim(), t=$('#to').value.trim();
-    try{ let a=A,b=B; if(t){ b=await geocode(t); } if(f){ a=await geocode(f); }
-      A=a; B=b; closeSheet($('#searchSheet')); map.jumpTo({center:a,zoom:15.5,pitch:0,bearing:0}); await computeRoute(a,b);
+    try{ let a=A,b=B;
+      if(toCoord) b=toCoord; else if(t) b=await geocode(t);
+      if(fromCoord) a=fromCoord; else if(f) a=await geocode(f);
+      A=a; B=b; $('#sugFrom').innerHTML=''; $('#sugTo').innerHTML=''; closeSheet($('#searchSheet'));
+      map.jumpTo({center:a,zoom:15.5,pitch:0,bearing:0}); await computeRoute(a,b);
     }catch(e){ toast(L.notFound[S.lang]); } });
-  $('#useLoc').addEventListener('click',()=>{ if(!navigator.geolocation){toast(L.locOff[S.lang]);return;}
-    navigator.geolocation.getCurrentPosition(p=>{ A=[p.coords.longitude,p.coords.latitude]; $('#from').value='📍'; toast('OK'); },
-      ()=>toast(L.locOff[S.lang])); });
+  $('#useLoc').addEventListener('click',()=>{ if(!navigator.geolocation){toast(L.gpsHint[S.lang]);return;}
+    navigator.geolocation.getCurrentPosition(
+      p=>{ fromCoord=[p.coords.longitude,p.coords.latitude]; A=fromCoord;
+        $('#from').value='📍 '+p.coords.latitude.toFixed(4)+', '+p.coords.longitude.toFixed(4);
+        map.jumpTo({center:A,zoom:16}); toast('Standort übernommen'); },
+      ()=>toast(L.gpsHint[S.lang]), {enableHighAccuracy:true,timeout:8000,maximumAge:10000}); });
 
   // ---- Start ----
   applyLang(); updateUI(); computeRoute(A,B); requestAnimationFrame(frame);
