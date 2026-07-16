@@ -6,8 +6,14 @@ build/
 .flutter-plugins-dependencies
 pubspec.lock
 
-# Von `flutter create` erzeugte Plattform-Ordner (lokal generieren)
-/android/
+# android/ wird mitgeliefert, damit die Standort-Berechtigungen (GPS) erhalten
+# bleiben. Nur maschinenspezifische / generierte Dateien ausschließen:
+/android/local.properties
+/android/.gradle/
+/android/app/build/
+*.iml
+
+# Die übrigen Plattform-Ordner lokal mit `flutter create .` erzeugen:
 /ios/
 /linux/
 /macos/

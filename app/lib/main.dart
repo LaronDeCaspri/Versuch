@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'lane_guidance_screen.dart';
+import 'nav_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +24,7 @@ class MasarApp extends StatelessWidget {
         // Arabisch fällt automatisch auf Noto Naskh Arabic zurück.
         fontFamilyFallback: const ['NotoArabic'],
       ),
-      home: const LaneGuidanceScreen(),
+      home: const NavScreen(),
     );
   }
 }
