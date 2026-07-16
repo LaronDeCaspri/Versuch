@@ -87,8 +87,13 @@
   .sug:empty{display:none}
 
   /* Marker */
-  .car-arrow{width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;
-    border-bottom:28px solid var(--go);filter:drop-shadow(0 0 6px rgba(37,227,154,.85))}
+  .puck{width:28px;height:28px;position:relative;pointer-events:none}
+  .puck .cone{position:absolute;left:50%;top:-10px;width:30px;height:26px;transform:translateX(-50%);
+    background:radial-gradient(ellipse at 50% 100%, rgba(43,131,255,.6), rgba(43,131,255,0) 72%);
+    clip-path:polygon(50% 0,100% 100%,0 100%)}
+  .puck .dot{position:absolute;inset:5px;border-radius:50%;background:#2b83ff;border:3px solid #fff;
+    box-shadow:0 0 0 1px rgba(0,0,0,.28),0 2px 7px rgba(0,0,0,.55)}
+  .car-arrow{width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-bottom:28px solid var(--go)}
   .cam-mark{width:24px;height:24px;border-radius:50%;background:var(--warn);border:2px solid #fff;display:grid;place-items:center;box-shadow:0 2px 8px rgba(0,0,0,.5)}
   .cam-mark svg{width:14px;height:14px;fill:none;stroke:#fff;stroke-width:1.7}
 
@@ -364,7 +369,7 @@ return maplibregl$1;
     [46.6853,24.7200],[46.6853,24.7235],[46.6895,24.7250],[46.6950,24.7268],[46.7020,24.7290]];
 
   let cams=[], maneuvers=[], camMarkers=[];
-  const carEl=document.createElement('div'); carEl.innerHTML='<div class="car-arrow"></div>';
+  const carEl=document.createElement('div'); carEl.className='puck'; carEl.innerHTML='<div class="cone"></div><div class="dot"></div>';
   const car=new maplibregl.Marker({element:carEl,rotationAlignment:'map'});
 
   function clearCamMarkers(){ camMarkers.forEach(m=>m.remove()); camMarkers=[]; }
@@ -374,11 +379,21 @@ return maplibregl$1;
       camMarkers.push(new maplibregl.Marker({element:el}).setLngLat(c.ll).addTo(map)); }); }
 
   let styleReady=false, routeReady=false, drawn=false;
-  function drawRoute(){ const gj={type:'Feature',geometry:{type:'LineString',coordinates:coords}};
-    if(map.getSource('route')) map.getSource('route').setData(gj);
-    else{ map.addSource('route',{type:'geojson',data:gj});
-      map.addLayer({id:'route-cap',type:'line',source:'route',paint:{'line-color':'#0c8f63','line-width':13,'line-opacity':.55},layout:{'line-join':'round','line-cap':'round'}});
-      map.addLayer({id:'route-ln',type:'line',source:'route',paint:{'line-color':'#25e39a','line-width':7},layout:{'line-join':'round','line-cap':'round'}}); }
+  function line(cs){ return {type:'Feature',geometry:{type:'LineString',coordinates:cs}}; }
+  function splitAt(dd){ let i=0; while(i<coords.length-2&&cum[i+1]<dd)i++; const p=posAt(dd);
+    return {done:coords.slice(0,i+1).concat([p]), ahead:[p].concat(coords.slice(i+1))}; }
+  function updateRouteLines(){ if(!map.getSource('rahead'))return; const s=splitAt(d);
+    map.getSource('rdone').setData(line(s.done)); map.getSource('rahead').setData(line(s.ahead)); }
+  function drawRoute(){ const full=line(coords); const s=splitAt(d);
+    if(map.getSource('route')){ map.getSource('route').setData(full); map.getSource('rdone').setData(line(s.done)); map.getSource('rahead').setData(line(s.ahead)); }
+    else{
+      map.addSource('route',{type:'geojson',data:full});
+      map.addSource('rdone',{type:'geojson',data:line(s.done)});
+      map.addSource('rahead',{type:'geojson',data:line(s.ahead)});
+      map.addLayer({id:'route-cap',type:'line',source:'route',paint:{'line-color':'#04120c','line-width':15,'line-opacity':.5},layout:{'line-join':'round','line-cap':'round'}});
+      map.addLayer({id:'route-done',type:'line',source:'rdone',paint:{'line-color':'#8090ad','line-width':7,'line-opacity':.9},layout:{'line-join':'round','line-cap':'round'}});
+      map.addLayer({id:'route-ahead',type:'line',source:'rahead',paint:{'line-color':'#25e39a','line-width':9},layout:{'line-join':'round','line-cap':'round'}});
+    }
     car.setLngLat(posAt(0)).addTo(map); addCamMarkers();
   }
   function maybeDraw(){ if(!styleReady||!routeReady) return;
@@ -430,6 +445,21 @@ return maplibregl$1;
     {at:total*0.6,limit:100,type:L.camGeneric[S.lang],done:false},{at:total*0.82,limit:60,type:L.camGeneric[S.lang],done:false}]
     .map(c=>Object.assign(c,{ll:posAt(c.at)})); }
 
+  // Spuranzahl der Straßen entlang der Route aus OpenStreetMap
+  let laneWays=[];
+  async function fetchLanes(){ laneWays=[]; try{
+      let mnLat=90,mxLat=-90,mnLng=180,mxLng=-180;
+      coords.forEach(c=>{ mnLng=Math.min(mnLng,c[0]);mxLng=Math.max(mxLng,c[0]);mnLat=Math.min(mnLat,c[1]);mxLat=Math.max(mxLat,c[1]); });
+      const q='[out:json][timeout:20];way["highway"]["lanes"]('+mnLat+','+mnLng+','+mxLat+','+mxLng+');out geom;';
+      const ctrl=new AbortController(),to=setTimeout(()=>ctrl.abort(),12000);
+      const r=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:'data='+encodeURIComponent(q),signal:ctrl.signal}); clearTimeout(to);
+      const j=await r.json();
+      laneWays=(j.elements||[]).filter(w=>w.geometry&&w.tags&&w.tags.lanes)
+        .map(w=>({pts:w.geometry.map(g=>[g.lon,g.lat]), lanes:parseInt(w.tags.lanes)||0})).filter(w=>w.lanes>0);
+    }catch(e){ laneWays=[]; } }
+  function lanesAt(ll){ let best=0,bd=45; for(const w of laneWays){ for(const p of w.pts){ const dd=hav(ll,p); if(dd<bd){bd=dd;best=w.lanes;} } } return best; }
+  let liveLaneN=0, lastLaneCalc=0;
+
   async function computeRoute(a,b){ routeReady=false; drawn=false; $('#mRoad').textContent=L.calcing[S.lang];
     let steps=null;
     try{ const u='https://router.project-osrm.org/route/v1/driving/'+a[0]+','+a[1]+';'+b[0]+','+b[1]+'?overview=full&geometries=geojson&steps=true';
@@ -438,7 +468,7 @@ return maplibregl$1;
       if(j&&j.routes&&j.routes[0]){ coords=j.routes[0].geometry.coordinates; steps=(j.routes[0].legs&&j.routes[0].legs[0]&&j.routes[0].legs[0].steps)||null; }
       else coords=fallback.slice();
     }catch(e){ coords=fallback.slice(); toast(L.routing[S.lang]); }
-    buildCum(); buildManeuvers(steps); await fetchCams(); routeReady=true; d=0; running=false; setPlay();
+    buildCum(); buildManeuvers(steps); await fetchCams(); fetchLanes(); routeReady=true; d=0; running=false; setPlay();
     maybeDraw(); follow=false; setRecenter(true); fitRoute(); updateUI(); toast(routeSummary());
   }
 
@@ -494,23 +524,29 @@ return maplibregl$1;
       else if(wakeLock){ wakeLock.release(); wakeLock=null; } }catch(e){} }
   function onArrive(){ keepAwake(false); vibrate([120,80,120]); chime(); speak(L.arrived[S.lang]);
     $('#arrTitle').textContent=L.arrived[S.lang]; $('#arrive').classList.add('on'); }
+  let lastLine=0;
   function frame(ts){ if(running&&total>0){ if(!last)last=ts; const dt=Math.min(0.05,(ts-last)/1000); last=ts;
       const lim=curLimit(); speed+=((lim+Math.sin(d/120)*7)-speed)*Math.min(1,dt*1.4); d+=(speed/3.6)*dt;
       if(d>=total){ d=total; running=false; setPlay(); onArrive(); }
-      frameCenter(d,false); updateUI(); } else last=0; requestAnimationFrame(frame); }
+      frameCenter(d,false); updateUI();
+      if(ts-lastLine>250){ lastLine=ts; updateRouteLines(); }
+    } else last=0; requestAnimationFrame(frame); }
 
   function updateUI(){
+    if(performance.now()-lastLaneCalc>1200){ lastLaneCalc=performance.now(); liveLaneN=lanesAt(posAt(d)); }
     let nm=null,nmIdx=-1; for(let i=0;i<maneuvers.length;i++){ if(maneuvers[i].at>=d-15){ nm=maneuvers[i]; nmIdx=i; break; } }
     if(nm){ const toM=Math.max(0,nm.at-d); const instr=(MAN[nm.key]?MAN[nm.key][S.lang]:'');
       $('#mDist').textContent=Math.round(toM/10)*10; $('#mRoad').textContent=instr+(nm.name?(' · '+nm.name):'');
       $('#mArrow').querySelector('svg').innerHTML=manArrowSvg[nm.key]||manArrowSvg.through;
       const nx=maneuvers[nmIdx+1], mt=$('#mThen');
       if(nx && toM<900){ mt.textContent=thenW[S.lang]+' '+(MAN[nx.key]?MAN[nx.key][S.lang]:''); mt.style.display=''; } else mt.style.display='none';
-      if(S.lanes && nm.lanes && toM<320) showLanes(nm); else hideLanes();
+      if(S.lanes && nm.lanes && toM<320) showLanes(nm);
+      else if(S.lanes && liveLaneN>1) showLiveLanes(liveLaneN); else hideLanes();
       if(!nm.s1 && toM<820 && toM>420){ nm.s1=true; speak(sayIn(toM,instr)); }
       if(!nm.s2 && toM<340 && toM>110){ nm.s2=true; chime(); speak(sayIn(toM,instr)); }
       if(!nm.s3 && toM<70 && toM>0){ nm.s3=true; chime(); vibrate([80,50,80]); speak(sayNow(instr)); }
-    } else { $('#mDist').textContent='0'; $('#mRoad').textContent=L.goal[S.lang]; $('#mThen').style.display='none'; hideLanes(); }
+    } else { $('#mDist').textContent='0'; $('#mRoad').textContent=L.goal[S.lang]; $('#mThen').style.display='none';
+      if(S.lanes && liveLaneN>1) showLiveLanes(liveLaneN); else hideLanes(); }
     if(total>0) $('#prog').style.width=Math.min(100,d/total*100).toFixed(1)+'%';
 
     const sp=Math.round(speed); $('#spd').textContent=sp; const lim=curLimit(); $('#limit').textContent=lim||'–';
@@ -546,6 +582,11 @@ return maplibregl$1;
     box.addEventListener('mousedown',down); window.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
     box.addEventListener('touchstart',down,{passive:false}); window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',up);
   })();
+  function showLiveLanes(n){ const box=$('#lanes'); const key='live'+n; if(box.dataset.k!==key){ box.dataset.k=key;
+      box.innerHTML='<div class="grip"></div><div class="lrow"></div>'; const row=box.querySelector('.lrow');
+      for(let i=0;i<Math.min(n,6);i++){ const el=document.createElement('div'); el.className='lane';
+        el.innerHTML='<svg viewBox="0 0 60 60">'+glyph.through+'</svg>'; row.appendChild(el); } }
+    box.classList.add('on'); }
   function hideLanes(){ $('#lanes').classList.remove('on'); $('#lanes').dataset.k=''; }
 
   // ---- UI-Texte anwenden ----
