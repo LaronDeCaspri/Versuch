@@ -2,6 +2,24 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+/// Eine Fahrspur an einer Kreuzung (aus OSRM „intersections.lanes").
+class Lane {
+  final bool valid;               // gehört diese Spur zur Route?
+  final List<String> indications; // z. B. ["straight"], ["slight right"], ["left","through"]
+  Lane(this.valid, this.indications);
+
+  /// Pfeil-Richtung für die Anzeige.
+  String get arrow {
+    final ind = indications.isNotEmpty ? indications.last : 'straight';
+    if (ind.contains('uturn')) return 'uturn';
+    if (ind.contains('slight right')) return 'slightRight';
+    if (ind.contains('slight left')) return 'slightLeft';
+    if (ind.contains('sharp right') || ind == 'right') return 'right';
+    if (ind.contains('sharp left') || ind == 'left') return 'left';
+    return 'straight';
+  }
+}
+
 /// Ein Abbiege-Manöver entlang der Route.
 class Maneuver {
   final LatLng location;
@@ -9,7 +27,8 @@ class Maneuver {
   final String type;          // OSRM maneuver.type
   final String modifier;      // OSRM maneuver.modifier (right/left/…)
   final String name;          // Straßenname
-  Maneuver(this.location, this.distanceAlong, this.type, this.modifier, this.name);
+  final List<Lane> lanes;     // Fahrspuren im Anlauf auf das Manöver
+  Maneuver(this.location, this.distanceAlong, this.type, this.modifier, this.name, this.lanes);
 
   /// Vereinfachter Richtungs-Schlüssel für Icon/Ansage.
   String get key {
@@ -33,7 +52,15 @@ class RouteResult {
   RouteResult(this.points, this.distance, this.duration, this.maneuvers);
 }
 
-/// Kostenlose Dienste: OSRM (Routing) und Nominatim (Adress-Suche), beide OpenStreetMap.
+/// Ein Blitzer (Saher) aus OpenStreetMap.
+class Camera {
+  final LatLng location;
+  final int? maxspeed; // km/h, falls bekannt
+  Camera(this.location, this.maxspeed);
+}
+
+/// Kostenlose Dienste: OSRM (Routing inkl. Spuren/Alternativen), Nominatim
+/// (Adress-Suche) und Overpass (Blitzer) – alle OpenStreetMap.
 class NavService {
   static const _ua = {'User-Agent': 'MasarNav/0.1 (prototype)'};
 
@@ -57,17 +84,21 @@ class NavService {
     return (jsonDecode(r.body) as List).cast<Map<String, dynamic>>();
   }
 
-  static Future<RouteResult?> route(LatLng from, LatLng to) async {
+  /// Haupt- und Alternativrouten (bis zu 3). Erste = schnellste.
+  static Future<List<RouteResult>> routes(LatLng from, LatLng to) async {
     final uri = Uri.parse(
         'https://router.project-osrm.org/route/v1/driving/'
         '${from.longitude},${from.latitude};${to.longitude},${to.latitude}'
-        '?overview=full&geometries=geojson&steps=true');
+        '?overview=full&geometries=geojson&steps=true&alternatives=3');
     final r = await http.get(uri);
-    if (r.statusCode != 200) return null;
+    if (r.statusCode != 200) return [];
     final j = jsonDecode(r.body) as Map;
     final routes = j['routes'] as List?;
-    if (routes == null || routes.isEmpty) return null;
-    final rt = routes.first as Map;
+    if (routes == null || routes.isEmpty) return [];
+    return routes.map((rt) => _parseRoute(rt as Map)).toList();
+  }
+
+  static RouteResult _parseRoute(Map rt) {
     final coords = (rt['geometry']['coordinates'] as List)
         .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
         .toList();
@@ -78,17 +109,83 @@ class NavService {
       for (final st in (legs.first['steps'] as List)) {
         final man = st['maneuver'] as Map;
         final loc = man['location'] as List;
+        // Fahrspuren aus den Kreuzungen dieses Schritts sammeln.
+        final lanes = <Lane>[];
+        final inters = st['intersections'] as List?;
+        if (inters != null) {
+          for (final it in inters) {
+            final ln = (it as Map)['lanes'] as List?;
+            if (ln != null) {
+              lanes
+                ..clear()
+                ..addAll(ln.map((l) => Lane(
+                      ((l as Map)['valid'] ?? false) as bool,
+                      ((l['indications'] ?? const []) as List)
+                          .map((e) => e.toString())
+                          .toList(),
+                    )));
+            }
+          }
+        }
         maneuvers.add(Maneuver(
           LatLng((loc[1] as num).toDouble(), (loc[0] as num).toDouble()),
           at,
           (man['type'] ?? '') as String,
           (man['modifier'] ?? '') as String,
           (st['name'] ?? '') as String,
+          lanes,
         ));
         at += (st['distance'] as num).toDouble();
       }
     }
     return RouteResult(coords, (rt['distance'] as num).toDouble(),
         (rt['duration'] as num).toDouble(), maneuvers);
+  }
+
+  /// Echte Blitzer entlang der Route (OpenStreetMap via Overpass).
+  static Future<List<Camera>> cameras(List<LatLng> route) async {
+    if (route.isEmpty) return [];
+    double minLat = 90, minLon = 180, maxLat = -90, maxLon = -180;
+    for (final p in route) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLon) minLon = p.longitude;
+      if (p.longitude > maxLon) maxLon = p.longitude;
+    }
+    final q = '[out:json][timeout:25];'
+        'node["highway"="speed_camera"]($minLat,$minLon,$maxLat,$maxLon);out;';
+    final uri =
+        Uri.parse('https://overpass-api.de/api/interpreter?data=${Uri.encodeComponent(q)}');
+    try {
+      final r = await http.get(uri, headers: _ua);
+      if (r.statusCode != 200) return [];
+      final els = (jsonDecode(r.body) as Map)['elements'] as List? ?? [];
+      final cams = <Camera>[];
+      const dist = Distance();
+      for (final e in els) {
+        final m = e as Map;
+        final lat = (m['lat'] as num?)?.toDouble();
+        final lon = (m['lon'] as num?)?.toDouble();
+        if (lat == null || lon == null) continue;
+        final ll = LatLng(lat, lon);
+        // Nur Blitzer nahe der eigentlichen Route behalten (max. 80 m).
+        var near = false;
+        for (var i = 0; i < route.length; i += 3) {
+          if (dist.as(LengthUnit.Meter, ll, route[i]) < 80) {
+            near = true;
+            break;
+          }
+        }
+        if (!near) continue;
+        int? mx;
+        final tags = m['tags'] as Map?;
+        final ms = tags?['maxspeed'];
+        if (ms is String) mx = int.tryParse(ms.replaceAll(RegExp(r'[^0-9]'), ''));
+        cams.add(Camera(ll, mx));
+      }
+      return cams;
+    } catch (_) {
+      return [];
+    }
   }
 }
