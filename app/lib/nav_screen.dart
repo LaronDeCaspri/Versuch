@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -73,7 +74,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
   List<Hazard> _hazards = [];
   bool _showTurnPreview = true;
   bool _showSpeedProfile = false;
-  int _routePreference = 0; // 0=fastest, 1=shortest, 2=scenic
+  int _routePreference = 0;
   Timer? _etaUpdateTimer;
   DateTime? _navigationStartTime;
   double _distanceTraveled = 0;
@@ -81,6 +82,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
   double _ecodrivingScore = 100.0;
   List<String> _savedRoutes = [];
   List<LatLng> _navigationHistory = [];
+  List<Map<String, dynamic>> _userHazards = [];
 
   RouteResult? get _route => (_alts.isNotEmpty && _sel < _alts.length) ? _alts[_sel] : null;
   bool get _isDarkTheme => _view == ViewMode.dark || _shouldAutoNightMode();
@@ -97,6 +99,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     _turnPreviewAnim = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _turnPreviewAnimController, curve: Curves.easeOutQuart));
     _initLocation();
     _loadSimulatedHazards();
+    _loadUserHazards();
   }
 
   Future<void> _initPrefs() async {
@@ -556,11 +559,93 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
   }
 
   void _loadSimulatedHazards() {
-    // Simulate some hazards - in real app this would come from Waze-like crowdsourcing
     _hazards = [
       Hazard(const LatLng(24.7455, 46.6881), 'slowTraffic', 'Heavy traffic ahead', DateTime.now()),
       Hazard(const LatLng(24.7200, 46.6700), 'construction', 'Road work on King Fahd Rd', DateTime.now()),
     ];
+  }
+
+  void _loadUserHazards() {
+    final str = _prefs.getString('user_hazards') ?? '[]';
+    try {
+      final list = jsonDecode(str) as List;
+      _userHazards = list.cast<Map<String, dynamic>>();
+      for (final h in _userHazards) {
+        final loc = LatLng(h['lat'] as double, h['lon'] as double);
+        final type = h['type'] as String;
+        final desc = h['desc'] as String?;
+        final age = DateTime.now().difference(DateTime.parse(h['time'] as String)).inHours;
+        if (age < 24) {
+          _hazards.add(Hazard(loc, type, desc, DateTime.parse(h['time'] as String)));
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _reportHazard(String type, String? description) {
+    if (_pos == null) {
+      _speak('GPS erforderlich');
+      return;
+    }
+    final h = {
+      'lat': _pos!.latitude,
+      'lon': _pos!.longitude,
+      'type': type,
+      'desc': description,
+      'time': DateTime.now().toIso8601String(),
+    };
+    _userHazards.add(h);
+    _prefs.setString('user_hazards', jsonEncode(_userHazards));
+    _hazards.add(Hazard(_pos!, type, description, DateTime.now()));
+    _speak('$type gemeldet');
+    setState(() {});
+  }
+
+  void _showReportDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: _panel,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(_t('reportHazard'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 16),
+            _reportBtn('accident', '🚗 Unfall', _warn),
+            _reportBtn('slowTraffic', '🚦 Stau', Colors.orange),
+            _reportBtn('construction', '🚧 Baustelle', Colors.amber),
+            _reportBtn('debris', '⚠️ Hindernis', Colors.red),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(_t('cancel'), style: const TextStyle(color: Colors.white54)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _reportBtn(String type, String label, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: color.withValues(alpha: 0.15),
+            side: BorderSide(color: color, width: 1.5),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+          ),
+          onPressed: () {
+            _reportHazard(type, null);
+            Navigator.pop(context);
+          },
+          child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+        ),
+      ),
+    );
   }
 
   List<Maneuver> _getUpcomingManeuvers(int count) {
@@ -882,6 +967,8 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
                   const SizedBox(height: 8),
                   _roundBtn(_follow ? Icons.my_location : Icons.location_searching, _recenter,
                       tint: _follow ? _go : Colors.white),
+                  const SizedBox(height: 8),
+                  _roundBtn(Icons.warning_amber, _showReportDialog, tint: _warn),
                 ]),
               ),
             ),
@@ -2118,7 +2205,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
           decoration: BoxDecoration(
             color: active ? _go.withValues(alpha: 0.15) : Colors.white10,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: active ? _go : Colors.white20, width: 1.5),
+            border: Border.all(color: active ? _go : Colors.white10, width: 1.5),
           ),
           child: Center(
             child: Text(label,
@@ -2185,6 +2272,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'parking': 'Parken',
       'routeSummary': 'Routenzusammenfassung',
       'startNavigation': 'Navigation starten',
+      'reportHazard': 'Gefahren melden',
       'cancel': 'Abbrechen',
       'turns': 'Abbiegungen',
       'hazards': 'Gefahren',
@@ -2242,6 +2330,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'parking': 'Parking',
       'routeSummary': 'Route summary',
       'startNavigation': 'Start navigation',
+      'reportHazard': 'Report hazard',
       'cancel': 'Cancel',
       'turns': 'Turns',
       'hazards': 'Hazards',
@@ -2299,6 +2388,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'parking': 'مواقف السيارات',
       'routeSummary': 'ملخص المسار',
       'startNavigation': 'ابدأ التنقل',
+      'reportHazard': 'الإبلاغ عن الخطر',
       'cancel': 'إلغاء',
       'turns': 'الانعطافات',
       'hazards': 'المخاطر',
