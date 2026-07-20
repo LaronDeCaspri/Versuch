@@ -89,7 +89,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _applyTtsLang();
-    _tts.setSpeechRate(0.95);
+    _tts.setSpeechRate(0.65);
     _initPrefs();
     _speedLimitAnimController = AnimationController(duration: const Duration(milliseconds: 600), vsync: this);
     _speedLimitAnim = Tween<double>(begin: 1.0, end: 1.0).animate(_speedLimitAnimController);
@@ -439,13 +439,15 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       }
     }
 
-    // Speed warning feedback
+    // Speed warning feedback with beep alert
     final category = _speedWarningCategory();
     if (category == 'dangerous' && !_spoken.contains(-1)) {
       _spoken.add(-1);
+      _tts.speak('beep beep beep'); // Audio alert
       _speak(_t('slowDown'));
     } else if (category == 'moderate' && !_spoken.contains(-2)) {
       _spoken.add(-2);
+      _tts.speak('beep'); // Single beep for moderate
       _speak(_t('speedWarning'));
     }
 
@@ -774,9 +776,11 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
             children: [
               TileLayer(
                 urlTemplate: dark
-                    ? 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-                    : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    ? 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png'
+                    : 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.masar.app',
+                subdomains: const ['a', 'b', 'c'],
+                tileSize: 256,
               ),
               PolylineLayer(polylines: _routeLines()),
 
@@ -1776,7 +1780,20 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
 
   String _formatETA() {
     final rem = _pos != null ? _remainingMeters(_pos!) : 0.0;
-    final minRemain = (rem / 1000 / 50 * 60).clamp(0, 999).round();
+    // Realistischere Geschwindigkeitsberechnung: basiert auf aktueller Geschwindigkeit + Durchschnitt
+    double avgSpeed = 50.0;
+    if (_speedKmh > 5) {
+      avgSpeed = _speedKmh * 0.6 + 50 * 0.4; // 60% aktuelle, 40% Durchschnitt
+    }
+
+    // Verkehrsbedingte Verzögerung hinzufügen
+    double trafficMultiplier = 1.0;
+    if (_hazards.isNotEmpty) {
+      trafficMultiplier = 1.1 + (_hazards.where((h) => h.type == 'slowTraffic').length * 0.05);
+    }
+    avgSpeed = avgSpeed / trafficMultiplier;
+
+    final minRemain = (rem / 1000 / avgSpeed * 60).clamp(0, 999).round();
     final now = DateTime.now();
     final arrival = now.add(Duration(minutes: minRemain));
     return '${arrival.hour.toString().padLeft(2, '0')}:${arrival.minute.toString().padLeft(2, '0')}';
@@ -1786,69 +1803,123 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     final rem = _pos != null ? _remainingMeters(_pos!) : 0.0;
     final min = (rem / 1000 / 50 * 60).clamp(0, 999).round();
     final over = _speedKmh > 121;
-    return Row(children: [
-      Container(
-        width: 72,
-        height: 72,
-        decoration: BoxDecoration(
-          color: _panel,
-          shape: BoxShape.circle,
-          border: Border.all(color: over ? _warn : _go, width: 3),
-          boxShadow: [
-            BoxShadow(
-              color: (over ? _warn : _go).withValues(alpha: 0.2),
-              blurRadius: 12,
-            ),
-          ],
-        ),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text('${_speedKmh.round()}',
-              style: TextStyle(
-                  color: over ? _warn : Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800)),
-          Text(_miles ? 'mph' : 'km/h', style: const TextStyle(color: Colors.white54, fontSize: 9)),
-        ]),
-      ),
-      const Spacer(),
-      if (_route != null)
+    final ecoColor = _ecodrivingScore >= 80 ? const Color(0xFF00D964) :
+                     _ecodrivingScore >= 60 ? const Color(0xFFFFA500) :
+                     _ecodrivingScore >= 40 ? Colors.orange :
+                     Colors.red;
+
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      // Eco-Driving Bar
+      if (_navigating)
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          width: double.infinity,
+          height: 8,
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: Colors.black26,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: _ecodrivingScore / 100,
+              backgroundColor: Colors.transparent,
+              valueColor: AlwaysStoppedAnimation<Color>(ecoColor),
+              minHeight: 8,
+            ),
+          ),
+        ),
+      Row(children: [
+        // Speed Meter (left)
+        Container(
+          width: 90,
+          height: 90,
           decoration: BoxDecoration(
             color: _panel,
-            borderRadius: BorderRadius.circular(14),
+            shape: BoxShape.circle,
+            border: Border.all(color: over ? _warn : _go, width: 4),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
-                blurRadius: 8,
+                color: (over ? _warn : _go).withValues(alpha: 0.3),
+                blurRadius: 16,
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_navigating)
-                Text(_formatETA(),
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900))
-              else
-                Text(_fmtKm(_route!.distance),
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
-              const SizedBox(height: 2),
-              Text(_navigating ? '$min min' : _fmtKm(rem),
-                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
-            ],
-          ),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Text('${_speedKmh.round()}',
+                style: TextStyle(
+                    color: over ? _warn : Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.w900)),
+            Text(_miles ? 'mph' : 'km/h',
+                style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+          ]),
         ),
-      const Spacer(),
-      FloatingActionButton(
-        backgroundColor: _navigating ? _warn : _go,
-        elevation: 6,
-        onPressed: _route == null ? null : _startStop,
-        child: Icon(_navigating ? Icons.close : Icons.navigation, color: Colors.black, size: 28),
-      ),
+        const SizedBox(width: 12),
+
+        // ETA + Eco (center)
+        if (_route != null)
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _panel,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _panelLight, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_navigating) ...[
+                    Row(children: [
+                      Icon(Icons.schedule, color: _go, size: 16),
+                      const SizedBox(width: 6),
+                      Text(_formatETA(),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+                      const Spacer(),
+                      Text('$min min',
+                          style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                    ]),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Icon(Icons.eco, color: ecoColor, size: 14),
+                      const SizedBox(width: 6),
+                      Text(_formatEcodrivingScore(),
+                          style: TextStyle(color: ecoColor, fontSize: 13, fontWeight: FontWeight.w700)),
+                      const SizedBox(width: 4),
+                      Text('${_ecodrivingScore.toStringAsFixed(0)}%',
+                          style: TextStyle(color: ecoColor.withValues(alpha: 0.7), fontSize: 12)),
+                    ]),
+                  ] else ...[
+                    Text(_fmtKm(_route!.distance),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 4),
+                    Text(_fmtKm(rem),
+                        style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(width: 12),
+
+        // Start/Stop (right)
+        FloatingActionButton(
+          backgroundColor: _navigating ? _warn : _go,
+          elevation: 8,
+          onPressed: _route == null ? null : _startStop,
+          child: Icon(_navigating ? Icons.close : Icons.navigation, color: Colors.black, size: 30),
+        ),
+      ]),
     ]);
   }
 
