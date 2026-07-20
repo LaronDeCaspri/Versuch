@@ -395,7 +395,8 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
 
   Future<void> _saveRoute() async {
     if (_route == null) return;
-    final name = '${_search.text} - ${DateTime.now().format()}';
+    final now = DateTime.now();
+    final name = '${_search.text} - ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     _savedRoutes.add(name);
     _prefs.setStringList('saved_routes', _savedRoutes);
   }
