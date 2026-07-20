@@ -626,6 +626,9 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
 
           if (_status.isNotEmpty) _statusPill(),
 
+          // Pre-navigation summary
+          if (!_navigating && _route != null && _showPreNavSummary()) _preNavSummary(),
+
           // Alt routes before start
           if (!_navigating && _alts.length > 1) _altBar(),
 
@@ -1176,30 +1179,169 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
   Widget _lanePanel(Maneuver man) {
     return Container(
       margin: const EdgeInsets.only(top: 6),
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
         color: _panel,
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _go.withValues(alpha: 0.3), width: 1),
+        boxShadow: [
+          BoxShadow(color: _go.withValues(alpha: 0.1), blurRadius: 8),
+        ],
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          for (final ln in man.lanes)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: Container(
-                width: 34,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: ln.valid ? _go.withValues(alpha: 0.18) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: ln.valid ? _go : Colors.white24, width: ln.valid ? 2 : 1),
+          Text('${_t('lanes')} · ${man.lanes.where((l) => l.valid).length}/${man.lanes.length}',
+              style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < man.lanes.length; i++)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Container(
+                    width: 38,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: man.lanes[i].valid ? _go.withValues(alpha: 0.2) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: man.lanes[i].valid ? _go : Colors.white24,
+                          width: man.lanes[i].valid ? 2.5 : 1.5),
+                      boxShadow: man.lanes[i].valid
+                          ? [BoxShadow(color: _go.withValues(alpha: 0.3), blurRadius: 6)]
+                          : [],
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(_iconFor(man.lanes[i].arrow),
+                            color: man.lanes[i].valid ? _go : Colors.white38, size: 20),
+                        if (man.lanes[i].valid)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Container(
+                              width: 4,
+                              height: 4,
+                              decoration: BoxDecoration(color: _go, shape: BoxShape.circle),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-                child: Icon(_iconFor(ln.arrow),
-                    color: ln.valid ? _go : Colors.white38, size: 22),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _showPreNavSummary() {
+    // Show summary if route just loaded and haven't started yet
+    return _alts.isNotEmpty && !_navigating && _navigationStartTime == null;
+  }
+
+  Widget _preNavSummary() {
+    final r = _route!;
+    final toll = _estimateTolls(r);
+    final fuel = _estimateFuel(r);
+    final hazardCount = _hazards.length;
+
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+      child: GestureDetector(
+        onTap: () {}, // Prevent taps from going through
+        child: Container(
+          color: Colors.black54,
+          child: Center(
+            child: Material(
+              color: _panel,
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('${_t('routeSummary')}',
+                          style: const TextStyle(color: _go, fontSize: 20, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 18),
+                      _summaryRow('Duration', '${(r.duration / 60).round()} min', _go),
+                      _summaryRow('Distance', _fmtKm(r.distance), Colors.white),
+                      _summaryRow('Turns', '${r.maneuvers.length}', Colors.blue),
+                      if (toll > 0) _summaryRow('Tolls', '~${toll.toStringAsFixed(0)} SAR', _warn),
+                      _summaryRow('Fuel', '~${fuel.toStringAsFixed(1)}L', Colors.orange),
+                      if (hazardCount > 0)
+                        _summaryRow('Hazards', '$hazardCount ahead', Colors.orange),
+                      _summaryRow('Speed Cameras', '${_cameras.length} on route', _warn),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _go,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: () {
+                            _startStop();
+                          },
+                          child: Text(_t('startNavigation'),
+                              style: const TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.white24),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _alts = [];
+                            });
+                          },
+                          child: Text(_t('cancel'),
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _summaryRow(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Text(value,
+                style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+          ),
         ],
       ),
     );
@@ -1676,6 +1818,12 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'fuel': 'Kraftstoff',
       'tolls': 'Mautgebühren',
       'parking': 'Parken',
+      'routeSummary': 'Routenzusammenfassung',
+      'startNavigation': 'Navigation starten',
+      'cancel': 'Abbrechen',
+      'turns': 'Abbiegungen',
+      'hazards': 'Gefahren',
+      'speedCameras': 'Blitzer',
     },
     'en': {
       'where': 'Where to? (address or place)',
@@ -1716,6 +1864,12 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'fuel': 'Fuel',
       'tolls': 'Tolls',
       'parking': 'Parking',
+      'routeSummary': 'Route summary',
+      'startNavigation': 'Start navigation',
+      'cancel': 'Cancel',
+      'turns': 'Turns',
+      'hazards': 'Hazards',
+      'speedCameras': 'Speed cameras',
     },
     'ar': {
       'where': 'إلى أين؟ (عنوان أو مكان)',
@@ -1756,6 +1910,12 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'fuel': 'الوقود',
       'tolls': 'الرسوم',
       'parking': 'مواقف السيارات',
+      'routeSummary': 'ملخص المسار',
+      'startNavigation': 'ابدأ التنقل',
+      'cancel': 'إلغاء',
+      'turns': 'الانعطافات',
+      'hazards': 'المخاطر',
+      'speedCameras': 'كاميرات السرعة',
     },
   };
 
