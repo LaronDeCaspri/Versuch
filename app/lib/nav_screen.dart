@@ -575,6 +575,21 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
                 userAgentPackageName: 'com.masar.app',
               ),
               PolylineLayer(polylines: _routeLines()),
+
+              // Hazard markers
+              MarkerLayer(markers: [
+                for (final h in _hazards.where((h) {
+                  if (_pos == null) return false;
+                  return _distance.as(LengthUnit.Meter, _pos!, h.location) < 3000;
+                }))
+                  Marker(
+                    point: h.location,
+                    width: 32,
+                    height: 32,
+                    child: _hazardMarker(h),
+                  ),
+              ]),
+
               if (_showCams)
                 MarkerLayer(markers: [
                   for (final c in _cameras)
@@ -704,8 +719,42 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
           color: _warn,
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [BoxShadow(color: Color(0x80FF4D5E), blurRadius: 8)],
         ),
         child: const Icon(Icons.camera_alt, color: Colors.white, size: 14),
+      );
+
+  Widget _hazardMarker(Hazard h) => Container(
+        decoration: BoxDecoration(
+          color: h.type == 'accident'
+              ? Colors.red
+              : h.type == 'construction'
+                  ? Colors.orange
+                  : h.type == 'slowTraffic'
+                      ? Colors.amber
+                      : Colors.orange,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: h.type == 'accident'
+                  ? Colors.red.withValues(alpha: 0.5)
+                  : Colors.orange.withValues(alpha: 0.3),
+              blurRadius: 8,
+            ),
+          ],
+        ),
+        child: Icon(
+          h.type == 'accident'
+              ? Icons.warning
+              : h.type == 'construction'
+                  ? Icons.construction
+                  : h.type == 'slowTraffic'
+                      ? Icons.traffic
+                      : Icons.warning_amber,
+          color: Colors.white,
+          size: 16,
+        ),
       );
 
   Widget _speedLimitSign() {
@@ -1186,13 +1235,17 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
           for (var i = 0; i < _alts.length; i++)
             GestureDetector(
               onTap: () => _selectAlt(i),
+              onLongPress: () => _showRouteDetails(i),
               child: Container(
                 margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: _panel,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: i == _sel ? _go : Colors.white24, width: 2),
+                  boxShadow: i == _sel
+                      ? [BoxShadow(color: _go.withValues(alpha: 0.3), blurRadius: 8)]
+                      : [],
                 ),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Text('${(_alts[i].duration / 60).round()} ${_t('min')}',
@@ -1202,12 +1255,98 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
                           fontSize: 16)),
                   Text(_fmtKm(_alts[i].distance),
                       style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                  if (i == _sel)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Container(
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(color: _go, shape: BoxShape.circle),
+                      ),
+                    ),
                 ]),
               ),
             ),
         ]),
       ),
     );
+  }
+
+  void _showRouteDetails(int routeIndex) {
+    final route = _alts[routeIndex];
+    final tollEstimate = _estimateTolls(route);
+    final fuelEstimate = _estimateFuel(route);
+    final parkingDifficulty = _estimateParkingDifficulty(route.points.last);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _panel,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Directionality(
+        textDirection: _rtl ? TextDirection.rtl : TextDirection.ltr,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('${_t('routeDetails')} #${routeIndex + 1}',
+                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 16),
+            _detailRow('Time', '${(route.duration / 60).round()} minutes', _go),
+            _detailRow('Distance', _fmtKm(route.distance), Colors.white),
+            _detailRow('Tolls', tollEstimate > 0 ? '~${tollEstimate.toStringAsFixed(0)} SAR' : 'None', _warn),
+            _detailRow('Fuel', '~${fuelEstimate.toStringAsFixed(1)}L', Colors.orange),
+            _detailRow('Parking', parkingDifficulty, Colors.blue),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: _go),
+                onPressed: () {
+                  Navigator.pop(context);
+                  _selectAlt(routeIndex);
+                },
+                child: Text(_t('selectRoute'),
+                    style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(children: [
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+        const Spacer(),
+        Text(value,
+            style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+
+  double _estimateTolls(RouteResult route) {
+    // Simulated toll estimation based on route distance
+    // In Saudi Arabia, tolls are ~0.5 SAR per km on saher highways
+    if (route.distance > 50000) return (route.distance / 1000) * 0.5;
+    return 0;
+  }
+
+  double _estimateFuel(RouteResult route) {
+    // Estimate fuel consumption: ~7L per 100km
+    return (route.distance / 1000) * 0.07;
+  }
+
+  String _estimateParkingDifficulty(LatLng location) {
+    // Simulate parking difficulty based on location
+    // In real app, would use OSM data or parking APIs
+    final hash = location.latitude.toString().hashCode + location.longitude.toString().hashCode;
+    if (hash % 5 == 0) return 'Easy';
+    if (hash % 5 == 1) return 'Moderate';
+    if (hash % 5 == 2) return 'Difficult';
+    return 'Unknown';
   }
 
   Widget _camWarnBadge() {
@@ -1532,6 +1671,11 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'minRemaining': 'Min',
       'destination': 'Ziel',
       'stopped': 'Route beendet',
+      'routeDetails': 'Routendetails',
+      'selectRoute': 'Route auswählen',
+      'fuel': 'Kraftstoff',
+      'tolls': 'Mautgebühren',
+      'parking': 'Parken',
     },
     'en': {
       'where': 'Where to? (address or place)',
@@ -1567,6 +1711,11 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'minRemaining': 'min',
       'destination': 'destination',
       'stopped': 'Route stopped',
+      'routeDetails': 'Route details',
+      'selectRoute': 'Select route',
+      'fuel': 'Fuel',
+      'tolls': 'Tolls',
+      'parking': 'Parking',
     },
     'ar': {
       'where': 'إلى أين؟ (عنوان أو مكان)',
@@ -1602,6 +1751,11 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'minRemaining': 'دقيقة',
       'destination': 'الوجهة',
       'stopped': 'توقفت المسار',
+      'routeDetails': 'تفاصيل المسار',
+      'selectRoute': 'اختر المسار',
+      'fuel': 'الوقود',
+      'tolls': 'الرسوم',
+      'parking': 'مواقف السيارات',
     },
   };
 
