@@ -60,6 +60,26 @@ class Camera {
   Camera(this.location, this.maxspeed);
 }
 
+/// Gefahrenmeldung (Hazard) - Unfälle, Staus, Baustellen, Hindernisse
+class Hazard {
+  final LatLng location;
+  final String type; // 'accident', 'slowTraffic', 'construction', 'debris'
+  final String? description;
+  final DateTime reported;
+  Hazard(this.location, this.type, this.description, this.reported);
+}
+
+/// Segment einer Route mit erweiterten Informationen
+class RouteSegment {
+  final LatLng start;
+  final LatLng end;
+  final double distance; // Meter
+  final double duration; // Sekunden
+  final int? speedLimit; // km/h
+  final String roadType; // 'motorway', 'trunk', 'primary', 'secondary', 'residential'
+  RouteSegment(this.start, this.end, this.distance, this.duration, this.speedLimit, this.roadType);
+}
+
 /// Kostenlose Dienste: OSRM (Routing inkl. Spuren/Alternativen), Nominatim
 /// (Adress-Suche) und Overpass (Blitzer) – alle OpenStreetMap.
 class NavService {

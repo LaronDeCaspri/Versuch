@@ -66,6 +66,17 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
 
   late AnimationController _speedLimitAnimController;
   late Animation<double> _speedLimitAnim;
+  late AnimationController _turnPreviewAnimController;
+  late Animation<double> _turnPreviewAnim;
+
+  // Advanced features
+  List<Hazard> _hazards = [];
+  bool _showTurnPreview = true;
+  bool _showSpeedProfile = false;
+  int _routePreference = 0; // 0=fastest, 1=shortest, 2=scenic
+  Timer? _etaUpdateTimer;
+  DateTime? _navigationStartTime;
+  double _distanceTraveled = 0;
 
   RouteResult? get _route => (_alts.isNotEmpty && _sel < _alts.length) ? _alts[_sel] : null;
   bool get _isDarkTheme => _view == ViewMode.dark || _shouldAutoNightMode();
@@ -78,7 +89,10 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     _initPrefs();
     _speedLimitAnimController = AnimationController(duration: const Duration(milliseconds: 600), vsync: this);
     _speedLimitAnim = Tween<double>(begin: 1.0, end: 1.0).animate(_speedLimitAnimController);
+    _turnPreviewAnimController = AnimationController(duration: const Duration(milliseconds: 800), vsync: this);
+    _turnPreviewAnim = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _turnPreviewAnimController, curve: Curves.easeOutQuart));
     _initLocation();
+    _loadSimulatedHazards();
   }
 
   Future<void> _initPrefs() async {
@@ -106,7 +120,9 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     _search.dispose();
     _suggestTimer?.cancel();
     _rerouteTimer?.cancel();
+    _etaUpdateTimer?.cancel();
     _speedLimitAnimController.dispose();
+    _turnPreviewAnimController.dispose();
     super.dispose();
   }
 
@@ -354,15 +370,27 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       final man = r.maneuvers[_nextMan];
       final d = _distance.as(LengthUnit.Meter, ll, man.location);
       final instr = _man(man.key);
-      if (d < 60 && !_spoken.contains(_nextMan * 10 + 3)) {
+      final nextStreet = man.name.isNotEmpty ? man.name : '';
+
+      // Multiple guidance callouts at different distances
+      if (d < 30 && !_spoken.contains(_nextMan * 10 + 4)) {
+        _spoken.add(_nextMan * 10 + 4);
+        final nextInstr = _nextMan + 1 < r.maneuvers.length
+            ? _man(r.maneuvers[_nextMan + 1].key)
+            : _t('destination');
+        _speak('${_t('now')} $instr${nextStreet.isNotEmpty ? ' onto ${nextStreet}' : ''}. ${_t('then')} $nextInstr');
+      } else if (d < 100 && !_spoken.contains(_nextMan * 10 + 3)) {
         _spoken.add(_nextMan * 10 + 3);
-        _speak('${_t('now')} $instr');
-      } else if (d < 250 && !_spoken.contains(_nextMan * 10 + 2)) {
+        _speak('${_round(d)}${_miles ? ' yards' : ' meters'} $instr');
+      } else if (d < 300 && !_spoken.contains(_nextMan * 10 + 2)) {
         _spoken.add(_nextMan * 10 + 2);
         _speak(_inPhrase(d, instr));
-      } else if (d < 700 && !_spoken.contains(_nextMan * 10 + 1)) {
+      } else if (d < 800 && !_spoken.contains(_nextMan * 10 + 1)) {
         _spoken.add(_nextMan * 10 + 1);
         _speak(_inPhrase(d, instr));
+      } else if (d < 1500 && !_spoken.contains(_nextMan * 10)) {
+        _spoken.add(_nextMan * 10);
+        _speak('${_t('prepareFor')} $instr');
       }
     }
     _updateCameraWarning(ll);
@@ -408,6 +436,46 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     setState(() => _navigating = false);
     _map.rotate(0);
     _speak(_man('arrive'));
+    _etaUpdateTimer?.cancel();
+  }
+
+  void _loadSimulatedHazards() {
+    // Simulate some hazards - in real app this would come from Waze-like crowdsourcing
+    _hazards = [
+      Hazard(const LatLng(24.7455, 46.6881), 'slowTraffic', 'Heavy traffic ahead', DateTime.now()),
+      Hazard(const LatLng(24.7200, 46.6700), 'construction', 'Road work on King Fahd Rd', DateTime.now()),
+    ];
+  }
+
+  List<Maneuver> _getUpcomingManeuvers(int count) {
+    final r = _route;
+    if (r == null) return [];
+    final start = _nextMan;
+    final end = (start + count).clamp(0, r.maneuvers.length);
+    return r.maneuvers.sublist(start, end);
+  }
+
+  double _distanceToManeuver(int maneuverIndex) {
+    final r = _route;
+    if (r == null || _pos == null || maneuverIndex >= r.maneuvers.length) return 0;
+    return _distance.as(LengthUnit.Meter, _pos!, r.maneuvers[maneuverIndex].location);
+  }
+
+  String _nextStreetName() {
+    final r = _route;
+    if (r == null || _nextMan + 1 >= r.maneuvers.length) return '';
+    final nextMan = r.maneuvers[_nextMan + 1];
+    return nextMan.name.isNotEmpty ? nextMan.name : _man(nextMan.key);
+  }
+
+  void _startNavigation() {
+    _navigationStartTime = DateTime.now();
+    _distanceTraveled = 0;
+    _etaUpdateTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (_navigating && _pos != null) {
+        setState(() {});
+      }
+    });
   }
 
   void _startStop() {
@@ -418,12 +486,14 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     });
     if (_navigating) {
       _speak(_t('started'));
+      _startNavigation();
       if (_pos != null) {
         _map.move(_pos!, 17);
         _updateGuidance(_pos!);
       }
     } else {
       _map.rotate(0);
+      _etaUpdateTimer?.cancel();
     }
   }
 
@@ -564,11 +634,29 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
             ),
           ),
 
-          // Speed limit sign + camera warning (during navigation)
+          // Speed limit sign + camera warning + hazards (during navigation)
           if (_navigating) ...[
             if (_currentSpeedLimit() != null) _speedLimitSign(),
             if (_nearCam != null) _camWarnBadge(),
+            ..._hazardWarnings(),
           ],
+
+          // Turn-by-turn preview (during navigation)
+          if (_navigating && _showTurnPreview) _turnPreviewPanel(),
+
+          // Speed profile chart (optional, can be toggled)
+          if (_navigating && _showSpeedProfile) _speedProfileChart(),
+
+          // Navigation top bar with detailed info
+          if (_navigating)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: _navInfoBar(),
+              ),
+            ),
 
           // Bottom: Speedometer + ETA + Start/Stop
           SafeArea(
@@ -653,6 +741,217 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _hazardWarnings() {
+    final warnings = <Widget>[];
+    for (final h in _hazards.where((h) {
+      if (_pos == null) return false;
+      final d = _distance.as(LengthUnit.Meter, _pos!, h.location);
+      return d < 2000; // Show hazards within 2km
+    })) {
+      final d = _distance.as(LengthUnit.Meter, _pos!, h.location);
+      if (d < 500) { // Show badge for hazards < 500m
+        warnings.add(
+          Positioned(
+            left: 12,
+            bottom: 168,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: h.type == 'accident' ? Colors.red : Colors.orange,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 8)],
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(
+                  h.type == 'accident'
+                      ? Icons.warning
+                      : h.type == 'construction'
+                          ? Icons.construction
+                          : h.type == 'slowTraffic'
+                              ? Icons.traffic
+                              : Icons.warning_amber,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                Text('${_round(d)}m ${h.type}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+              ]),
+            ),
+          ),
+        );
+      }
+    }
+    return warnings;
+  }
+
+  Widget _turnPreviewPanel() {
+    final upcoming = _getUpcomingManeuvers(4);
+    if (upcoming.isEmpty) return const SizedBox.shrink();
+
+    return Positioned(
+      left: 10,
+      right: 10,
+      bottom: 100,
+      child: ScaleTransition(
+        scale: _turnPreviewAnim,
+        child: Material(
+          color: _panel,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${_t('nextTurns')} (${upcoming.length})',
+                    style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                ...upcoming.map((man) {
+                  final d = _distanceToManeuver(upcoming.indexOf(man) + _nextMan);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(children: [
+                      Icon(_iconFor(man.key), color: _go, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${_round(d)}m · ${man.name.isNotEmpty ? man.name : _man(man.key)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                            if (upcoming.indexOf(man) < upcoming.length - 1)
+                              Text('then ${_man(upcoming[upcoming.indexOf(man) + 1].key)}',
+                                  style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                          ],
+                        ),
+                      ),
+                    ]),
+                  );
+                }).toList(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _speedProfileChart() {
+    final r = _route;
+    if (r == null || r.limits.isEmpty) return const SizedBox.shrink();
+
+    return Positioned(
+      top: 120,
+      left: 10,
+      right: 10,
+      height: 60,
+      child: Material(
+        color: _panelLight.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            children: [
+              const Icon(Icons.speed, color: _go, size: 18),
+              const SizedBox(width: 6),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < r.limits.length; i += 5)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Container(
+                            width: 20,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: (r.limits[i] ?? 0) > 100
+                                  ? Colors.green
+                                  : (r.limits[i] ?? 0) > 50
+                                      ? _go
+                                      : _warn,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _navInfoBar() {
+    final r = _route;
+    if (r == null || _pos == null) return const SizedBox.shrink();
+
+    final remaining = _remainingMeters(_pos!);
+    final min = (remaining / 1000 / 50 * 60).clamp(0, 999).round();
+    final distTraveled = _cum[_nearestIndex(_pos!)];
+    final totalDist = r.distance;
+
+    return Container(
+      color: _panel.withValues(alpha: 0.95),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$min ${_t('minRemaining')}',
+                    style: const TextStyle(color: _go, fontSize: 14, fontWeight: FontWeight.w800)),
+                Text('${_fmtKm(remaining)} remaining',
+                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
+              ],
+            ),
+            const Spacer(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text('${_speedKmh.round()} / ${_currentSpeedLimit() ?? '?'} km/h',
+                      style: TextStyle(
+                          color: _speedKmh > (_currentSpeedLimit() ?? 200) ? _warn : Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700)),
+                  LinearProgressIndicator(
+                    value: (_speedKmh / (_currentSpeedLimit() ?? 120)).clamp(0, 1),
+                    minHeight: 2,
+                    backgroundColor: Colors.white12,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                        _speedKmh > (_currentSpeedLimit() ?? 120) ? _warn : _go),
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('${(distTraveled / totalDist * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(color: _go, fontSize: 14, fontWeight: FontWeight.w800)),
+                Text('${_fmtKm(distTraveled)} / ${_fmtKm(totalDist)}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -1227,6 +1526,12 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'setWork': 'Arbeit speichern',
       'homeSaved': 'Zuhause gespeichert',
       'workSaved': 'Arbeit gespeichert',
+      'prepareFor': 'Vorbereitung auf',
+      'then': 'dann',
+      'nextTurns': 'Nächste Abbiegungen',
+      'minRemaining': 'Min',
+      'destination': 'Ziel',
+      'stopped': 'Route beendet',
     },
     'en': {
       'where': 'Where to? (address or place)',
@@ -1256,6 +1561,12 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'setWork': 'Save work',
       'homeSaved': 'Home saved',
       'workSaved': 'Work saved',
+      'prepareFor': 'Prepare for',
+      'then': 'then',
+      'nextTurns': 'Next turns',
+      'minRemaining': 'min',
+      'destination': 'destination',
+      'stopped': 'Route stopped',
     },
     'ar': {
       'where': 'إلى أين؟ (عنوان أو مكان)',
@@ -1285,6 +1596,12 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'setWork': 'حفظ العمل',
       'homeSaved': 'تم حفظ المنزل',
       'workSaved': 'تم حفظ العمل',
+      'prepareFor': 'استعد ل',
+      'then': 'ثم',
+      'nextTurns': 'الانعطافات التالية',
+      'minRemaining': 'دقيقة',
+      'destination': 'الوجهة',
+      'stopped': 'توقفت المسار',
     },
   };
 
