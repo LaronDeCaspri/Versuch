@@ -1968,6 +1968,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
   void _openMenu() {
     showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setSheet) {
           void set(VoidCallback fn) {
@@ -1975,32 +1976,37 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
             setState(fn);
           }
 
-          return Directionality(
-            textDirection: _rtl ? TextDirection.rtl : TextDirection.ltr,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
-              child: SingleChildScrollView(
-                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 14),
-                      decoration: BoxDecoration(
-                          color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
-                  Text(_t('settings'),
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 14),
-                  Text(_t('language'), style: const TextStyle(color: Colors.white54, fontSize: 13)),
-                  const SizedBox(height: 6),
-                  Row(children: [
-                    _langChip('de', 'Deutsch', set),
-                    _langChip('en', 'English', set),
-                    _langChip('ar', 'العربية', set),
-                  ]),
+          return Dialog(
+            backgroundColor: _panel,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            child: Directionality(
+              textDirection: _rtl ? TextDirection.rtl : TextDirection.ltr,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: SingleChildScrollView(
+                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Text(_t('settings'),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white54),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ]),
+                    const SizedBox(height: 20),
+
+                    // Language (kompakt)
+                    Text(_t('language'), style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      _langChip('de', 'DE', set),
+                      const SizedBox(width: 8),
+                      _langChip('en', 'EN', set),
+                      const SizedBox(width: 8),
+                      _langChip('ar', 'AR', set),
+                    ]),
                   const SizedBox(height: 16),
                   _toggle(_t('voice'), _voice, (v) {
                     set(() => _voice = v);
@@ -2100,8 +2106,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
 
   Widget _langChip(String code, String label, void Function(VoidCallback) set) {
     final active = _lang == code;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
+    return Expanded(
       child: GestureDetector(
         onTap: () => set(() {
           _lang = code;
@@ -2109,16 +2114,19 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
           _savePref('language', code);
         }),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: active ? _go.withValues(alpha: 0.16) : Colors.white10,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: active ? _go : Colors.white24),
+            color: active ? _go.withValues(alpha: 0.15) : Colors.white10,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: active ? _go : Colors.white20, width: 1.5),
           ),
-          child: Text(label,
-              style: TextStyle(
-                  color: active ? _go : Colors.white,
-                  fontWeight: active ? FontWeight.w700 : FontWeight.w500)),
+          child: Center(
+            child: Text(label,
+                style: TextStyle(
+                    color: active ? _go : Colors.white70,
+                    fontSize: 12,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w600)),
+          ),
         ),
       ),
     );
