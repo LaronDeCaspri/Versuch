@@ -775,11 +775,10 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
             ),
             children: [
               TileLayer(
-                urlTemplate: dark
-                    ? 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png'
-                    : 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png',
+                urlTemplate: _lang == 'ar'
+                    ? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' // OSM für Arabisch (zeigt lokale Namen)
+                    : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', // ESRI für Englisch (englische Labels)
                 userAgentPackageName: 'com.masar.app',
-                subdomains: const ['a', 'b', 'c'],
                 tileSize: 256,
               ),
               PolylineLayer(polylines: _routeLines()),
