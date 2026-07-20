@@ -261,9 +261,9 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
 
   // ---------- Route ----------
   Future<void> _computeRoute(LatLng to, {String? query}) async {
-    if (_pos == null) return;
+    final from = _pos ?? const LatLng(24.7136, 46.6753); // Riad fallback
     setState(() => _status = _t('calcRoute'));
-    final list = await NavService.routes(_pos!, to);
+    final list = await NavService.routes(from, to);
     if (list.isEmpty) {
       setState(() => _status = _t('noRoute'));
       return;
@@ -1949,11 +1949,8 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
 
   // ---------- Menü ----------
   void _openMenu() {
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      backgroundColor: _panel,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => StatefulBuilder(
         builder: (ctx, setSheet) {
           void set(VoidCallback fn) {
