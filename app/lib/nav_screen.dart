@@ -492,6 +492,64 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     _map.rotate(0);
     _speak(_man('arrive'));
     _etaUpdateTimer?.cancel();
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _showNavigationStats();
+    });
+  }
+
+  void _showNavigationStats() {
+    if (!mounted || _navigationStartTime == null) return;
+    final totalTime = DateTime.now().difference(_navigationStartTime!).inMinutes;
+    final totalDist = _route!.distance;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Directionality(
+        textDirection: _rtl ? TextDirection.rtl : TextDirection.ltr,
+        child: AlertDialog(
+          backgroundColor: _panel,
+          title: Text(_t('navigationComplete'),
+              style: const TextStyle(color: _go, fontWeight: FontWeight.w800)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _statLine('Duration', '$totalTime minutes', Colors.white),
+                _statLine('Distance', _fmtKm(totalDist), Colors.white),
+                _statLine('Avg Speed', '${(totalDist / 1000 / (totalTime / 60)).toStringAsFixed(1)} km/h',
+                    Colors.blue),
+                _statLine('Eco Score', '${_ecodrivingScore.toStringAsFixed(0)}% ${_formatEcodrivingScore()}',
+                    _ecodrivingScore >= 80 ? _go : _warn),
+                _statLine('Speed Violations', '$_speedOverLimitCount times', _warn),
+                _statLine('Turns', '${_route!.maneuvers.length}', Colors.white),
+                _statLine('Cameras Passed', '${_cameras.length}', Colors.orange),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(_t('close'), style: const TextStyle(color: _go)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statLine(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          const Spacer(),
+          Text(value,
+              style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
   }
 
   void _loadSimulatedHazards() {
@@ -1009,56 +1067,110 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     final distTraveled = _cum[_nearestIndex(_pos!)];
     final totalDist = r.distance;
 
-    return Container(
-      color: _panel.withValues(alpha: 0.95),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          children: [
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('$min ${_t('minRemaining')}',
-                    style: const TextStyle(color: _go, fontSize: 14, fontWeight: FontWeight.w800)),
-                Text('${_fmtKm(remaining)} remaining',
-                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
-              ],
-            ),
-            const Spacer(),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Column(
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Container(
+        color: _panel.withValues(alpha: 0.95),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('$min ${_t('minRemaining')}',
+                      style: const TextStyle(color: _go, fontSize: 14, fontWeight: FontWeight.w800)),
+                  Text('${_fmtKm(remaining)} remaining',
+                      style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                ],
+              ),
+              const SizedBox(width: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text('${_speedKmh.round()} / ${_currentSpeedLimit() ?? '?'} km/h',
+                        style: TextStyle(
+                            color: _speedKmh > (_currentSpeedLimit() ?? 200) ? _warn : Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700)),
+                    Container(
+                      width: 50,
+                      height: 2,
+                      margin: const EdgeInsets.only(top: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.white12,
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          width: 50 * (_speedKmh / (_currentSpeedLimit() ?? 120)).clamp(0, 1),
+                          height: 2,
+                          decoration: BoxDecoration(
+                            color: _speedKmh > (_currentSpeedLimit() ?? 120) ? _warn : _go,
+                            borderRadius: BorderRadius.circular(1),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 20),
+              Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text('${_speedKmh.round()} / ${_currentSpeedLimit() ?? '?'} km/h',
-                      style: TextStyle(
-                          color: _speedKmh > (_currentSpeedLimit() ?? 200) ? _warn : Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700)),
-                  LinearProgressIndicator(
-                    value: (_speedKmh / (_currentSpeedLimit() ?? 120)).clamp(0, 1),
-                    minHeight: 2,
-                    backgroundColor: Colors.white12,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                        _speedKmh > (_currentSpeedLimit() ?? 120) ? _warn : _go),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _ecodrivingScore >= 80
+                          ? _go.withValues(alpha: 0.2)
+                          : _ecodrivingScore >= 60
+                              ? Colors.orange.withValues(alpha: 0.2)
+                              : _warn.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: _ecodrivingScore >= 80
+                            ? _go
+                            : _ecodrivingScore >= 60
+                                ? Colors.orange
+                                : _warn,
+                      ),
+                    ),
+                    child: Text('${_ecodrivingScore.toStringAsFixed(0)}% Eco',
+                        style: TextStyle(
+                            color: _ecodrivingScore >= 80
+                                ? _go
+                                : _ecodrivingScore >= 60
+                                    ? Colors.orange
+                                    : _warn,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700)),
                   ),
+                  Text('${_speedOverLimitCount} violations',
+                      style: const TextStyle(color: Colors.white54, fontSize: 9)),
                 ],
               ),
-            ),
-            const Spacer(),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text('${(distTraveled / totalDist * 100).toStringAsFixed(0)}%',
-                    style: const TextStyle(color: _go, fontSize: 14, fontWeight: FontWeight.w800)),
-                Text('${_fmtKm(distTraveled)} / ${_fmtKm(totalDist)}',
-                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
-              ],
-            ),
-          ],
+              const SizedBox(width: 20),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('${(distTraveled / totalDist * 100).toStringAsFixed(0)}%',
+                      style: const TextStyle(color: _go, fontSize: 14, fontWeight: FontWeight.w800)),
+                  Text('${_fmtKm(distTraveled)} / ${_fmtKm(totalDist)}',
+                      style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                ],
+              ),
+              const SizedBox(width: 12),
+            ],
+          ),
         ),
       ),
     );
@@ -1884,6 +1996,8 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'ecodrivingScore': 'Eco-Driving Score',
       'saveRoute': 'Route speichern',
       'routeSaved': 'Route gespeichert',
+      'navigationComplete': 'Navigation abgeschlossen',
+      'close': 'Schließen',
     },
     'en': {
       'where': 'Where to? (address or place)',
@@ -1935,6 +2049,8 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'ecodrivingScore': 'Eco-driving score',
       'saveRoute': 'Save route',
       'routeSaved': 'Route saved',
+      'navigationComplete': 'Navigation completed',
+      'close': 'Close',
     },
     'ar': {
       'where': 'إلى أين؟ (عنوان أو مكان)',
@@ -1986,6 +2102,8 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'ecodrivingScore': 'درجة القيادة الاقتصادية',
       'saveRoute': 'حفظ المسار',
       'routeSaved': 'تم حفظ المسار',
+      'navigationComplete': 'اكتملت الملاحة',
+      'close': 'إغلاق',
     },
   };
 
