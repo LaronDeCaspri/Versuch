@@ -15,7 +15,7 @@ const _grey = Color(0x998890A8);
 const _panelLight = Color(0xFF15213C);
 
 /// Kartenansichten, die der Umschalt-Knopf durchwechselt.
-enum ViewMode { standard, headingUp, dark }
+enum ViewMode { standard, satellite, terrain, dark, transit }
 
 class NavScreen extends StatefulWidget {
   const NavScreen({super.key});
@@ -252,7 +252,7 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     else if (_speedKmh > 70) targetZoom = 16;
     else if (_speedKmh > 40) targetZoom = 16.5;
 
-    if (_view == ViewMode.headingUp) {
+    if (_navigating) {
       _map.moveAndRotate(ll, targetZoom, -_heading);
     } else {
       _map.move(ll, targetZoom);
@@ -650,9 +650,38 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     setState(() {
       _view = ViewMode.values[(_view.index + 1) % ViewMode.values.length];
     });
-    if (_view != ViewMode.headingUp) _map.rotate(0);
-    if (_view == ViewMode.headingUp && _navigating && _pos != null) {
-      _map.moveAndRotate(_pos!, _map.camera.zoom, -_heading);
+    _map.rotate(0);
+  }
+
+  String _getTileUrl() {
+    switch (_view) {
+      case ViewMode.satellite:
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+      case ViewMode.terrain:
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}';
+      case ViewMode.transit:
+        return 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/voyager/{z}/{x}/{y}.png';
+      case ViewMode.dark:
+        return 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/dark_all/{z}/{x}/{y}.png';
+      default: // standard
+        return _lang == 'ar'
+            ? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+            : 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/light_all/{z}/{x}/{y}.png';
+    }
+  }
+
+  IconData _viewIcon() {
+    switch (_view) {
+      case ViewMode.satellite:
+        return Icons.satellite;
+      case ViewMode.terrain:
+        return Icons.terrain;
+      case ViewMode.transit:
+        return Icons.train;
+      case ViewMode.dark:
+        return Icons.nightlight;
+      default:
+        return Icons.map;
     }
   }
 
@@ -775,10 +804,9 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
             ),
             children: [
               TileLayer(
-                urlTemplate: _lang == 'ar'
-                    ? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' // OSM für Arabisch (zeigt lokale Namen)
-                    : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', // ESRI für Englisch (englische Labels)
+                urlTemplate: _getTileUrl(),
                 userAgentPackageName: 'com.masar.app',
+                subdomains: const ['a', 'b', 'c'],
                 tileSize: 256,
               ),
               PolylineLayer(polylines: _routeLines()),
@@ -1270,16 +1298,6 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     );
   }
 
-  IconData _viewIcon() {
-    switch (_view) {
-      case ViewMode.headingUp:
-        return Icons.navigation;
-      case ViewMode.dark:
-        return Icons.dark_mode;
-      case ViewMode.standard:
-        return Icons.layers;
-    }
-  }
 
   // Search + Menu button
   Widget _searchBar() {
