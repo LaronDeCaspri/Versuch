@@ -77,6 +77,10 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
   Timer? _etaUpdateTimer;
   DateTime? _navigationStartTime;
   double _distanceTraveled = 0;
+  int _speedOverLimitCount = 0;
+  double _ecodrivingScore = 100.0;
+  List<String> _savedRoutes = [];
+  List<LatLng> _navigationHistory = [];
 
   RouteResult? get _route => (_alts.isNotEmpty && _sel < _alts.length) ? _alts[_sel] : null;
   bool get _isDarkTheme => _view == ViewMode.dark || _shouldAutoNightMode();
@@ -359,9 +363,49 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     return null;
   }
 
+  String _speedWarningCategory() {
+    final limit = _currentSpeedLimit();
+    if (limit == null) return 'normal';
+    final diff = _speedKmh - limit;
+    if (diff < 0) return 'safe';
+    if (diff <= 10) return 'slight';
+    if (diff <= 20) return 'moderate';
+    return 'dangerous';
+  }
+
+  void _updateEcodrivingScore() {
+    if (_navigationStartTime == null) return;
+    final limit = _currentSpeedLimit();
+    if (limit != null) {
+      if (_speedKmh > limit) {
+        _speedOverLimitCount++;
+        _ecodrivingScore = math.max(0, _ecodrivingScore - 0.5);
+      } else {
+        _ecodrivingScore = math.min(100, _ecodrivingScore + 0.1);
+      }
+    }
+  }
+
+  String _formatEcodrivingScore() {
+    if (_ecodrivingScore >= 80) return 'Excellent';
+    if (_ecodrivingScore >= 60) return 'Good';
+    if (_ecodrivingScore >= 40) return 'Fair';
+    return 'Poor';
+  }
+
+  Future<void> _saveRoute() async {
+    if (_route == null) return;
+    final name = '${_search.text} - ${DateTime.now().format()}';
+    _savedRoutes.add(name);
+    _prefs.setStringList('saved_routes', _savedRoutes);
+  }
+
   void _updateGuidance(LatLng ll) {
     final r = _route;
     if (r == null) return;
+
+    _updateEcodrivingScore();
+
     if (r.maneuvers.isNotEmpty) {
       while (_nextMan < r.maneuvers.length - 1 &&
           _distance.as(LengthUnit.Meter, ll, r.maneuvers[_nextMan].location) < 25) {
@@ -393,6 +437,17 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
         _speak('${_t('prepareFor')} $instr');
       }
     }
+
+    // Speed warning feedback
+    final category = _speedWarningCategory();
+    if (category == 'dangerous' && !_spoken.contains(-1)) {
+      _spoken.add(-1);
+      _speak(_t('slowDown'));
+    } else if (category == 'moderate' && !_spoken.contains(-2)) {
+      _spoken.add(-2);
+      _speak(_t('speedWarning'));
+    }
+
     _updateCameraWarning(ll);
     setState(() {});
     if (_remainingMeters(ll) < 25) _arrive();
@@ -1824,6 +1879,11 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'turns': 'Abbiegungen',
       'hazards': 'Gefahren',
       'speedCameras': 'Blitzer',
+      'slowDown': 'Bitte langsamer fahren, Sie überschreiten das Tempolimit deutlich',
+      'speedWarning': 'Sie nähern sich dem Tempolimit',
+      'ecodrivingScore': 'Eco-Driving Score',
+      'saveRoute': 'Route speichern',
+      'routeSaved': 'Route gespeichert',
     },
     'en': {
       'where': 'Where to? (address or place)',
@@ -1870,6 +1930,11 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'turns': 'Turns',
       'hazards': 'Hazards',
       'speedCameras': 'Speed cameras',
+      'slowDown': 'Please slow down, you are significantly exceeding the speed limit',
+      'speedWarning': 'You are approaching the speed limit',
+      'ecodrivingScore': 'Eco-driving score',
+      'saveRoute': 'Save route',
+      'routeSaved': 'Route saved',
     },
     'ar': {
       'where': 'إلى أين؟ (عنوان أو مكان)',
@@ -1916,6 +1981,11 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'turns': 'الانعطافات',
       'hazards': 'المخاطر',
       'speedCameras': 'كاميرات السرعة',
+      'slowDown': 'من فضلك قلل السرعة، أنت تتجاوز حد السرعة بشكل كبير',
+      'speedWarning': 'أنت تقترب من حد السرعة',
+      'ecodrivingScore': 'درجة القيادة الاقتصادية',
+      'saveRoute': 'حفظ المسار',
+      'routeSaved': 'تم حفظ المسار',
     },
   };
 
