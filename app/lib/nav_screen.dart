@@ -653,6 +653,96 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
     }
   }
 
+  void _showStatistics() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _panel,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Directionality(
+        textDirection: _rtl ? TextDirection.rtl : TextDirection.ltr,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                        color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                Text(_t('statistics'),
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 16),
+                _statCard('${_t('totalRoutes')}', '${_savedRoutes.length}', _go),
+                _statCard('Recent Searches', '${_recentSearches.length}', Colors.blue),
+                _statCard('Speed Cameras', '${_cameras.length}', _warn),
+                _statCard('Home/Work', _home != null && _work != null ? 'Both set' : 'Incomplete', Colors.orange),
+                const SizedBox(height: 12),
+                Text('${_t('recentSearches')}:',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                if (_recentSearches.isNotEmpty)
+                  Column(
+                    children: [
+                      for (final search in _recentSearches.take(5))
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Text('• $search',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        ),
+                    ],
+                  )
+                else
+                  Text('No recent searches',
+                      style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statCard(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _panelLight,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(label,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: color.withValues(alpha: 0.3)),
+              ),
+              child: Text(value,
+                  style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _zoom(double d) =>
       _map.move(_map.camera.center, (_map.camera.zoom + d).clamp(3.0, 19.0));
 
@@ -1843,6 +1933,20 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
                     _savePref('miles', v);
                   }),
                   const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: _panelLight),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showStatistics();
+                      },
+                      icon: const Icon(Icons.bar_chart, color: _go, size: 18),
+                      label: Text(_t('viewStatistics'),
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   Text(_t('quickAccess'), style: const TextStyle(color: Colors.white54, fontSize: 13)),
                   const SizedBox(height: 8),
                   Row(children: [
@@ -1998,6 +2102,10 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'routeSaved': 'Route gespeichert',
       'navigationComplete': 'Navigation abgeschlossen',
       'close': 'Schließen',
+      'statistics': 'Statistiken',
+      'viewStatistics': 'Statistiken anzeigen',
+      'totalRoutes': 'Gespeicherte Routen',
+      'recentSearches': 'Letzte Suchen',
     },
     'en': {
       'where': 'Where to? (address or place)',
@@ -2051,6 +2159,10 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'routeSaved': 'Route saved',
       'navigationComplete': 'Navigation completed',
       'close': 'Close',
+      'statistics': 'Statistics',
+      'viewStatistics': 'View statistics',
+      'totalRoutes': 'Saved routes',
+      'recentSearches': 'Recent searches',
     },
     'ar': {
       'where': 'إلى أين؟ (عنوان أو مكان)',
@@ -2104,6 +2216,10 @@ class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
       'routeSaved': 'تم حفظ المسار',
       'navigationComplete': 'اكتملت الملاحة',
       'close': 'إغلاق',
+      'statistics': 'الإحصائيات',
+      'viewStatistics': 'عرض الإحصائيات',
+      'totalRoutes': 'المسارات المحفوظة',
+      'recentSearches': 'عمليات البحث الأخيرة',
     },
   };
 
