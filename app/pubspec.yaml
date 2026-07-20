@@ -15,6 +15,7 @@ dependencies:
   geolocator: ^13.0.1        # echtes GPS
   flutter_tts: ^4.2.0        # Sprachansagen (DE/EN/AR)
   http: ^1.2.2               # Routing (OSRM) & Geocoding (Nominatim)
+  shared_preferences: ^2.3.2 # Einstellungen + Zuhause/Arbeit dauerhaft speichern
   # später: here_sdk (3D-Kreuzungen/Live-Verkehr), supabase_flutter (Konten/Community)
 
 dev_dependencies:

@@ -5,12 +5,14 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'services.dart';
 
 const _go = Color(0xFF25E39A);
 const _warn = Color(0xFFFF4D5E);
 const _panel = Color(0xF20C1426);
 const _grey = Color(0x998890A8);
+const _panelLight = Color(0xFF15213C);
 
 /// Kartenansichten, die der Umschalt-Knopf durchwechselt.
 enum ViewMode { standard, headingUp, dark }
@@ -21,7 +23,7 @@ class NavScreen extends StatefulWidget {
   State<NavScreen> createState() => _NavScreenState();
 }
 
-class _NavScreenState extends State<NavScreen> {
+class _NavScreenState extends State<NavScreen> with TickerProviderStateMixin {
   final MapController _map = MapController();
   final TextEditingController _search = TextEditingController();
   final FlutterTts _tts = FlutterTts();
@@ -42,27 +44,60 @@ class _NavScreenState extends State<NavScreen> {
   List<Camera> _cameras = [];
   Camera? _nearCam;
   double _camDist = 0;
+  Timer? _rerouteTimer;
+  bool _offRoute = false;
+  bool _rerouteInProgress = false;
 
   bool _navigating = false, _follow = true;
   List<Map<String, dynamic>> _suggest = [];
   Timer? _suggestTimer;
 
-  // Einstellungen
+  // Einstellungen + Persistenz
   String _lang = 'de';         // de | en | ar
   bool _voice = true;
   bool _showLanes = true;
   bool _showCams = true;
   bool _miles = false;
   ViewMode _view = ViewMode.standard;
+  late SharedPreferences _prefs;
+  LatLng? _home;
+  LatLng? _work;
+  List<String> _recentSearches = [];
+
+  late AnimationController _speedLimitAnimController;
+  late Animation<double> _speedLimitAnim;
 
   RouteResult? get _route => (_alts.isNotEmpty && _sel < _alts.length) ? _alts[_sel] : null;
+  bool get _isDarkTheme => _view == ViewMode.dark || _shouldAutoNightMode();
 
   @override
   void initState() {
     super.initState();
     _applyTtsLang();
     _tts.setSpeechRate(0.95);
+    _initPrefs();
+    _speedLimitAnimController = AnimationController(duration: const Duration(milliseconds: 600), vsync: this);
+    _speedLimitAnim = Tween<double>(begin: 1.0, end: 1.0).animate(_speedLimitAnimController);
     _initLocation();
+  }
+
+  Future<void> _initPrefs() async {
+    _prefs = await SharedPreferences.getInstance();
+    setState(() {
+      final homeLat = _prefs.getDouble('home_lat');
+      final homeLon = _prefs.getDouble('home_lon');
+      if (homeLat != null && homeLon != null) _home = LatLng(homeLat, homeLon);
+      final workLat = _prefs.getDouble('work_lat');
+      final workLon = _prefs.getDouble('work_lon');
+      if (workLat != null && workLon != null) _work = LatLng(workLat, workLon);
+      _recentSearches = _prefs.getStringList('recent_searches') ?? [];
+      _lang = _prefs.getString('language') ?? 'de';
+      _voice = _prefs.getBool('voice') ?? true;
+      _showLanes = _prefs.getBool('show_lanes') ?? true;
+      _showCams = _prefs.getBool('show_cams') ?? true;
+      _miles = _prefs.getBool('miles') ?? false;
+    });
+    _applyTtsLang();
   }
 
   @override
@@ -70,10 +105,18 @@ class _NavScreenState extends State<NavScreen> {
     _posSub?.cancel();
     _search.dispose();
     _suggestTimer?.cancel();
+    _rerouteTimer?.cancel();
+    _speedLimitAnimController.dispose();
     super.dispose();
   }
 
-  // ---------- Sprache ----------
+  // ---------- Sprache und Theme ----------
+  bool _shouldAutoNightMode() {
+    final now = DateTime.now();
+    // Zwischen 21:00 und 06:00 automatisch dunkel
+    return now.hour >= 21 || now.hour < 6;
+  }
+
   void _applyTtsLang() {
     _tts.setLanguage(_lang == 'ar' ? 'ar-SA' : (_lang == 'en' ? 'en-US' : 'de-DE'));
   }
@@ -86,6 +129,20 @@ class _NavScreenState extends State<NavScreen> {
 
   void _speak(String s) {
     if (_voice) _tts.speak(s);
+  }
+
+  void _savePref(String key, dynamic value) {
+    if (value is String) {
+      _prefs.setString(key, value);
+    } else if (value is bool) {
+      _prefs.setBool(key, value);
+    } else if (value is double) {
+      _prefs.setDouble(key, value);
+    } else if (value is int) {
+      _prefs.setInt(key, value);
+    } else if (value is List<String>) {
+      _prefs.setStringList(key, value);
+    }
   }
 
   // ---------- Standort ----------
@@ -123,25 +180,80 @@ class _NavScreenState extends State<NavScreen> {
     if (_navigating) {
       if (_follow) _recenterCamera(ll);
       _updateGuidance(ll);
+      _checkOffRoute(ll);
     }
   }
 
+  void _checkOffRoute(LatLng ll) {
+    final r = _route;
+    if (r == null) return;
+    final idx = _nearestIndex(ll);
+    final distToRoute = _distance.as(LengthUnit.Meter, ll, r.points[idx]);
+    final wasOffRoute = _offRoute;
+    _offRoute = distToRoute > 50; // Wenn >50m entfernt, als "off-route" markieren
+
+    if (_offRoute && !wasOffRoute) {
+      _speak(_t('offRoute'));
+      _triggerReroute(ll);
+    }
+    if (_offRoute != wasOffRoute) setState(() {});
+  }
+
+  void _triggerReroute(LatLng from) {
+    if (_rerouteInProgress) return;
+    _rerouteTimer?.cancel();
+    _rerouteTimer = Timer(const Duration(seconds: 2), () async {
+      if (!_navigating) return;
+      setState(() => _rerouteInProgress = true);
+      final list = await NavService.routes(from, _route!.points.last);
+      if (list.isNotEmpty && mounted) {
+        setState(() {
+          _alts = list;
+          _sel = 0;
+          _nextMan = 0;
+          _spoken.clear();
+          _offRoute = false;
+          _rerouteInProgress = false;
+        });
+        _rebuildCum();
+        if (_showCams) {
+          NavService.cameras(_route!.points).then((c) {
+            if (mounted) setState(() => _cameras = c);
+          });
+        }
+      }
+    });
+  }
+
   void _recenterCamera(LatLng ll) {
+    // Speed-dependent zoom: schneller fahren = weiter rauszoomen
+    double targetZoom = 17;
+    if (_speedKmh > 100) targetZoom = 15.5;
+    else if (_speedKmh > 70) targetZoom = 16;
+    else if (_speedKmh > 40) targetZoom = 16.5;
+
     if (_view == ViewMode.headingUp) {
-      _map.moveAndRotate(ll, _map.camera.zoom, -_heading);
+      _map.moveAndRotate(ll, targetZoom, -_heading);
     } else {
-      _map.move(ll, _map.camera.zoom);
+      _map.move(ll, targetZoom);
     }
   }
 
   // ---------- Route ----------
-  Future<void> _computeRoute(LatLng to) async {
+  Future<void> _computeRoute(LatLng to, {String? query}) async {
     if (_pos == null) return;
     setState(() => _status = _t('calcRoute'));
     final list = await NavService.routes(_pos!, to);
     if (list.isEmpty) {
       setState(() => _status = _t('noRoute'));
       return;
+    }
+    // Speichere Suche als recent (wenn query vorhanden)
+    if (query != null && query.isNotEmpty) {
+      if (_recentSearches.contains(query)) _recentSearches.remove(query);
+      _recentSearches.insert(0, query);
+      if (_recentSearches.length > 10) _recentSearches.removeLast();
+      _savePref('recent_searches', _recentSearches);
     }
     setState(() {
       _alts = list;
@@ -151,10 +263,10 @@ class _NavScreenState extends State<NavScreen> {
       _camSpoken.clear();
       _cameras = [];
       _status = '';
+      _offRoute = false;
     });
     _rebuildCum();
     _fitRoute(_route!.points);
-    // Blitzer nachladen (nicht blockierend).
     if (_showCams) {
       NavService.cameras(_route!.points).then((c) {
         if (mounted) setState(() => _cameras = c);
@@ -214,6 +326,21 @@ class _NavScreenState extends State<NavScreen> {
     if (r == null) return 0;
     final i = _nearestIndex(ll);
     return (r.distance - _cum[i]).clamp(0, r.distance);
+  }
+
+  double _routeProgress(LatLng ll) {
+    final r = _route;
+    if (r == null || r.distance == 0) return 0;
+    final i = _nearestIndex(ll);
+    return (_cum[i] / r.distance).clamp(0, 1);
+  }
+
+  int? _currentSpeedLimit() {
+    final r = _route;
+    if (r == null || r.limits.isEmpty || _pos == null) return null;
+    final i = _nearestIndex(_pos!);
+    if (i < r.limits.length) return r.limits[i];
+    return null;
   }
 
   void _updateGuidance(LatLng ll) {
@@ -313,7 +440,16 @@ class _NavScreenState extends State<NavScreen> {
       setState(() => _status = _t('notFound'));
       return;
     }
-    await _computeRoute(to);
+    await _computeRoute(to, query: q);
+  }
+
+  Future<void> _routeToLocation(LatLng to, {String? label}) async {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _search.text = label ?? 'Ziel';
+      _suggest = [];
+    });
+    await _computeRoute(to, query: label);
   }
 
   void _onSearchChanged(String v) {
@@ -348,11 +484,11 @@ class _NavScreenState extends State<NavScreen> {
   @override
   Widget build(BuildContext context) {
     final center = _pos ?? const LatLng(24.7136, 46.6753); // Riad als Fallback
-    final dark = _view == ViewMode.dark;
+    final dark = _isDarkTheme;
     return Directionality(
       textDirection: _rtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: const Color(0xFF0A1122),
+        backgroundColor: dark ? const Color(0xFF0A0F1A) : const Color(0xFF0A1122),
         body: Stack(children: [
           FlutterMap(
             mapController: _map,
@@ -368,7 +504,6 @@ class _NavScreenState extends State<NavScreen> {
                     : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.masar.app',
               ),
-              // Alternativen grau, gewählte Route grün.
               PolylineLayer(polylines: _routeLines()),
               if (_showCams)
                 MarkerLayer(markers: [
@@ -396,7 +531,7 @@ class _NavScreenState extends State<NavScreen> {
             ],
           ),
 
-          // Oben: Suche + Menü  /  Anweisung + Spuren
+          // Top: Search / Navigation Info
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(10),
@@ -406,10 +541,10 @@ class _NavScreenState extends State<NavScreen> {
 
           if (_status.isNotEmpty) _statusPill(),
 
-          // Alternativrouten-Leiste (vor Start)
+          // Alt routes before start
           if (!_navigating && _alts.length > 1) _altBar(),
 
-          // Rechts: Ansicht, Zoom, Zentrieren
+          // Right side: View, Zoom, Recenter
           SafeArea(
             child: Align(
               alignment: Alignment.centerRight,
@@ -429,10 +564,13 @@ class _NavScreenState extends State<NavScreen> {
             ),
           ),
 
-          // Blitzer-Warnschild (während Navigation)
-          if (_navigating && _nearCam != null) _camWarnBadge(),
+          // Speed limit sign + camera warning (during navigation)
+          if (_navigating) ...[
+            if (_currentSpeedLimit() != null) _speedLimitSign(),
+            if (_nearCam != null) _camWarnBadge(),
+          ],
 
-          // Unten: Tacho + ETA + Start/Stop
+          // Bottom: Speedometer + ETA + Start/Stop
           SafeArea(
             child: Align(
               alignment: Alignment.bottomCenter,
@@ -482,6 +620,44 @@ class _NavScreenState extends State<NavScreen> {
         child: const Icon(Icons.camera_alt, color: Colors.white, size: 14),
       );
 
+  Widget _speedLimitSign() {
+    final limit = _currentSpeedLimit();
+    if (limit == null) return const SizedBox.shrink();
+    final warning = _speedKmh > limit;
+    return Positioned(
+      top: 100,
+      right: 12,
+      child: ScaleTransition(
+        scale: _speedLimitAnim,
+        child: Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+            color: warning ? _warn : Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: warning ? _warn.withValues(alpha: 0.4) : Colors.black26,
+                blurRadius: 12,
+              ),
+            ],
+          ),
+          child: Center(
+            child: Text(
+              '$limit',
+              style: TextStyle(
+                color: warning ? Colors.white : Colors.black,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   IconData _viewIcon() {
     switch (_view) {
       case ViewMode.headingUp:
@@ -493,7 +669,7 @@ class _NavScreenState extends State<NavScreen> {
     }
   }
 
-  // Suche + Menübutton
+  // Search + Menu button
   Widget _searchBar() {
     return Column(children: [
       Row(children: [
@@ -532,27 +708,66 @@ class _NavScreenState extends State<NavScreen> {
         const SizedBox(width: 8),
         _roundBtn(Icons.tune, _openMenu),
       ]),
+      if (_suggest.isEmpty && _search.text.isEmpty) ...[
+        const SizedBox(height: 10),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            if (_home != null)
+              _shortcutBtn(Icons.home, 'Zuhause', () => _routeToLocation(_home!, label: 'Zuhause')),
+            if (_work != null)
+              _shortcutBtn(Icons.work, 'Arbeit', () => _routeToLocation(_work!, label: 'Arbeit')),
+            for (final recent in _recentSearches.take(3))
+              _shortcutBtn(Icons.history, recent, () => _routeToLocation(LatLng(0, 0), label: recent)),
+          ]),
+        ),
+      ],
       for (final s in _suggest)
         Material(
-          color: const Color(0xFF0A1428),
+          color: _panelLight,
           child: ListTile(
             dense: true,
+            leading: const Icon(Icons.location_on, color: Colors.white54, size: 18),
             title: Text(s['display_name'] as String,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontSize: 13)),
             onTap: () {
-              _search.text = (s['display_name'] as String).split(',').first;
+              final name = (s['display_name'] as String).split(',').first;
+              _search.text = name;
               setState(() => _suggest = []);
               _computeRoute(
-                  LatLng(double.parse(s['lat'] as String), double.parse(s['lon'] as String)));
+                  LatLng(double.parse(s['lat'] as String), double.parse(s['lon'] as String)),
+                  query: name);
             },
           ),
         ),
     ]);
   }
 
-  // Anweisung + Fahrspuren (während Navigation)
+  Widget _shortcutBtn(IconData icon, String label, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Material(
+        color: _panelLight,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, color: _go, size: 20),
+              const SizedBox(height: 4),
+              Text(label, style: const TextStyle(color: Colors.white, fontSize: 11)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Navigation instruction + lanes + progress bar
   Widget _navTop() {
     final r = _route!;
     final man = (r.maneuvers.isNotEmpty && _nextMan < r.maneuvers.length)
@@ -562,6 +777,18 @@ class _NavScreenState extends State<NavScreen> {
         ? _distance.as(LengthUnit.Meter, _pos!, man.location)
         : 0.0;
     return Column(children: [
+      // Progress bar
+      if (_pos != null)
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: LinearProgressIndicator(
+            value: _routeProgress(_pos!),
+            minHeight: 3,
+            backgroundColor: Colors.white12,
+            valueColor: const AlwaysStoppedAnimation<Color>(_go),
+          ),
+        ),
+      const SizedBox(height: 8),
       Material(
         color: _panel,
         borderRadius: BorderRadius.circular(16),
@@ -577,7 +804,7 @@ class _NavScreenState extends State<NavScreen> {
                 children: [
                   Text('${_round(d)} m',
                       style: const TextStyle(
-                          color: Colors.white, fontSize: 30, fontWeight: FontWeight.w800)),
+                          color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800)),
                   Text(
                       man == null || man.name.isEmpty
                           ? _man(man?.key ?? 'straight')
@@ -585,7 +812,7 @@ class _NavScreenState extends State<NavScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w600)),
+                          color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -709,10 +936,18 @@ class _NavScreenState extends State<NavScreen> {
     );
   }
 
+  String _formatETA() {
+    final rem = _pos != null ? _remainingMeters(_pos!) : 0.0;
+    final minRemain = (rem / 1000 / 50 * 60).clamp(0, 999).round();
+    final now = DateTime.now();
+    final arrival = now.add(Duration(minutes: minRemain));
+    return '${arrival.hour.toString().padLeft(2, '0')}:${arrival.minute.toString().padLeft(2, '0')}';
+  }
+
   Widget _bottomBar() {
     final rem = _pos != null ? _remainingMeters(_pos!) : 0.0;
     final min = (rem / 1000 / 50 * 60).clamp(0, 999).round();
-    final over = _speedKmh > 121; // grobe Tempo-Warnung
+    final over = _speedKmh > 121;
     return Row(children: [
       Container(
         width: 72,
@@ -721,6 +956,12 @@ class _NavScreenState extends State<NavScreen> {
           color: _panel,
           shape: BoxShape.circle,
           border: Border.all(color: over ? _warn : _go, width: 3),
+          boxShadow: [
+            BoxShadow(
+              color: (over ? _warn : _go).withValues(alpha: 0.2),
+              blurRadius: 12,
+            ),
+          ],
         ),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Text('${_speedKmh.round()}',
@@ -734,24 +975,41 @@ class _NavScreenState extends State<NavScreen> {
       const Spacer(),
       if (_route != null)
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(14)),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: _panel,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 8,
+              ),
+            ],
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(_navigating ? '$min ${_t('min')}' : _fmtKm(_route!.distance),
-                  style: const TextStyle(
-                      color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
-              Text(_fmtKm(rem), style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              if (_navigating)
+                Text(_formatETA(),
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900))
+              else
+                Text(_fmtKm(_route!.distance),
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 2),
+              Text(_navigating ? '$min min' : _fmtKm(rem),
+                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
             ],
           ),
         ),
       const Spacer(),
       FloatingActionButton(
         backgroundColor: _navigating ? _warn : _go,
+        elevation: 6,
         onPressed: _route == null ? null : _startStop,
-        child: Icon(_navigating ? Icons.close : Icons.navigation, color: Colors.black),
+        child: Icon(_navigating ? Icons.close : Icons.navigation, color: Colors.black, size: 28),
       ),
     ]);
   }
@@ -784,7 +1042,7 @@ class _NavScreenState extends State<NavScreen> {
   void _openMenu() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF0C1426),
+      backgroundColor: _panel,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => StatefulBuilder(
@@ -798,36 +1056,107 @@ class _NavScreenState extends State<NavScreen> {
             textDirection: _rtl ? TextDirection.rtl : TextDirection.ltr,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 14),
-                    decoration: BoxDecoration(
-                        color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 14),
+                      decoration: BoxDecoration(
+                          color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                    ),
                   ),
-                ),
-                Text(_t('settings'),
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 14),
-                Text(_t('language'), style: const TextStyle(color: Colors.white54, fontSize: 13)),
-                const SizedBox(height: 6),
-                Row(children: [
-                  _langChip('de', 'Deutsch', set),
-                  _langChip('en', 'English', set),
-                  _langChip('ar', 'العربية', set),
+                  Text(_t('settings'),
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 14),
+                  Text(_t('language'), style: const TextStyle(color: Colors.white54, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    _langChip('de', 'Deutsch', set),
+                    _langChip('en', 'English', set),
+                    _langChip('ar', 'العربية', set),
+                  ]),
+                  const SizedBox(height: 16),
+                  _toggle(_t('voice'), _voice, (v) {
+                    set(() => _voice = v);
+                    _savePref('voice', v);
+                  }),
+                  _toggle(_t('lanes'), _showLanes, (v) {
+                    set(() => _showLanes = v);
+                    _savePref('show_lanes', v);
+                  }),
+                  _toggle(_t('cams'), _showCams, (v) {
+                    set(() => _showCams = v);
+                    _savePref('show_cams', v);
+                  }),
+                  _toggle(_t('miles'), _miles, (v) {
+                    set(() => _miles = v);
+                    _savePref('miles', v);
+                  }),
+                  const SizedBox(height: 16),
+                  Text(_t('quickAccess'), style: const TextStyle(color: Colors.white54, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: _menuBtn(_t('setHome'), Icons.home, () {
+                        if (_pos != null) {
+                          _home = _pos;
+                          _prefs.setDouble('home_lat', _pos!.latitude);
+                          _prefs.setDouble('home_lon', _pos!.longitude);
+                          set(() {});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(_t('homeSaved')),
+                              backgroundColor: _go,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      }),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _menuBtn(_t('setWork'), Icons.work, () {
+                        if (_pos != null) {
+                          _work = _pos;
+                          _prefs.setDouble('work_lat', _pos!.latitude);
+                          _prefs.setDouble('work_lon', _pos!.longitude);
+                          set(() {});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(_t('workSaved')),
+                              backgroundColor: _go,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      }),
+                    ),
+                  ]),
                 ]),
-                const SizedBox(height: 6),
-                _toggle(_t('voice'), _voice, (v) => set(() => _voice = v)),
-                _toggle(_t('lanes'), _showLanes, (v) => set(() => _showLanes = v)),
-                _toggle(_t('cams'), _showCams, (v) => set(() => _showCams = v)),
-                _toggle(_t('miles'), _miles, (v) => set(() => _miles = v)),
-              ]),
+              ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _menuBtn(String label, IconData icon, VoidCallback onTap) {
+    return Material(
+      color: _panelLight,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, color: _go, size: 20),
+            const SizedBox(height: 6),
+            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          ]),
+        ),
       ),
     );
   }
@@ -840,6 +1169,7 @@ class _NavScreenState extends State<NavScreen> {
         onTap: () => set(() {
           _lang = code;
           _applyTtsLang();
+          _savePref('language', code);
         }),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
@@ -889,8 +1219,14 @@ class _NavScreenState extends State<NavScreen> {
       'searching': 'Suche …',
       'notFound': 'Ort nicht gefunden',
       'started': 'Route gestartet',
+      'offRoute': 'Außerhalb der Route, neue Route wird berechnet',
       'enableLocation': 'Bitte Standortdienste aktivieren',
       'needPermission': 'Standort-Berechtigung nötig',
+      'quickAccess': 'Schnellzugriff',
+      'setHome': 'Zuhause speichern',
+      'setWork': 'Arbeit speichern',
+      'homeSaved': 'Zuhause gespeichert',
+      'workSaved': 'Arbeit gespeichert',
     },
     'en': {
       'where': 'Where to? (address or place)',
@@ -912,8 +1248,14 @@ class _NavScreenState extends State<NavScreen> {
       'searching': 'Searching …',
       'notFound': 'Place not found',
       'started': 'Route started',
+      'offRoute': 'Off route, recalculating …',
       'enableLocation': 'Please enable location services',
       'needPermission': 'Location permission needed',
+      'quickAccess': 'Quick access',
+      'setHome': 'Save home',
+      'setWork': 'Save work',
+      'homeSaved': 'Home saved',
+      'workSaved': 'Work saved',
     },
     'ar': {
       'where': 'إلى أين؟ (عنوان أو مكان)',
@@ -935,8 +1277,14 @@ class _NavScreenState extends State<NavScreen> {
       'searching': 'جارٍ البحث …',
       'notFound': 'المكان غير موجود',
       'started': 'بدأ المسار',
+      'offRoute': 'خارج المسار، يتم إعادة حساب …',
       'enableLocation': 'يرجى تفعيل خدمات الموقع',
       'needPermission': 'مطلوب إذن الموقع',
+      'quickAccess': 'وصول سريع',
+      'setHome': 'حفظ المنزل',
+      'setWork': 'حفظ العمل',
+      'homeSaved': 'تم حفظ المنزل',
+      'workSaved': 'تم حفظ العمل',
     },
   };
 

@@ -49,7 +49,8 @@ class RouteResult {
   final double distance; // Meter
   final double duration; // Sekunden
   final List<Maneuver> maneuvers;
-  RouteResult(this.points, this.distance, this.duration, this.maneuvers);
+  final List<int?> limits; // Tempolimit je Segment (km/h), null = unbekannt
+  RouteResult(this.points, this.distance, this.duration, this.maneuvers, this.limits);
 }
 
 /// Ein Blitzer (Saher) aus OpenStreetMap.
@@ -89,7 +90,7 @@ class NavService {
     final uri = Uri.parse(
         'https://router.project-osrm.org/route/v1/driving/'
         '${from.longitude},${from.latitude};${to.longitude},${to.latitude}'
-        '?overview=full&geometries=geojson&steps=true&alternatives=3');
+        '?overview=full&geometries=geojson&steps=true&alternatives=3&annotations=maxspeed');
     final r = await http.get(uri);
     if (r.statusCode != 200) return [];
     final j = jsonDecode(r.body) as Map;
@@ -103,9 +104,25 @@ class NavService {
         .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
         .toList();
     final maneuvers = <Maneuver>[];
+    final limits = <int?>[];
     double at = 0;
     final legs = rt['legs'] as List?;
     if (legs != null && legs.isNotEmpty) {
+      // Tempolimits je Segment aus der maxspeed-Annotation.
+      final ann = (legs.first as Map)['annotation'] as Map?;
+      final ms = ann?['maxspeed'] as List?;
+      if (ms != null) {
+        for (final e in ms) {
+          final m = e as Map;
+          final sp = m['speed'];
+          if (sp is num) {
+            final unit = m['unit'];
+            limits.add(unit == 'mph' ? (sp * 1.60934).round() : sp.round());
+          } else {
+            limits.add(null);
+          }
+        }
+      }
       for (final st in (legs.first['steps'] as List)) {
         final man = st['maneuver'] as Map;
         final loc = man['location'] as List;
@@ -139,7 +156,7 @@ class NavService {
       }
     }
     return RouteResult(coords, (rt['distance'] as num).toDouble(),
-        (rt['duration'] as num).toDouble(), maneuvers);
+        (rt['duration'] as num).toDouble(), maneuvers, limits);
   }
 
   /// Echte Blitzer entlang der Route (OpenStreetMap via Overpass).
