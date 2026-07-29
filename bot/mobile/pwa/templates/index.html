@@ -2,8 +2,10 @@
 <html lang="de">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#0d1117">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+    <meta name="theme-color" content="#0a0e17">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Trading Bot</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/static/icon-192.png">
@@ -11,34 +13,81 @@
     <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+
 <div id="news-popup" class="news-popup hidden">
     <div class="news-popup-title"></div>
     <div class="news-popup-summary"></div>
     <div class="news-popup-meta">
         <span class="news-popup-source"></span>
-        <button class="news-popup-close">✕</button>
+        <button class="news-popup-close ghost">Schliessen</button>
     </div>
 </div>
+
 <header>
-    <h1>⚡ Trading Bot</h1>
-    <div id="status-pill">idle</div>
+    <div class="brand">
+        <div class="brand-mark">⌁</div>
+        <div>
+            <div style="letter-spacing:-0.5px;">Trading Bot</div>
+            <div style="color:var(--muted); font-size:0.68rem; font-weight:500; letter-spacing:0.5px; text-transform:uppercase;">Demo · 10 000 USDT</div>
+        </div>
+    </div>
+    <div class="status-pills">
+        <div id="mode-pill" class="pill"><span class="dot"></span><span>Manuell</span></div>
+        <div id="status-pill" class="pill"><span class="dot"></span><span>Idle</span></div>
+    </div>
 </header>
 
 <main>
+
+    <!-- big signal tile ---------------------------------------------- -->
     <section id="signal-tile" class="signal grey">
+        <div class="signal-badge">Handelsentscheidung</div>
         <div class="signal-label">HALTEN</div>
         <div class="signal-symbol">–</div>
-        <div class="signal-details">
-            <div>Entry <strong id="sig-entry">–</strong></div>
-            <div>Stop  <strong id="sig-stop">–</strong></div>
-            <div>Ziele <strong id="sig-tp">–</strong></div>
-        </div>
-        <div class="signal-score">Konfluenz-Score <span id="sig-score">0</span></div>
+        <div class="signal-price num">Warte auf konfluentes Setup</div>
     </section>
 
+    <!-- Jarvis ------------------------------------------------------- -->
+    <section class="card">
+        <h2>Jarvis · Sprachassistent <span class="badge" id="jarvis-badge">deaktiviert</span></h2>
+        <div id="jarvis-panel">
+            <div id="jarvis-orb">J</div>
+            <div id="jarvis-status">
+                <div class="title">Jarvis bereit</div>
+                <div class="subtitle">Spricht Signale, News, Stops und Take-Profits laut aus. Läuft komplett im Browser – keine Cloud, keine Kosten.</div>
+            </div>
+        </div>
+        <div id="jarvis-controls">
+            <button id="jarvis-toggle">Jarvis aktivieren</button>
+            <select id="jarvis-voice-picker" title="Stimme auswählen"></select>
+        </div>
+        <div id="jarvis-log"></div>
+    </section>
+
+    <!-- portfolio dashboard ------------------------------------------ -->
+    <section class="card">
+        <h2>Portfolio <span class="badge">Paper</span></h2>
+        <div class="row"><span>Equity</span><strong class="num" id="equity">–</strong></div>
+        <div class="row"><span>Cash</span><strong class="num" id="cash">–</strong></div>
+        <div class="row"><span>Offene Positionen</span><strong class="num" id="pos-count">–</strong></div>
+        <div class="btn-row">
+            <button id="btn-start" class="primary">Start</button>
+            <button id="btn-stop" class="danger">Stop</button>
+            <button id="btn-scan">Scan</button>
+        </div>
+        <div class="toggle-row">
+            <div class="lbl"><strong id="mode-label">Manuell (Demo)</strong> – Signale bestätigen · Vollautomatik wenn an</div>
+            <div id="mode-toggle" class="toggle"></div>
+        </div>
+        <div class="btn-row">
+            <button id="btn-enable-sound">🔔 Push-Nachrichten aktivieren</button>
+        </div>
+    </section>
+
+    <!-- confluence + matrix ------------------------------------------ -->
     <section class="card">
         <h2>Konfluenz-Meter</h2>
-        <div class="confluence-wrap" id="confluence-wrap"></div>
+        <div id="confluence-wrap"></div>
     </section>
 
     <section class="card">
@@ -46,59 +95,30 @@
         <div id="matrix" class="matrix"></div>
     </section>
 
+    <!-- fear & greed ------------------------------------------------- -->
     <section class="card">
         <h2>Fear &amp; Greed Index</h2>
         <div class="fng">
-            <div id="fng-value" class="fng-value">–</div>
+            <div class="fng-dial"><div class="fng-inner num" id="fng-value">–</div></div>
             <div>
                 <div class="fng-label">Marktstimmung</div>
-                <div id="fng-class" class="fng-classification">–</div>
-                <div id="fng-hint" style="color:var(--muted);font-size:0.8rem;margin-top:6px">
-                    &lt; 20 = extreme Angst · Templeton kauft · &gt; 80 = Gier · Soros / Paulson bereiten Shorts vor
-                </div>
+                <div id="fng-class" class="fng-class">–</div>
+                <div class="fng-hint">&lt; 20 = extreme Angst · Templeton kauft &nbsp;·&nbsp; &gt; 80 = Gier · Soros / Paulson bereiten Shorts vor</div>
             </div>
         </div>
     </section>
 
-    <section id="dashboard" class="card">
-        <div class="row"><span>Equity</span><strong id="equity">–</strong></div>
-        <div class="row"><span>Cash</span><strong id="cash">–</strong></div>
-        <div class="row"><span>Offene Positionen</span><strong id="pos-count">–</strong></div>
-        <div class="btn-row">
-            <button id="btn-start" class="primary">Start</button>
-            <button id="btn-stop" class="danger">Stop</button>
-            <button id="btn-scan">Scan</button>
-        </div>
-        <div class="btn-row">
-            <button id="btn-enable-sound">🔔 Ton + Push aktivieren</button>
-        </div>
-        <div class="toggle-row">
-            <div id="mode-toggle" class="toggle"></div>
-            <span class="lbl"><strong id="mode-label">Manuell (Demo)</strong> – Signale bestätigen · Vollautomatik wenn an</span>
-        </div>
-    </section>
-
+    <!-- live TV chart ------------------------------------------------ -->
     <section class="card">
-        <h2>Live-Chart (TradingView)</h2>
-        <div id="tv-select" style="margin-bottom:8px;"></div>
-        <div id="tv-wrap" style="height:360px; border-radius:8px; overflow:hidden; background:#000;">
+        <h2>Live-Chart <span class="badge">TradingView</span></h2>
+        <div id="tv-wrap">
             <iframe id="tv-iframe" src="" style="width:100%; height:100%; border:0;"></iframe>
         </div>
     </section>
 
     <section class="card">
-        <h2>Erkannte Chart-Muster</h2>
+        <h2>Erkannte Chart-Muster <span class="badge">Warum · Weshalb · Wieso</span></h2>
         <div id="patterns"></div>
-    </section>
-
-    <section class="card">
-        <h2>Marktlage (frei)</h2>
-        <div id="intel"></div>
-    </section>
-
-    <section class="card">
-        <h2>Performance</h2>
-        <div id="analytics"></div>
     </section>
 
     <section class="card">
@@ -107,8 +127,18 @@
     </section>
 
     <section class="card">
-        <h2>Trader-Council (10 Legenden)</h2>
+        <h2>Marktlage (kostenlos)</h2>
+        <div id="intel"></div>
+    </section>
+
+    <section class="card">
+        <h2>Trader-Council <span class="badge">10 Legenden</span></h2>
         <div id="council" class="council"></div>
+    </section>
+
+    <section class="card">
+        <h2>Performance</h2>
+        <div id="analytics"></div>
     </section>
 
     <section class="card">
@@ -122,9 +152,9 @@
     </section>
 
     <section class="card">
-        <h2>Strategien ({{ strategies|length }})</h2>
+        <h2>Strategien <span class="badge">{{ strategies|length }} aktiv</span></h2>
         <div id="strategies">
-            {% for s in strategies %}<span class="chip">{{ s }}</span>{% endfor %}
+            {% for s in strategies %}<span class="chip">{{ s.replace("_", " ") }}</span>{% endfor %}
         </div>
     </section>
 
@@ -132,8 +162,12 @@
         <h2>Rulebook</h2>
         <ol id="rules"></ol>
     </section>
+
 </main>
 
+<footer>Trading Bot · Demo-Modus · kein echtes Geld</footer>
+
+<script src="/static/jarvis.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

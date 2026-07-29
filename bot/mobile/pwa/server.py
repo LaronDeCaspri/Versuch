@@ -45,7 +45,7 @@ from src.core.logger import setup
 from src.data.market_data import MarketData
 from src.execution.paper import PaperBroker
 from src.knowledge import PRINCIPLES, READING_LIST, RULEBOOK
-from src.notify import Notifier
+from src.notify import AnnouncementQueue, Notifier, format_fng, format_news
 from src.risk.manager import RiskManager
 from src.strategies import Ensemble, REGISTRY
 
@@ -65,9 +65,14 @@ class BotService:
             ntfy_server=os.environ.get("NTFY_SERVER", "https://ntfy.sh"),
             cooldown_seconds=int(os.environ.get("SIGNAL_COOLDOWN", "600")),
         )
+        self.announcements = AnnouncementQueue()
+        self.broker.announcements = self.announcements
         self.journal = Journal(os.environ.get("JOURNAL_PATH", "data/journal.sqlite"))
         self.engine = Engine(cfg, self.market, self.broker, self.ensemble, self.risk,
-                             notifier=self.notifier, journal=self.journal)
+                             notifier=self.notifier, journal=self.journal,
+                             announcements=self.announcements)
+        self._last_fng_bucket: int | None = None
+        self._seen_news_ids: set[str] = set()
         self.news = NewsFeed(cache_seconds=300)
         self.intel = MarketIntel(cache_seconds=600)
         self._thread: threading.Thread | None = None
@@ -284,6 +289,12 @@ def create_app(service: "BotService | None" = None) -> Flask:
         except Exception as e:
             data = {"value": 50, "classification": "Neutral", "error": str(e)}
         fear_greed._cache = {"ts": time.time(), "data": data}
+        # announce regime shifts (extreme fear / greed)
+        bucket = 1 if data["value"] <= 20 else (2 if data["value"] >= 80 else 0)
+        if bucket != 0 and service._last_fng_bucket != bucket:
+            service.announcements.push(format_fng(data["value"], data.get("classification", "")),
+                                       level="alert" if bucket else "info")
+        service._last_fng_bucket = bucket
         return jsonify(data)
 
     @app.get("/api/confluence")
@@ -324,9 +335,32 @@ def create_app(service: "BotService | None" = None) -> Flask:
             result.append(row)
         return jsonify(result)
 
+    @app.get("/api/announcements")
+    def announcements_pending():
+        return jsonify([a.to_dict() for a in service.announcements.pending()])
+
+    @app.post("/api/announcements/ack")
+    def announcements_ack():
+        ids = request.get_json(silent=True) or []
+        service.announcements.mark_delivered(list(ids))
+        return jsonify({"ok": True})
+
+    @app.post("/api/announcements/say")
+    def announcements_say():
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text", "")).strip()
+        if text:
+            service.announcements.push(text, level=str(data.get("level", "info")))
+        return jsonify({"ok": True})
+
     @app.get("/api/news")
     def news():
         items = service.news.latest(limit=30)
+        # push high-importance news that we haven't announced yet
+        for i in items:
+            if i.importance >= 3 and i.title not in service._seen_news_ids:
+                service._seen_news_ids.add(i.title)
+                service.announcements.push(format_news(i.title, i.source), level="warn")
         return jsonify([i.to_dict() for i in items])
 
     @app.get("/api/news/important")

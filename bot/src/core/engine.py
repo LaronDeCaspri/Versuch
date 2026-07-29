@@ -8,7 +8,7 @@ from ..data.market_data import MarketData
 from ..execution.broker import Broker
 from ..execution.pending import PendingStore
 from ..journal import Journal, JournalEntry
-from ..notify import Notifier
+from ..notify import AnnouncementQueue, Notifier, format_close, format_signal
 from ..notify.signals import event_from
 from ..risk.manager import RiskManager
 from ..strategies import Ensemble, REGISTRY, Side, StrategyContext
@@ -22,7 +22,8 @@ class Engine:
     def __init__(self, cfg: Config, market: MarketData, broker: Broker, ensemble: Ensemble,
                  risk: RiskManager, notifier: Notifier | None = None,
                  pending: PendingStore | None = None, require_confirmation: bool = True,
-                 journal: Journal | None = None):
+                 journal: Journal | None = None,
+                 announcements: AnnouncementQueue | None = None):
         self.cfg = cfg
         self.market = market
         self.broker = broker
@@ -32,6 +33,7 @@ class Engine:
         self.pending = pending or PendingStore()
         self.require_confirmation = require_confirmation
         self.journal = journal
+        self.announcements = announcements
         self._last_marks: dict[str, float] = {}
 
     def _log(self, kind: str, symbol: str, side: str, price: float, **kw) -> None:
@@ -121,6 +123,11 @@ class Engine:
         self._log("signal", symbol, side.value, price,
                   qty=plan.size, strategy=",".join(s.strategy for s in (sigs or []))[:80],
                   reasons=reasons, metadata={"stop": plan.stop, "tps": tp_prices, "score": score})
+        if self.announcements is not None:
+            action = "BUY" if side.value == "long" else "SELL"
+            weighted = sum((tp[0] - price) * plan.size * tp[1] * (1 if side.value == "long" else -1)
+                           for tp in plan.take_profits)
+            self.announcements.push(format_signal(action, symbol, price, plan.stop, weighted), level="alert")
         if self.require_confirmation:
             self.pending.add(side, symbol, price, plan.stop, plan.take_profits, plan.size,
                              plan.risk_amount, score, reasons)

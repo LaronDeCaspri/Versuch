@@ -59,8 +59,9 @@ function renderSignalTile(pending, lightFallback) {
         const cls = pending.action === "BUY" ? "green" : pending.action === "SELL" ? "red" : "grey";
         tile.className = "signal " + cls;
         const f = pending.forecast || {};
+        const actionLabel = pending.action === "BUY" ? "KAUFEN" : pending.action === "SELL" ? "VERKAUFEN" : "AUSSTIEG";
         const tpLines = (pending.take_profits || []).map((tp, i) =>
-            `<div class="row"><span>TP${i + 1} (${(tp.fraction*100).toFixed(0)}%)</span><strong>${fmt(tp.price, 4)}</strong></div>`).join("");
+            `<div><div class="k">TP${i + 1} · ${(tp.fraction*100).toFixed(0)}%</div><div class="v num">${fmt(tp.price, 4)}</div></div>`).join("");
         const r = pending.risk || {};
         const riskFactors = (r.factors || []).map(x =>
             `<div class="risk-factor"><span>${x.name} <small>(${x.value})</small></span><span class="impact">+${fmt(x.impact,1)}</span></div>`).join("");
@@ -69,36 +70,37 @@ function renderSignalTile(pending, lightFallback) {
                 <b>${p.name_de}:</b> ${p.means}
             </div>`).join("");
         tile.innerHTML = `
-            <div class="signal-label">${pending.action}</div>
+            <div class="signal-badge">${pending.action === 'BUY' ? 'KAUFSIGNAL' : 'VERKAUFSSIGNAL'}</div>
+            <div class="signal-label">${actionLabel}</div>
             <div class="signal-symbol">${pending.symbol}</div>
-            <img src="${pending.chart_url}" alt="chart" style="width:100%; margin-top:10px; border-radius:8px; background:#000;"/>
-            <div style="text-align:left; margin-top:12px;">
-                <div class="row"><span>Entry</span><strong>${fmt(pending.entry, 4)}</strong></div>
-                <div class="row"><span>Stop-Loss</span><strong style="color:#f85149">${fmt(pending.stop, 4)}</strong></div>
+            <div class="signal-price num">Preis ${fmt(pending.entry, 4)} USDT</div>
+            <img src="${pending.chart_url}" alt="chart" style="width:100%; margin-top:14px; border-radius:8px; background:#000;"/>
+            <div class="kv">
+                <div><div class="k">Entry</div><div class="v num">${fmt(pending.entry, 4)}</div></div>
+                <div><div class="k">Stop-Loss</div><div class="v num" style="color:var(--red)">${fmt(pending.stop, 4)}</div></div>
                 ${tpLines}
-                <div class="row"><span>Grösse</span><strong>${fmt(pending.size, 6)}</strong></div>
-                <div class="row"><span>Risiko</span><strong>${money(pending.risk_amount)}</strong></div>
+                <div><div class="k">Grösse</div><div class="v num">${fmt(pending.size, 6)}</div></div>
+                <div><div class="k">Risiko</div><div class="v num">${money(pending.risk_amount)}</div></div>
             </div>
             ${r.score !== undefined ? `
             <div class="risk-block">
-                <div class="signal-score" style="text-align:left;">Risiko-Bewertung: <strong style="color:var(--${r.color || 'yellow'})">${(r.label||'').toUpperCase()} · ${r.score}/100</strong></div>
-                <div class="risk-bar-bg"><div class="risk-bar-fill risk-color-${r.color||'yellow'}" style="width:${r.score}%;"></div></div>
+                <div class="risk-title"><span>Risiko-Bewertung</span><span style="color:var(--${r.color}); font-weight:800; letter-spacing:0.5px;">${(r.label||'').toUpperCase()} · ${r.score}/100</span></div>
+                <div class="risk-bar-bg"><div class="risk-bar-fill risk-color-${r.color}" style="width:${r.score}%;"></div></div>
                 ${riskFactors}
             </div>` : ""}
-            <div class="risk-block">
-                <div class="signal-score" style="text-align:left;">Gewinn-Prognose</div>
-                <div class="row"><span>Bei allen TPs</span><strong style="color:#3fb950">+${money(f.weighted_profit)}</strong></div>
-                <div class="row"><span>Bei vollem Run</span><strong style="color:#3fb950">+${money(f.max_profit_full_run)}</strong></div>
-                <div class="row"><span>Bei Stop</span><strong style="color:#f85149">-${money(f.loss_at_stop)}</strong></div>
-                <div class="row"><span>Erwartungswert (50/50)</span><strong>${money(f.expected_value_50_50)}</strong></div>
-                <div class="row"><span>Risk / Reward</span><strong>1 : ${fmt(f.risk_reward_final)}</strong></div>
+            <div class="forecast-block">
+                <div class="risk-title"><span>Gewinn-Prognose</span><span style="color:var(--text-2); font-weight:600;">R : R  1 : ${fmt(f.risk_reward_final)}</span></div>
+                <div class="row"><span>Bei allen Take-Profits</span><strong class="num" style="color:var(--green)">+${money(f.weighted_profit)}</strong></div>
+                <div class="row"><span>Bei vollem Run</span><strong class="num" style="color:var(--green)">+${money(f.max_profit_full_run)}</strong></div>
+                <div class="row"><span>Bei Stop-Loss</span><strong class="num" style="color:var(--red)">-${money(f.loss_at_stop)}</strong></div>
+                <div class="row"><span>Erwartungswert (50/50)</span><strong class="num">${money(f.expected_value_50_50)}</strong></div>
             </div>
-            ${patterns ? `<div style="margin-top:8px; text-align:left;"><b style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">Erkannte Muster</b>${patterns}</div>` : ""}
+            ${patterns ? `<div style="margin-top:10px; text-align:left;"><div class="risk-title" style="margin-bottom:2px;">Erkannte Muster</div>${patterns}</div>` : ""}
             <div class="btn-row" style="margin-top:16px;">
-                <button class="primary" id="confirm-btn">✓ BESTÄTIGEN</button>
+                <button class="confirm" id="confirm-btn">✓ BESTÄTIGEN</button>
                 <button class="danger" id="cancel-btn">✕ VERWERFEN</button>
             </div>
-            <div style="margin-top:10px; font-size:0.75rem; opacity:0.75; text-align:left;">${(pending.reasons || []).slice(0,3).join(" · ")}</div>
+            <div style="margin-top:10px; font-size:0.72rem; color:var(--muted); text-align:left;">${(pending.reasons || []).slice(0,3).join(" · ")}</div>
         `;
         $("#confirm-btn").onclick = async () => {
             $("#confirm-btn").textContent = "…";
@@ -114,13 +116,10 @@ function renderSignalTile(pending, lightFallback) {
         const light = lightFallback || { action: "HOLD", color: "grey", symbol: "–", score: 0 };
         tile.className = "signal " + (light.color || "grey");
         tile.innerHTML = `
+            <div class="signal-badge">Handelsentscheidung</div>
             <div class="signal-label">${light.action === "BUY" ? "KAUFEN" : light.action === "SELL" ? "VERKAUFEN" : "HALTEN"}</div>
             <div class="signal-symbol">${light.symbol || "–"}</div>
-            <div class="signal-details">
-                <div>Konfluenz<strong>${fmt(light.score, 2)}</strong></div>
-                <div>Signale<strong>${(light.reasons || []).length}</strong></div>
-            </div>
-            <div class="signal-score">Warte auf konfluentes Setup</div>
+            <div class="signal-price num">Konfluenz-Score ${fmt(light.score, 2)}  ·  ${(light.reasons || []).length} bestätigende Strategien</div>
         `;
     }
 }
@@ -232,8 +231,9 @@ async function refresh() {
     $("#equity").textContent = fmt(s.equity) + " USDT";
     $("#cash").textContent = fmt(s.cash) + " USDT";
     $("#pos-count").textContent = s.positions ? s.positions.length : 0;
-    $("#status-pill").textContent = s.running ? "running" : "idle";
-    $("#status-pill").classList.toggle("on", !!s.running);
+    const pill = $("#status-pill");
+    pill.classList.toggle("on", !!s.running);
+    pill.querySelector("span:last-child").textContent = s.running ? "Läuft" : "Idle";
     renderPositions(s.positions);
 }
 
@@ -339,6 +339,9 @@ async function loadMode() {
     modeAuto = !!d.auto;
     modeToggle.classList.toggle("on", modeAuto);
     $("#mode-label").textContent = modeAuto ? "Vollautomatik (Demo)" : "Manuell (Demo)";
+    const modePill = $("#mode-pill");
+    modePill.classList.toggle("on", modeAuto);
+    modePill.querySelector("span:last-child").textContent = modeAuto ? "Auto" : "Manuell";
 }
 modeToggle.onclick = async () => {
     modeAuto = !modeAuto;

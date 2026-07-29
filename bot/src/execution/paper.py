@@ -11,12 +11,14 @@ log = get(__name__)
 
 
 class PaperBroker(Broker):
-    def __init__(self, starting_balance: float = 10_000.0, fee_bps: float = 4.0):
+    def __init__(self, starting_balance: float = 10_000.0, fee_bps: float = 4.0,
+                 announcements=None):
         self._cash = starting_balance
         self._positions: dict[str, Position] = {}
         self._orders: list[Order] = []
         self.fee_bps = fee_bps
         self.equity_history: list[tuple[datetime, float]] = []
+        self.announcements = announcements
 
     def equity(self, mark: dict[str, float] | None = None) -> float:
         eq = self._cash
@@ -104,11 +106,15 @@ class PaperBroker(Broker):
         if pos.stop:
             if pos.side is Side.LONG and price <= pos.stop:
                 o = self.close_position(symbol, price, 1.0)
-                if o: triggered.append(o)
+                if o:
+                    triggered.append(o)
+                    self._announce_close(symbol, "sl", o.metadata.get("pnl", 0.0))
                 return triggered
             if pos.side is Side.SHORT and price >= pos.stop:
                 o = self.close_position(symbol, price, 1.0)
-                if o: triggered.append(o)
+                if o:
+                    triggered.append(o)
+                    self._announce_close(symbol, "sl", o.metadata.get("pnl", 0.0))
                 return triggered
         remaining_tps: list[tuple[float, float]] = []
         for tp_price, tp_qty in pos.take_profits:
@@ -120,9 +126,18 @@ class PaperBroker(Broker):
                     continue
                 frac = min(1.0, tp_qty / cur_pos.qty)
                 o = self.close_position(symbol, price, frac)
-                if o: triggered.append(o)
+                if o:
+                    triggered.append(o)
+                    self._announce_close(symbol, "tp", o.metadata.get("pnl", 0.0))
             else:
                 remaining_tps.append((tp_price, tp_qty))
         if symbol in self._positions:
             self._positions[symbol].take_profits = remaining_tps
         return triggered
+
+    def _announce_close(self, symbol: str, kind: str, pnl: float) -> None:
+        if self.announcements is None:
+            return
+        from ..notify import format_close
+        level = "success" if pnl >= 0 else "warn"
+        self.announcements.push(format_close(symbol, kind, pnl), level=level)
