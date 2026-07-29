@@ -1,0 +1,87 @@
+exchange:
+  name: binance
+  testnet: true
+  markets: [spot]
+
+universe:
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+    - XRP/USDT
+    - ADA/USDT
+    - AVAX/USDT
+    - LINK/USDT
+  timeframes: [5m, 15m, 1h, 4h, 1d]
+  primary_timeframe: 15m
+
+engine:
+  loop_interval_seconds: 30
+  warmup_candles: 500
+  parallel_scans: 16
+
+risk:
+  account_currency: USDT
+  risk_per_trade_pct: 1.0          # % of equity risked per trade
+  max_open_positions: 5
+  max_daily_loss_pct: 4.0          # kill switch
+  max_drawdown_pct: 15.0
+  atr_stop_multiplier: 2.0
+  take_profit_r_multiple: [1.5, 2.5, 4.0]   # partial exits at 1.5R, 2.5R, 4R
+  trail_after_r: 1.0
+
+strategies:
+  ema_cross:
+    enabled: true
+    weight: 1.0
+    fast: 20
+    slow: 50
+    trend_filter_ema: 200
+  macd_trend:
+    enabled: true
+    weight: 1.0
+    fast: 12
+    slow: 26
+    signal: 9
+  rsi_meanrev:
+    enabled: true
+    weight: 0.7
+    period: 14
+    oversold: 28
+    overbought: 72
+    require_trend_alignment: false
+  bollinger_squeeze:
+    enabled: true
+    weight: 0.8
+    period: 20
+    stdev: 2.0
+    squeeze_lookback: 120
+  donchian_breakout:
+    enabled: true
+    weight: 1.0
+    period: 55
+    exit_period: 20
+  vwap_reversion:
+    enabled: true
+    weight: 0.6
+    stdev_bands: [1.5, 2.5]
+  mmcrypto_style:
+    enabled: true
+    weight: 1.4
+    higher_tf: 4h
+    trigger_tf: 15m
+    ema_htf: 200
+    ema_ltf_fast: 21
+    ema_ltf_slow: 55
+    rsi_period: 14
+    volume_lookback: 20
+    volume_multiplier: 1.5
+
+ensemble:
+  min_score: 1.5                   # weighted sum of signals required to enter
+  agreement_required: 2            # min number of confirming strategies
+
+logging:
+  level: INFO
+  file: logs/bot.log
