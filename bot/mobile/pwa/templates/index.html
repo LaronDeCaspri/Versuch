@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0d1117">
+    <title>Trading Bot</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/static/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="news-popup" class="news-popup hidden">
+    <div class="news-popup-title"></div>
+    <div class="news-popup-summary"></div>
+    <div class="news-popup-meta">
+        <span class="news-popup-source"></span>
+        <button class="news-popup-close">✕</button>
+    </div>
+</div>
+<header>
+    <h1>⚡ Trading Bot</h1>
+    <div id="status-pill">idle</div>
+</header>
+
+<main>
+    <section id="signal-tile" class="signal grey">
+        <div class="signal-label">HALTEN</div>
+        <div class="signal-symbol">–</div>
+        <div class="signal-details">
+            <div>Entry <strong id="sig-entry">–</strong></div>
+            <div>Stop  <strong id="sig-stop">–</strong></div>
+            <div>Ziele <strong id="sig-tp">–</strong></div>
+        </div>
+        <div class="signal-score">Konfluenz-Score <span id="sig-score">0</span></div>
+    </section>
+
+    <section class="card">
+        <h2>Konfluenz-Meter</h2>
+        <div class="confluence-wrap" id="confluence-wrap"></div>
+    </section>
+
+    <section class="card">
+        <h2>Multi-Timeframe Alignment</h2>
+        <div id="matrix" class="matrix"></div>
+    </section>
+
+    <section class="card">
+        <h2>Fear &amp; Greed Index</h2>
+        <div class="fng">
+            <div id="fng-value" class="fng-value">–</div>
+            <div>
+                <div class="fng-label">Marktstimmung</div>
+                <div id="fng-class" class="fng-classification">–</div>
+                <div id="fng-hint" style="color:var(--muted);font-size:0.8rem;margin-top:6px">
+                    &lt; 20 = extreme Angst · Templeton kauft · &gt; 80 = Gier · Soros / Paulson bereiten Shorts vor
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="dashboard" class="card">
+        <div class="row"><span>Equity</span><strong id="equity">–</strong></div>
+        <div class="row"><span>Cash</span><strong id="cash">–</strong></div>
+        <div class="row"><span>Offene Positionen</span><strong id="pos-count">–</strong></div>
+        <div class="btn-row">
+            <button id="btn-start" class="primary">Start</button>
+            <button id="btn-stop" class="danger">Stop</button>
+            <button id="btn-scan">Scan</button>
+        </div>
+        <div class="btn-row">
+            <button id="btn-enable-sound">🔔 Ton + Push aktivieren</button>
+        </div>
+        <div class="toggle-row">
+            <div id="mode-toggle" class="toggle"></div>
+            <span class="lbl"><strong id="mode-label">Manuell (Demo)</strong> – Signale bestätigen · Vollautomatik wenn an</span>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Live-Chart (TradingView)</h2>
+        <div id="tv-select" style="margin-bottom:8px;"></div>
+        <div id="tv-wrap" style="height:360px; border-radius:8px; overflow:hidden; background:#000;">
+            <iframe id="tv-iframe" src="" style="width:100%; height:100%; border:0;"></iframe>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Erkannte Chart-Muster</h2>
+        <div id="patterns"></div>
+    </section>
+
+    <section class="card">
+        <h2>Marktlage (frei)</h2>
+        <div id="intel"></div>
+    </section>
+
+    <section class="card">
+        <h2>Performance</h2>
+        <div id="analytics"></div>
+    </section>
+
+    <section class="card">
+        <h2>News (Live)</h2>
+        <div id="news"></div>
+    </section>
+
+    <section class="card">
+        <h2>Trader-Council (10 Legenden)</h2>
+        <div id="council" class="council"></div>
+    </section>
+
+    <section class="card">
+        <h2>Positionen</h2>
+        <div id="positions"></div>
+    </section>
+
+    <section class="card">
+        <h2>Letzte Signale</h2>
+        <div id="signals"></div>
+    </section>
+
+    <section class="card">
+        <h2>Strategien ({{ strategies|length }})</h2>
+        <div id="strategies">
+            {% for s in strategies %}<span class="chip">{{ s }}</span>{% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Rulebook</h2>
+        <ol id="rules"></ol>
+    </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -17,7 +17,7 @@ from src.execution.ccxt_broker import CcxtBroker
 from src.execution.paper import PaperBroker
 from src.risk.manager import RiskManager
 from src.strategies import Ensemble, REGISTRY
-from src.knowledge import RULEBOOK
+from src.knowledge import PRINCIPLES, READING_LIST, RULEBOOK
 
 
 @click.group()
@@ -33,6 +33,24 @@ def cli(ctx: click.Context, config_path: str) -> None:
 def rulebook() -> None:
     for line in RULEBOOK:
         click.echo(line)
+
+
+@cli.command("principles")
+def principles() -> None:
+    for k, v in PRINCIPLES.items():
+        click.echo(f"[{k}] {v}")
+
+
+@cli.command("reading-list")
+def reading_list() -> None:
+    for line in READING_LIST:
+        click.echo(f"- {line}")
+
+
+@cli.command("strategies")
+def strategies_list() -> None:
+    for k in sorted(REGISTRY):
+        click.echo(k)
 
 
 @cli.command("scan")

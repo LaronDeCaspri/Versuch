@@ -71,6 +71,46 @@ pip install pytest
 pytest -q
 ```
 
+## Mobile / Android
+
+Drei Wege, das Ding aufs Handy zu bringen:
+
+### 1. PWA (schnellster Weg – kein Play-Store nötig)
+
+```
+python -m mobile.pwa.server        # Port 8090
+```
+
+Am Handy in Chrome `http://<IP>:8090` öffnen → Menü → **App installieren**.
+Dashboard mit Start/Stop/Scan-Buttons, Live-Equity, offenen Positionen, letzten
+Signalen, Rulebook. Läuft offline-fähig via Service Worker.
+
+### 2. Native APK via Kivy + Buildozer
+
+```
+cd bot/mobile/kivy
+pip install buildozer cython
+buildozer -v android debug
+```
+Die fertige APK landet unter `bin/tradingbot-*-debug.apk`. Auf dem Handy
+installieren (Unbekannte-Quellen erlauben).
+
+### 3. Direkt in Termux auf dem Handy
+
+Termux von F-Droid installieren, dann:
+
+```
+bash <(curl -sL https://raw.githubusercontent.com/LaronDeCaspri/Versuch/claude/trading-bot-system-owbxye/bot/mobile/termux/install.sh)
+```
+
+Bot läuft nativ auf dem Handy, PWA-UI unter `http://127.0.0.1:8090`.
+
+## Trader-Wissen
+
+- `python run.py strategies` – alle 18 Strategien listen
+- `python run.py principles` – Prinzipien aus Trading-Literatur + Top-10-Trader
+- `python run.py reading-list` – 19 empfohlene Bücher
+
 ## Sicherheits-Hinweise
 
 - Standardmässig läuft alles im Sandbox-/Paper-Modus.
