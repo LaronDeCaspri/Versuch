@@ -844,8 +844,10 @@ function checkWatchlist() {
 
 // ============ NEW: news integration ============
 async function _fetchCryptoCompare() {
-    const raw = await fetch("https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest").then((r) => r.json());
-    if (!raw?.Data) throw new Error("no data");
+    const res = await fetch("https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const raw = await res.json();
+    if (!raw?.Data?.length) throw new Error("keine Daten");
     return raw.Data.slice(0, 30).map((n) => ({
         title: n.title, url: n.url, source: n.source_info?.name || n.source,
         ts: new Date(n.published_on * 1000).toISOString(),
@@ -853,6 +855,24 @@ async function _fetchCryptoCompare() {
         body: (n.body || "").slice(0, 240),
     }));
 }
+
+async function _fetchRss2Json(rssUrl, sourceName) {
+    const proxy = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(rssUrl);
+    const res = await fetch(proxy);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const raw = await res.json();
+    if (raw.status !== "ok" || !raw.items?.length) throw new Error(raw.message || "keine Items");
+    return raw.items.slice(0, 30).map((n) => ({
+        title: n.title, url: n.link, source: sourceName,
+        ts: n.pubDate || new Date().toISOString(),
+        categories: (n.categories || []).slice(0, 4),
+        body: (n.description || "").replace(/<[^>]+>/g, "").slice(0, 240),
+    }));
+}
+
+const _fetchCoinDesk = () => _fetchRss2Json("https://www.coindesk.com/arc/outboundfeeds/rss/", "CoinDesk");
+const _fetchCointelegraph = () => _fetchRss2Json("https://cointelegraph.com/rss", "Cointelegraph");
+const _fetchDecrypt = () => _fetchRss2Json("https://decrypt.co/feed", "Decrypt");
 
 async function _fetchReddit() {
     const raw = await fetch("https://www.reddit.com/r/CryptoCurrency/hot.json?limit=25").then((r) => r.json());
@@ -886,6 +906,9 @@ async function fetchNews(force = false) {
     state.newsError = null;
     // try sources in order, keep whichever gets first non-empty result
     const attempts = [
+        { name: "CoinDesk", fn: _fetchCoinDesk },
+        { name: "Cointelegraph", fn: _fetchCointelegraph },
+        { name: "Decrypt", fn: _fetchDecrypt },
         { name: "CryptoCompare", fn: _fetchCryptoCompare },
         { name: "Reddit", fn: _fetchReddit },
         { name: "CryptoPanic", fn: _fetchCryptoPanic },
