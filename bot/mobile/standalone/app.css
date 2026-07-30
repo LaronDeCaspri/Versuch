@@ -262,15 +262,38 @@ button.ghost { background: transparent; }
 /* -------------------- fear & greed -------------------- */
 .fng { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; }
 .fng-dial {
-    position: relative; width: 92px; height: 92px;
+    position: relative; width: 110px; height: 110px;
     display: grid; place-items: center;
     border-radius: 50%;
-    background: conic-gradient(from -90deg, var(--red) 0deg, var(--amber) 108deg, var(--green) 216deg, var(--grey) 360deg);
-    padding: 4px;
+    background: conic-gradient(from -135deg,
+        var(--red)   0deg,
+        var(--amber) 68deg,
+        #fbbf24      108deg,
+        var(--green) 168deg,
+        var(--grey)  272deg);
+    padding: 5px;
 }
 .fng-inner {
     background: var(--bg-1); border-radius: 50%; width: 100%; height: 100%;
-    display: grid; place-items: center; font-size: 1.8rem; font-weight: 800;
+    display: grid; place-items: center; font-size: 1.9rem; font-weight: 800;
+    position: relative;
+}
+.fng-needle {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 2px; height: 42px;
+    background: var(--text);
+    transform-origin: 50% 90%;
+    transform: translate(-50%, -90%) rotate(0deg);
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 2px;
+    box-shadow: 0 0 4px rgba(0,0,0,0.5);
+}
+.fng-needle::before {
+    content: ""; position: absolute; top: -6px; left: 50%;
+    width: 8px; height: 8px; background: var(--text); border-radius: 50%;
+    transform: translateX(-50%);
+    box-shadow: 0 0 8px rgba(238, 242, 247, 0.5);
 }
 .fng-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.7px; }
 .fng-class { font-size: 1.05rem; font-weight: 700; margin: 2px 0 6px; }
@@ -294,6 +317,53 @@ button.ghost { background: transparent; }
 .side-long, .side-buy   { color: var(--green); font-weight: 700; }
 .side-short, .side-sell { color: var(--red);   font-weight: 700; }
 .side-flat, .side-hold  { color: var(--muted); }
+
+/* pro position cards */
+.pos-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+}
+.pos-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.pos-sym { display: flex; flex-direction: column; gap: 4px; }
+.pos-symbol { font-weight: 700; font-size: 1rem; }
+.side-badge {
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 0.62rem; letter-spacing: 0.6px;
+    font-weight: 700;
+    display: inline-block; width: fit-content;
+}
+.side-badge.side-long  { background: var(--green-dim); color: var(--green); }
+.side-badge.side-short { background: var(--red-dim);   color: var(--red); }
+.pos-pnl { text-align: right; font-variant-numeric: tabular-nums; }
+.pos-pnl .pnl-usd { font-size: 1.05rem; font-weight: 700; }
+.pos-pnl .pnl-pct { font-size: 0.75rem; opacity: 0.9; margin-top: 2px; }
+.pos-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px 12px;
+    font-size: 0.78rem;
+}
+.pos-grid .k { color: var(--muted); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.6px; }
+.pos-grid .v { font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* -------------------- portfolio allocation -------------------- */
+.alloc-bar {
+    display: flex; height: 22px;
+    border-radius: 6px; overflow: hidden;
+    background: var(--bg-2); margin-bottom: 8px;
+}
+.alloc-bar div {
+    height: 100%; display: flex; align-items: center; justify-content: center;
+    font-size: 0.65rem; font-weight: 700; color: white;
+    transition: flex-basis 0.4s;
+    min-width: 0;
+}
+.alloc-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 0.78rem; }
+.alloc-list .item { display: flex; justify-content: space-between; }
+.alloc-list .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 
 /* -------------------- patterns -------------------- */
 .pattern-card {

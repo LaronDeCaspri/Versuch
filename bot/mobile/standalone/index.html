@@ -110,6 +110,18 @@
         <div id="watchlist"></div>
     </section>
 
+    <!-- 24h market snapshot -->
+    <section class="card">
+        <h2>24h Marktübersicht <span class="badge">Binance</span></h2>
+        <div style="overflow-x:auto;"><table id="ticker24" class="perf-table"></table></div>
+    </section>
+
+    <!-- portfolio allocation -->
+    <section class="card">
+        <h2>Portfolio-Aufteilung</h2>
+        <div id="allocation"></div>
+    </section>
+
     <!-- multi-tf matrix -->
     <section class="card">
         <h2>Multi-Timeframe Alignment</h2>
@@ -120,7 +132,7 @@
     <section class="card">
         <h2>Fear &amp; Greed Index</h2>
         <div class="fng">
-            <div class="fng-dial"><div class="fng-inner num" id="fng-value">–</div></div>
+            <div class="fng-dial"><div class="fng-inner num" id="fng-value">–<div class="fng-needle" id="fng-needle"></div></div></div>
             <div>
                 <div class="fng-label">Marktstimmung</div>
                 <div id="fng-class" class="fng-class">lade …</div>
