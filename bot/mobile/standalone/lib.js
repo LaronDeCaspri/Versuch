@@ -668,6 +668,7 @@ class PaperBroker {
                 this.positions = d.positions || {};
                 this.journal = d.journal || [];
                 this.startingBalance = d.startingBalance || 10000;
+                this._autoHeal();
                 return;
             } catch (e) { /* fall through */ }
         }
@@ -675,6 +676,20 @@ class PaperBroker {
         this.positions = {};
         this.journal = [];
         this.save();
+    }
+    _autoHeal() {
+        // Detect legacy leveraged state from pre-fix versions and reset.
+        // Trigger: cash is deeply negative (impossible under no-leverage rules).
+        if (this.cash < -this.startingBalance * 0.05) {
+            console.warn("[TB] auto-heal: legacy leveraged state detected, resetting portfolio to 10k. Closed-trade journal kept for records.");
+            const kept = this.journal.filter((e) => e.kind === "close");
+            this.cash = this.startingBalance;
+            this.positions = {};
+            this.journal = kept;
+            this.save();
+            // let the app know so it can reset equity tracking too
+            try { window.dispatchEvent(new CustomEvent("tb-autoheal")); } catch (e) {}
+        }
     }
     save() {
         if (this.isolated) return;
