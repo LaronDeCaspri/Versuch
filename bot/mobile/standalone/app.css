@@ -816,3 +816,182 @@ footer {
     height: 380px; border-radius: var(--radius-sm);
     overflow: hidden; background: #000; border: 1px solid var(--border);
 }
+
+/* -------------------- v6: modal -------------------- */
+.modal {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(3, 6, 12, 0.82); backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+}
+.modal.hidden { display: none; }
+.modal-card {
+    background: var(--bg-2); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); padding: 20px;
+    max-width: 480px; width: 100%; max-height: 88vh; overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+}
+.modal-card h2 { margin-top: 0; }
+.onboarding-step {
+    background: rgba(77, 148, 255, 0.08);
+    border-left: 3px solid var(--accent);
+    padding: 14px 16px; border-radius: 8px; margin: 12px 0 18px;
+    font-size: 0.88rem; line-height: 1.55;
+}
+.onboarding-step h3 { margin: 0 0 8px; font-size: 1rem; color: var(--accent); }
+.ob-progress { display: flex; gap: 4px; margin-bottom: 12px; }
+.ob-dot { flex: 1; height: 4px; background: var(--border); border-radius: 2px; }
+.ob-dot.on { background: var(--accent); }
+
+/* -------------------- v6: market context -------------------- */
+.mkt-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px; margin-bottom: 12px;
+}
+.mkt-tile {
+    background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+}
+.mkt-tile .k { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.mkt-tile .v { font-weight: 700; font-size: 1.05rem; margin-top: 4px; }
+.trend-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.trend-chip {
+    background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 12px; padding: 4px 10px; font-size: 0.78rem; color: var(--amber);
+}
+
+/* -------------------- v6: on-chain -------------------- */
+.onchain-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 8px;
+}
+
+/* -------------------- v6: correlation heatmap -------------------- */
+.corr-table {
+    border-collapse: collapse; font-size: 0.7rem;
+}
+.corr-table th, .corr-table td {
+    padding: 4px 6px; text-align: center; border: 1px solid var(--border);
+    min-width: 38px;
+}
+.corr-table th { background: rgba(255,255,255,0.03); font-weight: 600; }
+.corr-cell { color: #fff; font-weight: 600; font-size: 0.68rem; }
+
+/* -------------------- v6: histogram -------------------- */
+.hist-bars {
+    display: flex; align-items: flex-end; gap: 2px;
+    height: 120px; padding: 8px 0; border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+}
+.hist-bar { flex: 1; min-width: 2px; border-radius: 2px 2px 0 0; }
+.hist-labels {
+    display: flex; justify-content: space-between;
+    color: var(--muted); font-size: 0.68rem; padding: 0 4px;
+}
+
+/* -------------------- v6: tools panel -------------------- */
+.tools-actions {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;
+}
+.tools-actions button { font-size: 0.8rem; padding: 10px 12px; }
+.qr-wrap {
+    text-align: center; padding: 12px;
+    background: rgba(255, 255, 255, 0.02); border-radius: 8px; margin-top: 8px;
+}
+.qr-wrap svg { max-width: 180px; height: auto; background: #fff; padding: 6px; border-radius: 6px; }
+.ntfy-input {
+    display: flex; gap: 6px; margin-top: 8px;
+}
+.ntfy-input input {
+    flex: 1; background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 0.82rem;
+}
+
+/* -------------------- v6: health panel -------------------- */
+.health-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem;
+}
+.health-row:last-child { border-bottom: none; }
+.health-dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+    margin-right: 8px; vertical-align: middle;
+}
+.health-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.health-dot.warn { background: var(--amber); }
+.health-dot.err { background: var(--red); }
+.health-dot.pending { background: var(--muted); }
+
+/* -------------------- v6: position expected profit -------------------- */
+.pos-forecast {
+    margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    font-size: 0.78rem;
+}
+.pos-forecast .k { color: var(--muted); font-size: 0.68rem; }
+.pos-forecast .v { font-weight: 700; }
+.pos-forecast .v.pos { color: var(--green); }
+.pos-forecast .v.neg { color: var(--red); }
+
+/* -------------------- v6: partial close slider -------------------- */
+.pct-slider { width: 100%; margin-top: 8px; }
+.pct-value {
+    text-align: center; font-weight: 700; font-size: 1.4rem;
+    color: var(--accent); margin: 8px 0;
+}
+.pct-preview {
+    background: rgba(77, 148, 255, 0.06);
+    border-radius: 8px; padding: 10px; margin-top: 10px; font-size: 0.82rem;
+}
+.pct-preview .row { padding: 4px 0; }
+
+/* -------------------- v6: manual order form -------------------- */
+.order-form label {
+    display: block; color: var(--muted); font-size: 0.72rem;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-top: 10px;
+}
+.order-form input, .order-form select {
+    width: 100%; background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 9px 11px;
+    font-size: 0.92rem; margin-top: 4px;
+}
+.order-preview {
+    background: rgba(77, 148, 255, 0.06);
+    border: 1px solid rgba(77, 148, 255, 0.25);
+    border-radius: 8px; padding: 10px 12px; margin-top: 12px; font-size: 0.82rem;
+}
+.side-buttons { display: flex; gap: 8px; margin-top: 6px; }
+.side-buttons button {
+    flex: 1; padding: 10px; font-weight: 700; border-radius: 6px;
+    background: rgba(255,255,255,0.03); color: var(--text);
+    border: 1px solid var(--border); cursor: pointer;
+}
+.side-buttons button.on.long { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+.side-buttons button.on.short { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+
+/* -------------------- v6: 24h ticker manual trade -------------------- */
+.ticker-trade { color: var(--accent); cursor: pointer; font-size: 0.72rem; text-decoration: underline; }
+
+/* -------------------- v6: theme toggle (light) -------------------- */
+:root[data-theme="light"] {
+    --bg-0: #f8fafc; --bg-1: #ffffff; --bg-2: #f1f5f9;
+    --surface: rgba(255, 255, 255, 0.9); --surface-2: rgba(241, 245, 249, 0.95);
+    --border: rgba(15, 23, 42, 0.08); --border-strong: rgba(15, 23, 42, 0.18);
+    --text: #0f172a; --text-2: #475569; --muted: #94a3b8;
+    --shadow-md: 0 6px 18px rgba(15, 23, 42, 0.10), 0 1px 3px rgba(15, 23, 42, 0.06);
+    --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.2);
+}
+:root[data-theme="light"] body {
+    background:
+        radial-gradient(circle at 30% -10%, rgba(77, 148, 255, 0.08), transparent 42%),
+        var(--bg-1);
+}
+:root[data-theme="light"] .modal { background: rgba(255, 255, 255, 0.82); }
+
+/* -------------------- v6: haltefrist badge -------------------- */
+.tax-hint {
+    display: inline-block; padding: 2px 6px; border-radius: 4px;
+    font-size: 0.66rem; font-weight: 600; margin-left: 4px;
+}
+.tax-free { background: rgba(34, 197, 94, 0.14); color: var(--green); }
+.tax-owed { background: rgba(245, 158, 11, 0.14); color: var(--amber); }

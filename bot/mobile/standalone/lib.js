@@ -911,6 +911,105 @@ async function fetchFearGreed() {
     } catch { return null; }
 }
 
+// CoinGecko global market data — BTC dominance, total market cap
+async function fetchGlobalMarket() {
+    try {
+        const d = await fetch("https://api.coingecko.com/api/v3/global").then((r) => r.json());
+        const g = d?.data;
+        if (!g) return null;
+        return {
+            btcDominance: g.market_cap_percentage?.btc ?? null,
+            ethDominance: g.market_cap_percentage?.eth ?? null,
+            totalMcap: g.total_market_cap?.usd ?? null,
+            totalVolume: g.total_volume?.usd ?? null,
+            mcapChange24h: g.market_cap_change_percentage_24h_usd ?? null,
+            activeCoins: g.active_cryptocurrencies ?? null,
+        };
+    } catch { return null; }
+}
+
+// CoinGecko trending coins
+async function fetchTrending() {
+    try {
+        const d = await fetch("https://api.coingecko.com/api/v3/search/trending").then((r) => r.json());
+        const coins = (d?.coins || []).slice(0, 10).map((x) => ({
+            id: x.item.id, name: x.item.name, symbol: x.item.symbol,
+            rank: x.item.market_cap_rank, score: x.item.score,
+        }));
+        return coins;
+    } catch { return []; }
+}
+
+// Frankfurter.app free EUR/USD rate — no key needed
+async function fetchEurRate() {
+    try {
+        const d = await fetch("https://api.frankfurter.app/latest?from=USD&to=EUR").then((r) => r.json());
+        return d?.rates?.EUR ?? null;
+    } catch { return null; }
+}
+
+// On-chain: hashrate + mempool from mempool.space
+async function fetchOnChain() {
+    try {
+        const [mempool, fees, hashrate] = await Promise.all([
+            fetch("https://mempool.space/api/mempool").then((r) => r.json()).catch(() => null),
+            fetch("https://mempool.space/api/v1/fees/recommended").then((r) => r.json()).catch(() => null),
+            fetch("https://mempool.space/api/v1/mining/hashrate/1d").then((r) => r.json()).catch(() => null),
+        ]);
+        return {
+            mempoolSize: mempool?.count ?? null,
+            mempoolVsize: mempool?.vsize ?? null,
+            fastFee: fees?.fastestFee ?? null,
+            halfFee: fees?.halfHourFee ?? null,
+            hourFee: fees?.hourFee ?? null,
+            hashrate: hashrate?.currentHashrate ?? null,
+            difficulty: hashrate?.currentDifficulty ?? null,
+        };
+    } catch { return null; }
+}
+
+// Rolling Sharpe from daily returns array
+function rollingSharpe(rets, window = 30, annualisation = 365) {
+    if (!rets.length || rets.length < window) return null;
+    const slice = rets.slice(-window);
+    const mean = slice.reduce((s, r) => s + r, 0) / slice.length;
+    const variance = slice.reduce((s, r) => s + (r - mean) ** 2, 0) / slice.length;
+    const std = Math.sqrt(variance);
+    if (std < 1e-12) return 0;
+    return (mean / std) * Math.sqrt(annualisation);
+}
+
+// Sortino — same but only counts downside deviation
+function rollingSortino(rets, window = 30, annualisation = 365) {
+    if (!rets.length || rets.length < window) return null;
+    const slice = rets.slice(-window);
+    const mean = slice.reduce((s, r) => s + r, 0) / slice.length;
+    const downside = slice.filter((r) => r < 0);
+    if (!downside.length) return 999;
+    const dvar = downside.reduce((s, r) => s + r ** 2, 0) / downside.length;
+    const dstd = Math.sqrt(dvar);
+    if (dstd < 1e-12) return 0;
+    return (mean / dstd) * Math.sqrt(annualisation);
+}
+
+// Calmar = CAGR / max-DD
+function calmar(equityHistory) {
+    if (!equityHistory || equityHistory.length < 30) return null;
+    const first = equityHistory[0];
+    const last = equityHistory[equityHistory.length - 1];
+    const days = (last.ts - first.ts) / (86400 * 1000);
+    if (days < 1) return null;
+    const totalReturn = last.eq / first.eq;
+    const cagr = Math.pow(totalReturn, 365 / days) - 1;
+    let peak = first.eq, maxDD = 0;
+    for (const p of equityHistory) {
+        if (p.eq > peak) peak = p.eq;
+        const dd = (peak - p.eq) / peak;
+        if (dd > maxDD) maxDD = dd;
+    }
+    return maxDD > 0 ? cagr / maxDD : (cagr > 0 ? 999 : 0);
+}
+
 // ---------- exports ----------
 return {
     sma, ema, rsi, macd, bollinger, atr, adx, donchian, obv, stoch, williamsR, cci, mfi,
@@ -919,5 +1018,7 @@ return {
     planTrade, forecast, assessRisk,
     PaperBroker,
     fetchKlines, fetchPrice, fetchFearGreed, fetch24hTickers,
+    fetchGlobalMarket, fetchTrending, fetchEurRate, fetchOnChain,
+    rollingSharpe, rollingSortino, calmar,
 };
 })();
