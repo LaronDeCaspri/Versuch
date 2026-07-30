@@ -752,13 +752,17 @@ function renderKillSwitch() {
     setTimeout(() => {
         const resume = document.getElementById("ks-resume");
         if (resume) resume.onclick = () => {
+            const eqNow = broker.equity(state.prices);
             state.halted = false;
-            state.dayStartEquity = broker.equity(state.prices);
+            state.dayStartEquity = eqNow;
             state.dayStartDate = new Date().toDateString();
+            // reset peak to current so drawdown-check doesn't immediately re-halt
+            state.peakEquity = eqNow;
             localStorage.setItem("tb_halted", "0");
-            localStorage.setItem("tb_day_equity", String(state.dayStartEquity));
+            localStorage.setItem("tb_day_equity", String(eqNow));
             localStorage.setItem("tb_day_date", state.dayStartDate);
-            announce("Kill-Switch entschärft. Bot handelt wieder.", "info");
+            localStorage.setItem("tb_peak_equity", String(eqNow));
+            announce("Kill-Switch entschärft. Bot handelt wieder. Peak und Tages-Referenz auf aktuelles Equity zurückgesetzt.", "info");
             renderAll();
         };
         const full = document.getElementById("ks-full-reset");
