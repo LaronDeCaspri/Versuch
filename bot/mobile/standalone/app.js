@@ -4213,13 +4213,67 @@ confirmPending = function(p) {
     }
 };
 
+// Reconstruct a rationale from CURRENT market state for positions that
+// were opened before rationale-tracking or via a path that skipped it
+function reconstructRationale(symbol, side) {
+    const candles = state.candles[symbol];
+    if (!candles || candles.length < 100) return null;
+    const c = window.TB.closes(candles), h = window.TB.highs(candles), l = window.TB.lows(candles);
+    const i = c.length - 1;
+    const rsiVal = window.TB.rsi(c, 14)[i];
+    const macdRes = window.TB.macd(c);
+    const adxVal = window.TB.adx(h, l, c, 14)[i];
+    const e20 = window.TB.ema(c, 20)[i], e50 = window.TB.ema(c, 50)[i], e200 = window.TB.ema(c, 200)[i];
+    const atrVal = window.TB.atr(h, l, c, 14)[i];
+    const patterns = window.TB.detectPatterns(candles);
+    const patternList = Object.keys(patterns).map((k) => ({
+        key: k, info: window.TB.PATTERN_INFO[k], stats: state.patternStats[k],
+    }));
+    const regime = window.TB.detectRegime(h, l, c);
+    const conf = window.TB.confluenceScore(candles);
+    const reasons = [];
+    if (side === "long") {
+        if (e20 > e50) reasons.push("<strong>Kurzfristig-Trend nach oben</strong> (EMA20 &gt; EMA50)");
+        if (c[i] > e200) reasons.push("<strong>Langfristig-Trend nach oben</strong> (Preis &gt; EMA200)");
+        if (rsiVal < 40) reasons.push(`RSI überverkauft: ${rsiVal.toFixed(1)}`);
+        if (macdRes.hist[i] > 0) reasons.push("MACD-Histogramm positiv");
+        if (adxVal > 25) reasons.push(`Starker Trend (ADX ${adxVal.toFixed(1)})`);
+    } else {
+        if (e20 < e50) reasons.push("<strong>Kurzfristig-Trend nach unten</strong> (EMA20 &lt; EMA50)");
+        if (c[i] < e200) reasons.push("<strong>Langfristig-Trend nach unten</strong> (Preis &lt; EMA200)");
+        if (rsiVal > 60) reasons.push(`RSI überkauft: ${rsiVal.toFixed(1)}`);
+        if (macdRes.hist[i] < 0) reasons.push("MACD-Histogramm negativ");
+        if (adxVal > 25) reasons.push(`Starker Trend (ADX ${adxVal.toFixed(1)})`);
+    }
+    if (!reasons.length) reasons.push("Aktuell keine klaren Trend-Signale");
+    return {
+        patterns: patternList,
+        regime,
+        indicators: { rsi: rsiVal, macdHist: macdRes.hist[i], adx: adxVal,
+                     ema20: e20, ema50: e50, ema200: e200, atrPct: (atrVal / c[i]) * 100 },
+        reasons,
+        confluenceScore: conf?.score,
+        confluenceSide: conf?.side,
+        strategies: [{ name: "aktuelle Marktanalyse", reason: "aus Live-Daten rekonstruiert (keine gespeicherte Begründung)" }],
+        reconstructed: true,
+    };
+}
+
 // ---- "Warum?" modal ----
 function showWhy(source) {
     // source is either a pending signal or a position
-    const r = source.rationale;
+    let r = source.rationale;
+    if (!r && source.symbol && source.side) {
+        r = reconstructRationale(source.symbol, source.side);
+    }
     if (!r) {
-        $("#why-body").innerHTML = "<p>Für diesen Trade wurde keine Begründung gespeichert (evtl. vor v9 eröffnet oder manuell).</p>";
-    } else {
+        $("#why-body").innerHTML = `
+            <p>Für diesen Trade konnte keine Begründung erzeugt werden — es fehlen Kursdaten für ${source.symbol || "das Symbol"}.</p>
+            <p>Warte einen Scan-Zyklus (30 Sek.) und probiere es nochmal.</p>`;
+        $("#why-modal").classList.remove("hidden");
+        return;
+    }
+    {
         const patternBlock = r.patterns.filter((p) => p.info).map((p) => {
             const stats = p.stats
                 ? `<small style="color:var(--muted);">${(p.stats.winRate * 100).toFixed(0)}% Win-Rate über ${p.stats.count} Vorkommen</small>`
@@ -4315,6 +4369,33 @@ renderSignalTile = function(pending, fallback) {
             }
         }
     }
+};
+
+// ---- Hook broker.submit to attach a rationale to EVERY new position ----
+// This covers manual trades, limit-order fills, DCA buys, rebalance,
+// grid fills, pair-trades — anywhere that calls broker.submit directly.
+const _origSubmitV9 = broker.submit.bind(broker);
+broker.submit = function(symbol, side, qty, price, meta) {
+    const r = _origSubmitV9(symbol, side, qty, price, meta);
+    if (r && !r.rationale) {
+        // build rationale from current market state
+        const source = meta?.strategy || "";
+        const humanSource = {
+            manual:       "Manueller Trade (du hast bestätigt)",
+            limit_order:  "Limit-Order gefüllt bei Ziel-Preis",
+            dca_buffett:  "DCA-Sparplan: wöchentlicher Kauf bei RSI &lt; 30",
+            rebalance:    "Rebalancing zur Ziel-Allokation",
+            pair_trade:   "Pair-Trade: Z-Score des Ratios überschritten",
+        }[source] || `Bot-Signal: ${source.replace(/_/g, " ")}`;
+        const reconstructed = reconstructRationale(symbol, side);
+        if (reconstructed) {
+            reconstructed.reasons.unshift(`<strong>Auslöser:</strong> ${humanSource}`);
+            reconstructed.strategies = [{ name: source || "manual", reason: humanSource }];
+            r.rationale = reconstructed;
+            broker.save();
+        }
+    }
+    return r;
 };
 
 // ---- Modal close bindings ----
