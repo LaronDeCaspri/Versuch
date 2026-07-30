@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+    <meta name="theme-color" content="#0a0e17">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Trading Bot</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="news-popup" class="news-popup hidden">
+    <div class="news-popup-title"></div>
+    <div class="news-popup-summary"></div>
+    <div class="news-popup-meta">
+        <span class="news-popup-source"></span>
+        <button class="news-popup-close ghost">Schliessen</button>
+    </div>
+</div>
+
+<header>
+    <div class="brand">
+        <div class="brand-mark">⌁</div>
+        <div>
+            <div style="letter-spacing:-0.5px;">Trading Bot</div>
+            <div style="color:var(--muted); font-size:0.68rem; font-weight:500; letter-spacing:0.5px; text-transform:uppercase;">Demo · Live-Daten · 10 000 USDT Spielgeld</div>
+        </div>
+    </div>
+    <div class="status-pills">
+        <div id="mode-pill" class="pill"><span class="dot"></span><span>Manuell</span></div>
+        <div id="status-pill" class="pill on"><span class="dot"></span><span>Live</span></div>
+    </div>
+</header>
+
+<main>
+
+    <!-- big signal tile -->
+    <section id="signal-tile" class="signal grey">
+        <div class="signal-badge">Handelsentscheidung</div>
+        <div class="signal-label">HALTEN</div>
+        <div class="signal-symbol">–</div>
+        <div class="signal-price num">Lade Live-Daten von Binance ...</div>
+    </section>
+
+    <!-- Jarvis -->
+    <section class="card">
+        <h2>Jarvis · Sprachassistent <span class="badge" id="jarvis-badge">deaktiviert</span></h2>
+        <div id="jarvis-panel">
+            <div id="jarvis-orb">J</div>
+            <div id="jarvis-status">
+                <div class="title">Jarvis bereit</div>
+                <div class="subtitle">Spricht Signale, Take-Profits und Stops auf Deutsch. Läuft komplett im Browser – keine Cloud, keine Kosten.</div>
+            </div>
+        </div>
+        <div id="jarvis-controls">
+            <button id="jarvis-toggle">Jarvis aktivieren</button>
+            <select id="jarvis-voice-picker" title="Stimme"></select>
+        </div>
+        <div id="jarvis-log"></div>
+    </section>
+
+    <!-- portfolio -->
+    <section class="card">
+        <h2>Portfolio <span class="badge">Paper</span></h2>
+        <div class="row"><span>Equity</span><strong class="num" id="equity">10 000,00 USDT</strong></div>
+        <div class="row"><span>Cash</span><strong class="num" id="cash">10 000,00 USDT</strong></div>
+        <div class="row"><span>Offene Positionen</span><strong class="num" id="pos-count">0</strong></div>
+        <div class="row"><span>Realisierter PnL</span><strong class="num" id="pnl">0,00 USDT</strong></div>
+        <div class="btn-row">
+            <button id="btn-scan" class="primary">Jetzt scannen</button>
+            <button id="btn-reset" class="danger">Reset</button>
+        </div>
+        <div class="toggle-row">
+            <div class="lbl"><strong id="mode-label">Manuell (Demo)</strong> – Signale bestätigen · Vollautomatik wenn an</div>
+            <div id="mode-toggle" class="toggle"></div>
+        </div>
+    </section>
+
+    <!-- multi-tf matrix -->
+    <section class="card">
+        <h2>Multi-Timeframe Alignment</h2>
+        <div id="matrix" class="matrix"></div>
+    </section>
+
+    <!-- fear & greed -->
+    <section class="card">
+        <h2>Fear &amp; Greed Index</h2>
+        <div class="fng">
+            <div class="fng-dial"><div class="fng-inner num" id="fng-value">–</div></div>
+            <div>
+                <div class="fng-label">Marktstimmung</div>
+                <div id="fng-class" class="fng-class">lade …</div>
+                <div class="fng-hint">&lt; 20 = extreme Angst · &gt; 80 = extreme Gier</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TV chart -->
+    <section class="card">
+        <h2>Live-Chart <span class="badge">TradingView</span></h2>
+        <div class="btn-row" style="margin-bottom:8px;" id="tv-symbols"></div>
+        <div id="tv-wrap">
+            <iframe id="tv-iframe" src="" style="width:100%; height:100%; border:0;" allowfullscreen></iframe>
+        </div>
+    </section>
+
+    <!-- positions -->
+    <section class="card">
+        <h2>Positionen</h2>
+        <div id="positions"></div>
+    </section>
+
+    <!-- signals log -->
+    <section class="card">
+        <h2>Letzte Scans</h2>
+        <div id="signals"></div>
+    </section>
+
+    <!-- journal -->
+    <section class="card">
+        <h2>Handels-Journal</h2>
+        <div id="journal"></div>
+    </section>
+
+    <!-- strategies chips -->
+    <section class="card">
+        <h2>Aktive Strategien <span class="badge" id="strat-count">–</span></h2>
+        <div id="strategies"></div>
+    </section>
+
+    <section class="card">
+        <h2>Rulebook</h2>
+        <ol id="rules">
+            <li>Kapitalerhalt zuerst, Gewinn danach.</li>
+            <li>Kein Trade ohne festgelegten Stop.</li>
+            <li>Risiko pro Trade ist fix, die Positionsgrösse passt sich an.</li>
+            <li>Konfluenz schlägt Überzeugung. Zwei unabhängige Signale oder kein Trade.</li>
+            <li>Höherer Zeitrahmen setzt Richtung, kleinerer Zeitrahmen den Trigger.</li>
+            <li>Volumen bestätigt Preis. Preis ohne Volumen ist Rauschen.</li>
+            <li>Nie hinterher rennen. Das nächste Setup kommt in Minuten.</li>
+            <li>Nach 3 Verlusten in Folge: Pause und Review.</li>
+            <li>Jeden Trade journalisieren: Setup, Idee, Ausführung, Ergebnis, Lektion.</li>
+            <li>Kill-Switch auf Tagesverlust und Drawdown ist nicht verhandelbar.</li>
+        </ol>
+    </section>
+
+</main>
+
+<footer>Trading Bot · Läuft komplett im Browser · Live-Daten von Binance Public API · kein Server, keine Cloud, keine Kosten</footer>
+
+<script src="lib.js"></script>
+<script src="jarvis.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
