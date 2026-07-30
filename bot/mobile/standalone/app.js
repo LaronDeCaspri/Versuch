@@ -149,16 +149,30 @@ function renderPositions() {
 function renderMatrix() {
     const el = $("#matrix");
     const tfs = ["15m", "1h", "4h", "1d"];
-    let html = `<div class="head">Symbol</div>` + tfs.map((t) => `<div class="head">${t}</div>`).join("");
-    for (const sym of CFG.symbols) {
-        html += `<div>${sym}</div>`;
-        for (const tf of tfs) {
-            const key = `${sym}_${tf}`;
-            const dir = state.tfDir?.[key] || "flat";
-            html += `<div><div class="dot ${dir}"></div></div>`;
-        }
-    }
-    el.innerHTML = html;
+    let up = 0, down = 0, flat = 0;
+    const rows = CFG.symbols.map((sym) => {
+        const cells = tfs.map((tf) => {
+            const dir = state.tfDir?.[`${sym}_${tf}`] || "flat";
+            if (dir === "up") up++;
+            else if (dir === "down") down++;
+            else flat++;
+            return `<td><span class="dot ${dir}"></span></td>`;
+        }).join("");
+        return `<tr><td>${sym}</td>${cells}</tr>`;
+    }).join("");
+    el.innerHTML = `
+        <table class="matrix-table">
+            <thead><tr><th>Symbol</th>${tfs.map((t) => `<th>${t}</th>`).join("")}</tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div class="matrix-summary">
+            <span class="legend">
+                <span><span class="dot up"></span> Aufwärts</span>
+                <span><span class="dot down"></span> Abwärts</span>
+                <span><span class="dot"></span> Neutral</span>
+            </span>
+            <span>${up} up · ${down} down · ${flat} flat</span>
+        </div>`;
 }
 
 function renderSignalsLog() {
@@ -276,9 +290,9 @@ function passesStrictFilter(pending) {
 }
 
 // =========== main scan loop ============================================
-async function refreshMatrix(symbol, candles) {
+function dirFromCandles(candles) {
     const closes = window.TB.closes(candles);
-    if (closes.length < 210) return;
+    if (closes.length < 210) return "flat";
     const macd = window.TB.macd(closes);
     const e20 = window.TB.ema(closes, 20);
     const e50 = window.TB.ema(closes, 50);
@@ -289,8 +303,19 @@ async function refreshMatrix(symbol, candles) {
         macd.hist[i] > 0 ? 1 : -1,
         rsi[i] > 50 ? 1 : -1,
     ].reduce((s, x) => s + x, 0);
+    return votes >= 2 ? "up" : votes <= -2 ? "down" : "flat";
+}
+
+async function refreshMatrix(symbol, primaryCandles) {
     state.tfDir = state.tfDir || {};
-    state.tfDir[`${symbol}_${CFG.primaryTf}`] = votes >= 2 ? "up" : votes <= -2 ? "down" : "flat";
+    state.tfDir[`${symbol}_${CFG.primaryTf}`] = dirFromCandles(primaryCandles);
+    const tfs = ["1h", "4h", "1d"].filter((t) => t !== CFG.primaryTf);
+    await Promise.all(tfs.map(async (tf) => {
+        try {
+            const c = await window.TB.fetchKlines(symbol, tf, 250);
+            state.tfDir[`${symbol}_${tf}`] = dirFromCandles(c);
+        } catch (e) { /* keep previous */ }
+    }));
 }
 
 async function scanSymbol(symbol) {
