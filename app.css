@@ -995,3 +995,97 @@ footer {
 }
 .tax-free { background: rgba(34, 197, 94, 0.14); color: var(--green); }
 .tax-owed { background: rgba(245, 158, 11, 0.14); color: var(--amber); }
+
+/* -------------------- v7: limit orders / DCA / grid / rebalance / pair -------------------- */
+.lim-row, .grid-row, .pair-row, .reb-row {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02); margin-bottom: 6px; font-size: 0.82rem;
+}
+.lim-row.armed { border-left: 3px solid var(--amber); }
+.lim-row.filled { border-left: 3px solid var(--green); opacity: 0.7; }
+.lim-cancel {
+    background: transparent; border: 1px solid var(--red); color: var(--red);
+    padding: 4px 8px; border-radius: 4px; font-size: 0.72rem; cursor: pointer;
+}
+.dca-config {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;
+}
+.dca-config label { color: var(--muted); font-size: 0.72rem; }
+.dca-config input, .dca-config select {
+    width: 100%; background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 0.82rem;
+}
+
+/* -------------------- v7: macro calendar -------------------- */
+.econ-row {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 6px; font-size: 0.82rem;
+}
+.econ-row.imminent {
+    background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3);
+}
+.econ-badge {
+    background: var(--surface-2); padding: 3px 8px; border-radius: 4px;
+    font-weight: 700; font-size: 0.7rem; min-width: 44px; text-align: center;
+}
+.econ-badge.FOMC { background: rgba(77, 148, 255, 0.18); color: var(--accent); }
+.econ-badge.CPI { background: rgba(239, 68, 68, 0.18); color: var(--red); }
+.econ-badge.NFP { background: rgba(245, 158, 11, 0.18); color: var(--amber); }
+.econ-badge.ECB { background: rgba(168, 85, 247, 0.18); color: var(--purple); }
+.econ-badge.BTC { background: rgba(34, 197, 94, 0.18); color: var(--green); }
+.econ-countdown { font-family: monospace; color: var(--muted); font-size: 0.75rem; }
+
+/* -------------------- v7: whale list -------------------- */
+.whale-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 6px; font-size: 0.82rem;
+}
+.whale-row a { color: var(--accent); text-decoration: none; font-family: monospace; font-size: 0.72rem; }
+
+/* -------------------- v7: alpha decay -------------------- */
+.decay-strategy { margin-bottom: 14px; }
+.decay-strategy .head {
+    display: flex; justify-content: space-between; font-size: 0.78rem;
+    margin-bottom: 4px; align-items: center;
+}
+.decay-bars { display: flex; align-items: flex-end; gap: 3px; height: 40px; }
+.decay-bar { flex: 1; border-radius: 2px 2px 0 0; min-width: 6px; }
+.decay-bar.pos { background: var(--green); }
+.decay-bar.neg { background: var(--red); }
+.decay-trend { font-size: 0.72rem; font-weight: 700; }
+.decay-trend.up { color: var(--green); }
+.decay-trend.down { color: var(--red); }
+.decay-trend.flat { color: var(--muted); }
+
+/* -------------------- v7: integrations panel -------------------- */
+.integ-row {
+    display: grid; grid-template-columns: 1fr; gap: 4px;
+    padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+    background: rgba(255,255,255,0.02); margin-bottom: 8px;
+}
+.integ-row .head {
+    display: flex; justify-content: space-between; font-weight: 700; font-size: 0.9rem;
+}
+.integ-row input {
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 0.82rem;
+    font-family: monospace;
+}
+.integ-row .btn-row { margin-top: 6px; }
+.integ-status { font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+.integ-status.on { background: rgba(34, 197, 94, 0.18); color: var(--green); }
+.integ-status.off { background: rgba(107, 120, 145, 0.14); color: var(--muted); }
+
+/* -------------------- v7: histogram normal-overlay -------------------- */
+.hist-svg { width: 100%; height: 140px; }
+.hist-normal-line { stroke: var(--amber); stroke-width: 1.5; fill: none; opacity: 0.85; }
+
+/* -------------------- v7: journal method selector -------------------- */
+#journal-method {
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 6px 8px; font-size: 0.78rem;
+    margin-left: 8px;
+}

@@ -1010,6 +1010,201 @@ function calmar(equityHistory) {
     return maxDD > 0 ? cagr / maxDD : (cagr > 0 ? 999 : 0);
 }
 
+// Active addresses + block stats from blockchain.info
+async function fetchBlockchainStats() {
+    try {
+        const [addrs, txs, diff] = await Promise.all([
+            fetch("https://blockchain.info/q/24hrbtcsent?cors=true").then((r) => r.text()).catch(() => null),
+            fetch("https://blockchain.info/q/24hrtransactioncount?cors=true").then((r) => r.text()).catch(() => null),
+            fetch("https://blockchain.info/q/getdifficulty?cors=true").then((r) => r.text()).catch(() => null),
+        ]);
+        return {
+            btcSent24h: addrs ? parseFloat(addrs) / 1e8 : null,
+            txCount24h: txs ? parseInt(txs) : null,
+            difficulty: diff ? parseFloat(diff) : null,
+        };
+    } catch { return null; }
+}
+
+// mempool.space large recent transactions — pseudo whale watch
+async function fetchWhaleTransfers() {
+    try {
+        const mempool = await fetch("https://mempool.space/api/mempool/recent").then((r) => r.json()).catch(() => []);
+        // top 10 by fee (proxy for large value txns)
+        return (mempool || []).slice(0, 30)
+            .filter((t) => t.value > 1e9)                // > 10 BTC in satoshi (100M sat/BTC)
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 8)
+            .map((t) => ({
+                txid: t.txid,
+                btc: t.value / 1e8,
+                fee: t.fee,
+                url: `https://mempool.space/tx/${t.txid}`,
+            }));
+    } catch { return []; }
+}
+
+// Hard-coded macro event calendar (FOMC / CPI / NFP + BTC halving)
+function economicCalendar() {
+    const raw = [
+        // FOMC 2026 (approx dates — Fed publishes ~1yr in advance)
+        { date: "2026-01-28", type: "FOMC", desc: "Fed Zinsentscheid" },
+        { date: "2026-03-18", type: "FOMC", desc: "Fed Zinsentscheid + SEP" },
+        { date: "2026-04-29", type: "FOMC", desc: "Fed Zinsentscheid" },
+        { date: "2026-06-17", type: "FOMC", desc: "Fed Zinsentscheid + SEP" },
+        { date: "2026-07-29", type: "FOMC", desc: "Fed Zinsentscheid" },
+        { date: "2026-09-16", type: "FOMC", desc: "Fed Zinsentscheid + SEP" },
+        { date: "2026-10-28", type: "FOMC", desc: "Fed Zinsentscheid" },
+        { date: "2026-12-16", type: "FOMC", desc: "Fed Zinsentscheid + SEP" },
+        // CPI 2026 — typically 2nd Wed of month
+        { date: "2026-01-14", type: "CPI",  desc: "US-Inflationsdaten (Dez)" },
+        { date: "2026-02-11", type: "CPI",  desc: "US-Inflationsdaten (Jan)" },
+        { date: "2026-03-11", type: "CPI",  desc: "US-Inflationsdaten (Feb)" },
+        { date: "2026-04-15", type: "CPI",  desc: "US-Inflationsdaten (Mär)" },
+        { date: "2026-05-13", type: "CPI",  desc: "US-Inflationsdaten (Apr)" },
+        { date: "2026-06-10", type: "CPI",  desc: "US-Inflationsdaten (Mai)" },
+        { date: "2026-07-15", type: "CPI",  desc: "US-Inflationsdaten (Jun)" },
+        { date: "2026-08-12", type: "CPI",  desc: "US-Inflationsdaten (Jul)" },
+        { date: "2026-09-10", type: "CPI",  desc: "US-Inflationsdaten (Aug)" },
+        { date: "2026-10-15", type: "CPI",  desc: "US-Inflationsdaten (Sep)" },
+        { date: "2026-11-13", type: "CPI",  desc: "US-Inflationsdaten (Okt)" },
+        { date: "2026-12-10", type: "CPI",  desc: "US-Inflationsdaten (Nov)" },
+        // NFP — first Friday
+        { date: "2026-01-02", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-02-06", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-03-06", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-04-03", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-05-01", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-06-05", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-07-03", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-08-07", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-09-04", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-10-02", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-11-06", type: "NFP",  desc: "Nonfarm Payrolls" },
+        { date: "2026-12-04", type: "NFP",  desc: "Nonfarm Payrolls" },
+        // ECB
+        { date: "2026-01-22", type: "ECB",  desc: "EZB Zinsentscheid" },
+        { date: "2026-03-12", type: "ECB",  desc: "EZB Zinsentscheid" },
+        { date: "2026-04-30", type: "ECB",  desc: "EZB Zinsentscheid" },
+        { date: "2026-06-11", type: "ECB",  desc: "EZB Zinsentscheid" },
+        { date: "2026-07-23", type: "ECB",  desc: "EZB Zinsentscheid" },
+        { date: "2026-09-10", type: "ECB",  desc: "EZB Zinsentscheid" },
+        { date: "2026-10-29", type: "ECB",  desc: "EZB Zinsentscheid" },
+        { date: "2026-12-17", type: "ECB",  desc: "EZB Zinsentscheid" },
+        // BTC halving countdown (next: ~April 2028)
+        { date: "2028-04-15", type: "BTC",  desc: "Bitcoin Halving #5 (Block 1 050 000)" },
+    ];
+    const now = Date.now();
+    return raw
+        .map((e) => ({ ...e, ts: new Date(e.date + "T13:30:00Z").getTime() }))
+        .filter((e) => e.ts >= now - 6 * 3600 * 1000)     // include events happening today
+        .sort((a, b) => a.ts - b.ts);
+}
+
+// Alpha-decay: bucket a strategy's trades into 20-trade windows, compute mean PnL per bucket
+function alphaDecayBuckets(trades, bucketSize = 15) {
+    if (!trades.length) return [];
+    const sorted = trades.slice().sort((a, b) => new Date(a.close_ts) - new Date(b.close_ts));
+    const buckets = [];
+    for (let i = 0; i < sorted.length; i += bucketSize) {
+        const chunk = sorted.slice(i, i + bucketSize);
+        const meanPnl = chunk.reduce((s, t) => s + t.pnl, 0) / chunk.length;
+        const wins = chunk.filter((t) => t.pnl > 0).length;
+        buckets.push({
+            start: chunk[0].close_ts, end: chunk[chunk.length - 1].close_ts,
+            count: chunk.length, meanPnl, winRate: wins / chunk.length,
+        });
+    }
+    return buckets;
+}
+
+// FIFO/LIFO matcher for partial closes — produces proper lot-matched round-trips
+function matchTradesFifo(journal, method = "fifo") {
+    const opens = {};              // symbol → queue of {ts, price, qtyRemaining, strategy, side}
+    const matches = [];
+    for (const e of journal) {
+        if (e.kind === "open") {
+            (opens[e.symbol] = opens[e.symbol] || []).push({
+                ts: e.ts, price: e.price, qtyRemaining: e.qty, strategy: e.strategy || "",
+                side: e.side, original_qty: e.qty,
+            });
+        } else if (e.kind === "close") {
+            let need = e.qty;
+            const stack = opens[e.symbol] || [];
+            while (need > 1e-12 && stack.length) {
+                const idx = method === "fifo" ? 0 : stack.length - 1;
+                const lot = stack[idx];
+                const take = Math.min(lot.qtyRemaining, need);
+                const pnl = lot.side === "long"
+                    ? (e.price - lot.price) * take
+                    : (lot.price - e.price) * take;
+                matches.push({
+                    symbol: e.symbol, side: lot.side,
+                    open_ts: lot.ts, close_ts: e.ts,
+                    open_price: lot.price, close_price: e.price,
+                    qty: take, pnl,
+                    strategy: lot.strategy,
+                    holding_ms: new Date(e.ts) - new Date(lot.ts),
+                    partial: take < lot.original_qty,
+                });
+                lot.qtyRemaining -= take;
+                need -= take;
+                if (lot.qtyRemaining <= 1e-12) stack.splice(idx, 1);
+            }
+        }
+    }
+    return matches;
+}
+
+// AES-GCM encrypted backup using PBKDF2-derived key
+async function encryptWithPassword(plainText, password) {
+    const enc = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const keyMaterial = await crypto.subtle.importKey(
+        "raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+    const key = await crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt, iterations: 200_000, hash: "SHA-256" },
+        keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+    const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(plainText));
+    // combine: [salt(16)][iv(12)][ciphertext]
+    const combined = new Uint8Array(salt.length + iv.length + ct.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(ct), salt.length + iv.length);
+    return btoa(String.fromCharCode(...combined));
+}
+
+async function decryptWithPassword(b64, password) {
+    const raw = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const salt = raw.slice(0, 16);
+    const iv = raw.slice(16, 28);
+    const ct = raw.slice(28);
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+        "raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+    const key = await crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt, iterations: 200_000, hash: "SHA-256" },
+        keyMaterial, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+    return new TextDecoder().decode(pt);
+}
+
+// HMAC-SHA256 signature for Binance signed endpoints
+async function hmacSha256(secret, message) {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+        "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+    return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Normal-distribution PDF for histogram overlay
+function normalPdf(x, mean, std) {
+    if (std < 1e-12) return 0;
+    return (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-((x - mean) ** 2) / (2 * std * std));
+}
+
 // ---------- exports ----------
 return {
     sma, ema, rsi, macd, bollinger, atr, adx, donchian, obv, stoch, williamsR, cci, mfi,
@@ -1019,6 +1214,9 @@ return {
     PaperBroker,
     fetchKlines, fetchPrice, fetchFearGreed, fetch24hTickers,
     fetchGlobalMarket, fetchTrending, fetchEurRate, fetchOnChain,
+    fetchBlockchainStats, fetchWhaleTransfers,
     rollingSharpe, rollingSortino, calmar,
+    economicCalendar, alphaDecayBuckets, matchTradesFifo,
+    encryptWithPassword, decryptWithPassword, hmacSha256, normalPdf,
 };
 })();

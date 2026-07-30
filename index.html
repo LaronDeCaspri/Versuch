@@ -32,8 +32,9 @@
         </div>
     </div>
     <div class="status-pills">
+        <button id="lang-toggle" class="pill" title="Sprache"><span>DE</span></button>
         <button id="theme-toggle" class="pill" title="Hell/Dunkel"><span>🌙</span></button>
-        <div id="mode-pill" class="pill"><span class="dot"></span><span>Manuell</span></div>
+        <div id="mode-pill" class="pill"><span class="dot"></span><span data-i18n="mode-manual">Manuell</span></div>
         <div id="status-pill" class="pill on"><span class="dot"></span><span>Live</span></div>
     </div>
 </header>
@@ -240,6 +241,85 @@
         <div style="overflow-x:auto;"><table id="futures-table" class="perf-table"></table></div>
     </section>
 
+    <!-- limit orders -->
+    <section class="card">
+        <h2>Limit-Orders <span class="badge" id="limit-count">0 offen</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Wartet bis der Preis dein Level erreicht, dann führt Bot automatisch aus.
+        </div>
+        <div class="watchlist-add">
+            <select id="limit-symbol"></select>
+            <select id="limit-side">
+                <option value="long">LONG bei ≤</option>
+                <option value="short">SHORT bei ≥</option>
+            </select>
+            <input type="number" id="limit-price" placeholder="Preis" step="0.0001"/>
+            <input type="number" id="limit-notional" placeholder="USDT" step="10" value="200"/>
+            <button id="limit-add" class="primary" style="grid-column: span 2;">+ Limit-Order</button>
+        </div>
+        <div id="limit-list"></div>
+    </section>
+
+    <!-- DCA scheduler -->
+    <section class="card">
+        <h2>DCA-Sparplan <span class="badge">Buffett-Style</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Kauft wöchentlich in BTC/ETH/BNB, aber nur wenn RSI &lt; 30 (überverkauft). "Be greedy when others are fearful."
+        </div>
+        <div id="dca-panel"></div>
+    </section>
+
+    <!-- Grid trading -->
+    <section class="card">
+        <h2>Grid-Trading <span class="badge">Range-Markt</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Setzt automatisch Kauf-Orders unter aktuellem Preis und Verkauf-Orders darüber im Raster. Ideal für seitwärts laufende Märkte.
+        </div>
+        <div id="grid-panel"></div>
+    </section>
+
+    <!-- Portfolio rebalancing -->
+    <section class="card">
+        <h2>Portfolio-Rebalancing <span class="badge">Ziel-Allokation</span></h2>
+        <div id="rebalance-panel"></div>
+    </section>
+
+    <!-- Pair trading -->
+    <section class="card">
+        <h2>Pair-Trading <span class="badge">Market-neutral</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Long das relativ günstige Asset + Short das relativ teure. Verdient an Konvergenz, egal ob Markt steigt oder fällt.
+        </div>
+        <div id="pair-panel"></div>
+    </section>
+
+    <!-- economic calendar -->
+    <section class="card">
+        <h2>Makro-Kalender <span class="badge">FOMC · CPI · NFP · EZB</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Rote Zone = binnen 24h. Volatilität steigt bei Nachrichten stark — Positionsgrösse ggf. reduzieren.
+        </div>
+        <div id="econ-calendar"></div>
+    </section>
+
+    <!-- whale transfers -->
+    <section class="card">
+        <h2>Whale-Transfers <span class="badge">&gt; 10 BTC</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Grosse Bitcoin-Bewegungen aus dem Mempool (mempool.space).
+        </div>
+        <div id="whale-list"></div>
+    </section>
+
+    <!-- alpha decay -->
+    <section class="card">
+        <h2>Alpha-Decay <span class="badge">Strategie-Lebensdauer</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Bucket-PnL pro Strategie über die Zeit. Steiler Abfall = Edge verbraucht.
+        </div>
+        <div id="alpha-decay"></div>
+    </section>
+
     <!-- correlation heatmap -->
     <section class="card">
         <h2>Korrelations-Matrix <span class="badge">50 Bars</span></h2>
@@ -309,6 +389,10 @@
                 <button data-view="all" class="jv-tab">Gesamt</button>
             </div>
             <input type="date" id="journal-date" class="journal-date"/>
+            <select id="journal-method" title="Lot-Zuordnungs-Methode für Teil-Schliessungen">
+                <option value="fifo">FIFO (Steuer-Standard)</option>
+                <option value="lifo">LIFO</option>
+            </select>
         </div>
         <div id="journal-summary" class="journal-summary"></div>
         <div style="overflow-x:auto;">
@@ -330,6 +414,25 @@
     <section class="card">
         <h2>Benachrichtigungen &amp; Tools</h2>
         <div id="tools-panel"></div>
+    </section>
+
+    <!-- External integrations: Telegram, Email, Whale-Alert -->
+    <section class="card">
+        <h2>Externe Integrationen <span class="badge">Bring your own token</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Alle Credentials bleiben lokal im Browser (localStorage). Werden niemals an einen Server gesendet.
+        </div>
+        <div id="integrations-panel"></div>
+    </section>
+
+    <!-- Testnet UI -->
+    <section class="card">
+        <h2>Binance Testnet <span class="badge">Echte Orders · Testgeld</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Wenn aktiviert, gehen Bot-Trades zusätzlich als echte Orders auf testnet.binance.vision. Kostenlos, keine echten Coins.
+            API-Keys hier holen: <a href="https://testnet.binance.vision/" target="_blank" rel="noopener" style="color:var(--accent);">testnet.binance.vision</a>
+        </div>
+        <div id="testnet-panel"></div>
     </section>
 
     <!-- Health status -->
