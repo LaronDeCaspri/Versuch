@@ -1301,6 +1301,19 @@ $("#btn-reset").onclick = () => {
     renderAll();
 };
 
+$("#btn-nuke")?.addEventListener("click", () => {
+    if (!confirm("ALLES löschen? Depot, geschlossene Trades, Watchlist, Alarme, Historie — alles auf Werkseinstellung. Nicht rückgängig zu machen.")) return;
+    // wipe every tb_* key
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("tb_")) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+    announce("Komplett-Reset ausgeführt. App wird neu geladen.", "alert");
+    setTimeout(() => location.reload(), 800);
+});
+
 $("#mode-toggle").onclick = () => {
     state.autoMode = !state.autoMode;
     localStorage.setItem("tb_auto", state.autoMode ? "1" : "0");

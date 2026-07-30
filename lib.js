@@ -648,7 +648,7 @@ function assessRisk(plan, candles, openPositions, equity) {
 
 // ---------- paper broker with localStorage persistence ----------
 class PaperBroker {
-    static SCHEMA_VERSION = 2;                                // bump when accounting logic changes
+    static SCHEMA_VERSION = 3;                                // bump when accounting logic changes
     constructor(startingBalance = 10000, opts = {}) {
         this.startingBalance = startingBalance;
         this.isolated = !!opts.isolated;                       // no localStorage in isolated mode
@@ -693,16 +693,26 @@ class PaperBroker {
         this.save();
     }
     _autoHeal() {
-        // Detect legacy leveraged state from pre-fix versions and reset.
-        // Trigger: cash is deeply negative (impossible under no-leverage rules).
-        if (this.cash < -this.startingBalance * 0.05) {
-            console.warn("[TB] auto-heal: legacy leveraged state detected, resetting portfolio to 10k. Closed-trade journal kept for records.");
+        // Compute expected equity (no marks): cash + sum of position notionals at entry (long +, short -)
+        // If actual "no-marks" equity is way off from starting + realized PnL, state is corrupt.
+        let expected = this.cash;
+        for (const sym in this.positions) {
+            const p = this.positions[sym];
+            expected += (p.side === "long") ? p.qty * p.entry : -p.qty * p.entry;
+        }
+        const realized = this.journal.filter((e) => e.kind === "close").reduce((s, e) => s + (e.pnl || 0), 0);
+        const sane = this.startingBalance + realized;
+        const drift = Math.abs(expected - sane);
+        const corruptDrift = drift > this.startingBalance * 0.05;
+        const negCash = this.cash < -this.startingBalance * 0.02;
+        const oversizedCash = this.cash > this.startingBalance * 1.3;   // cash > 130% start = probably from double-crediting shorts
+        if (corruptDrift || negCash || oversizedCash) {
+            console.warn(`[TB] auto-heal: state corruption detected. expected=${expected.toFixed(2)} sane=${sane.toFixed(2)} cash=${this.cash.toFixed(2)}. Resetting portfolio to ${this.startingBalance}, keeping closed-trade journal.`);
             const kept = this.journal.filter((e) => e.kind === "close");
             this.cash = this.startingBalance;
             this.positions = {};
             this.journal = kept;
             this.save();
-            // let the app know so it can reset equity tracking too
             try { window.dispatchEvent(new CustomEvent("tb-autoheal")); } catch (e) {}
         }
     }
