@@ -150,6 +150,43 @@
         <div id="signals"></div>
     </section>
 
+    <!-- futures data — funding & long/short -->
+    <section class="card">
+        <h2>Futures-Sentiment <span class="badge">Binance</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Extreme positive Funding = überkaufte Longs (Short-Warnung). Long/Short-Ratio &gt; 3 = crowded long.
+        </div>
+        <div style="overflow-x:auto;"><table id="futures-table" class="perf-table"></table></div>
+    </section>
+
+    <!-- adaptive weights -->
+    <section class="card">
+        <h2>Adaptive Strategie-Gewichte <span class="badge">Self-improving</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Bot lernt selbst welche Strategien aktuell funktionieren. Gewinnende Strategien bekommen mehr Stimmrecht.
+        </div>
+        <div id="adaptive-weights"></div>
+    </section>
+
+    <!-- backtest -->
+    <section class="card">
+        <h2>Backtest-Modus <span class="badge">Was hätte ich verdient?</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Simuliert den Bot rückwirkend auf echten Binance-Kursen.
+        </div>
+        <div class="watchlist-add">
+            <select id="bt-symbol"></select>
+            <select id="bt-days">
+                <option value="7">7 Tage</option>
+                <option value="30" selected>30 Tage</option>
+                <option value="90">90 Tage</option>
+                <option value="180">180 Tage</option>
+            </select>
+            <button id="bt-run" class="primary" style="grid-column: span 2;">Backtest starten</button>
+        </div>
+        <div id="bt-result"></div>
+    </section>
+
     <!-- news -->
     <section class="card">
         <h2>Live-News <span class="badge" id="news-count">–</span></h2>

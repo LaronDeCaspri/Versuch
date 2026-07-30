@@ -541,14 +541,15 @@ const STRATEGIES = [
     { name: "weinstein_stages",   weight: 1.2, fn: stratWeinsteinStages },
 ];
 
-function ensemble(candles, minScore = 1.5, agreement = 2) {
+function ensemble(candles, minScore = 1.5, agreement = 2, adaptiveWeights = null) {
     const scores = { long: 0, short: 0 };
     const sigs = { long: [], short: [] };
     for (const s of STRATEGIES) {
         try {
             const r = s.fn(candles);
             if (!r || !r.side) continue;
-            scores[r.side] += s.weight * r.strength;
+            const adaptive = adaptiveWeights?.[s.name] || 1.0;
+            scores[r.side] += s.weight * r.strength * adaptive;
             sigs[r.side].push(r);
         } catch (e) { /* strategy failed silently */ }
     }
@@ -691,9 +692,12 @@ class PaperBroker {
         else this.cash += notional;
         this.positions[symbol] = {
             symbol, side, qty, entry: price,
-            stop: meta.stop || 0, opened_at: new Date().toISOString(),
+            stop: meta.stop || 0, original_stop: meta.stop || 0,
+            opened_at: new Date().toISOString(),
             take_profits: (meta.take_profits || []).map((t) => ({ price: t.price, qty: qty * t.fraction })),
             original_qty: qty, meta,
+            trailing_moves: 0,           // how many times stop moved up
+            peak_price: price,            // highest (long) / lowest (short) since open
         };
         this.journal.push({
             ts: new Date().toISOString(), kind: "open", symbol, side, price, qty,
@@ -722,6 +726,39 @@ class PaperBroker {
         const p = this.positions[symbol];
         if (!p) return [];
         const events = [];
+        // ---- trailing stop ----
+        // once profit >= 1R move stop to breakeven, then every 0.5R further trail by 0.5R
+        if (p.original_stop && p.entry && p.stop) {
+            const r = Math.abs(p.entry - p.original_stop);
+            if (r > 0) {
+                if (p.side === "long") {
+                    p.peak_price = Math.max(p.peak_price || price, price);
+                    const profitR = (p.peak_price - p.entry) / r;
+                    if (profitR >= 1.0) {
+                        const desiredStop = p.entry + (profitR - 1.0) * r * 0.5;
+                        const newStop = Math.max(p.stop, Math.min(desiredStop, p.peak_price - r * 0.5));
+                        if (newStop > p.stop + 1e-9) {
+                            p.stop = newStop;
+                            p.trailing_moves++;
+                            events.push({ kind: "trail", newStop, profitR });
+                        }
+                    }
+                } else {
+                    p.peak_price = Math.min(p.peak_price || price, price);
+                    const profitR = (p.entry - p.peak_price) / r;
+                    if (profitR >= 1.0) {
+                        const desiredStop = p.entry - (profitR - 1.0) * r * 0.5;
+                        const newStop = Math.min(p.stop, Math.max(desiredStop, p.peak_price + r * 0.5));
+                        if (newStop < p.stop - 1e-9) {
+                            p.stop = newStop;
+                            p.trailing_moves++;
+                            events.push({ kind: "trail", newStop, profitR });
+                        }
+                    }
+                }
+                if (events.length) this.save();
+            }
+        }
         if (p.stop) {
             if (p.side === "long" && price <= p.stop) {
                 const r = this.close(symbol, price, 1);
