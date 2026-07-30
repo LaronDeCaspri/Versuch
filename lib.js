@@ -870,6 +870,30 @@ async function fetchPrice(symbol) {
     return +d.price;
 }
 
+// 24h ticker data — one call for all symbols
+async function fetch24hTickers(symbols) {
+    try {
+        const url = "https://api.binance.com/api/v3/ticker/24hr";
+        const all = await fetch(url).then((r) => r.json());
+        const wanted = new Set(symbols.map((s) => s.replace("/", "")));
+        const out = {};
+        for (const t of all) {
+            if (!wanted.has(t.symbol)) continue;
+            const sym = t.symbol.replace(/USDT$/, "") + "/USDT";
+            out[sym] = {
+                symbol: sym,
+                priceChangePct: parseFloat(t.priceChangePercent),
+                lastPrice: parseFloat(t.lastPrice),
+                high: parseFloat(t.highPrice),
+                low: parseFloat(t.lowPrice),
+                volumeUSD: parseFloat(t.quoteVolume),
+                trades: parseInt(t.count),
+            };
+        }
+        return out;
+    } catch (e) { return {}; }
+}
+
 async function fetchFearGreed() {
     try {
         const d = await fetch("https://api.alternative.me/fng/?limit=1").then((r) => r.json());
@@ -884,6 +908,6 @@ return {
     STRATEGIES, ensemble,
     planTrade, forecast, assessRisk,
     PaperBroker,
-    fetchKlines, fetchPrice, fetchFearGreed,
+    fetchKlines, fetchPrice, fetchFearGreed, fetch24hTickers,
 };
 })();

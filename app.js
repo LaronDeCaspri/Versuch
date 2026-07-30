@@ -29,8 +29,8 @@ const CFG = {
     maxRiskPct: 3.0,
     atrStopMult: 1.8,
     tpMultiples: [2.0, 3.5, 5.0],
-    maxOpenPositions: 5,
-    maxNotionalPctPerPosition: 18,   // max 18% of equity per position (5 positions × 18% = 90%, keeps some cash)
+    maxOpenPositions: 12,
+    maxNotionalPctPerPosition: 8,    // max 8% of equity per position (12 positions × 8% = 96%, keeps some cash)
     // strict filters — auto-trade ONLY on best setups
     strictMinScore: 3.0,
     strictAgreement: 3,
@@ -168,20 +168,64 @@ function renderPortfolio() {
 function renderPositions() {
     const el = $("#positions");
     const pos = broker.positions;
-    const keys = Object.keys(pos);
+    const keys = Object.keys(pos).sort((a, b) => {
+        const pa = pos[a], pb = pos[b];
+        const priceA = state.prices[a] || pa.entry, priceB = state.prices[b] || pb.entry;
+        const pnlA = pa.side === "long" ? (priceA - pa.entry) * pa.qty : (pa.entry - priceA) * pa.qty;
+        const pnlB = pb.side === "long" ? (priceB - pb.entry) * pb.qty : (pb.entry - priceB) * pb.qty;
+        return pnlB - pnlA;                     // biggest gainers first
+    });
     if (!keys.length) { el.textContent = "keine offenen Positionen"; return; }
     el.innerHTML = keys.map((k) => {
         const p = pos[k];
         const price = state.prices[k] || p.entry;
+        const invested = p.qty * p.entry;
+        const currentValue = p.qty * price;
         const upnl = p.side === "long" ? (price - p.entry) * p.qty : (p.entry - price) * p.qty;
-        const pnlPct = ((price / p.entry - 1) * 100 * (p.side === "long" ? 1 : -1));
+        const pnlPct = p.side === "long" ? ((price / p.entry - 1) * 100) : ((p.entry / price - 1) * 100);
+        const pnlColor = upnl >= 0 ? "var(--green)" : "var(--red)";
+        const r = p.original_stop ? Math.abs(p.entry - p.original_stop) : 0;
+        const rMultiple = r > 0 ? (upnl / (r * p.qty)) : 0;
+        const nextTp = p.take_profits?.[0]?.price;
         return `
-            <div class="pos-row">
-                <span>${p.symbol}<br><small>${fmt(p.qty, 6)} @ ${fmt(p.entry, 4)}</small></span>
-                <span class="side-${p.side}">${p.side.toUpperCase()}</span>
-                <span class="num" style="color:${upnl >= 0 ? 'var(--green)' : 'var(--red)'}">${upnl >= 0 ? '+' : ''}${fmt(upnl, 2)}<br><small>${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct, 2)}%</small></span>
+            <div class="pos-card">
+                <div class="pos-head">
+                    <div class="pos-sym">
+                        <span class="pos-symbol">${p.symbol}</span>
+                        <span class="side-badge side-${p.side}">${p.side.toUpperCase()}</span>
+                    </div>
+                    <div class="pos-pnl" style="color:${pnlColor}">
+                        <div class="pnl-usd">${upnl >= 0 ? "+" : ""}${fmt(upnl, 2)} USDT</div>
+                        <div class="pnl-pct">${pnlPct >= 0 ? "+" : ""}${fmt(pnlPct, 2)}% · ${rMultiple >= 0 ? "+" : ""}${fmt(rMultiple, 2)}R</div>
+                    </div>
+                </div>
+                <div class="pos-grid">
+                    <div><div class="k">Investiert</div><div class="v num">${fmt(invested, 2)}</div></div>
+                    <div><div class="k">Aktueller Wert</div><div class="v num">${fmt(currentValue, 2)}</div></div>
+                    <div><div class="k">Menge</div><div class="v num">${fmt(p.qty, 6)}</div></div>
+                    <div><div class="k">Entry</div><div class="v num">${fmt(p.entry, 4)}</div></div>
+                    <div><div class="k">Live</div><div class="v num">${fmt(price, 4)}</div></div>
+                    <div><div class="k">Stop-Loss</div><div class="v num" style="color:var(--red)">${fmt(p.stop, 4)}</div></div>
+                    ${nextTp ? `<div><div class="k">Nächster TP</div><div class="v num" style="color:var(--green)">${fmt(nextTp, 4)}</div></div>` : ""}
+                    ${p.trailing_moves ? `<div><div class="k">Stop nachgezogen</div><div class="v num">${p.trailing_moves}×</div></div>` : ""}
+                </div>
+                <div class="btn-row" style="margin-top:8px;">
+                    <button class="ghost pos-close" data-sym="${k}" style="flex:1; font-size:0.78rem; padding:6px 8px;">Position jetzt schliessen</button>
+                </div>
             </div>`;
     }).join("");
+    el.querySelectorAll(".pos-close").forEach((btn) => {
+        btn.onclick = () => {
+            const sym = btn.dataset.sym;
+            const p = pos[sym];
+            if (!p) return;
+            if (!confirm(`Position ${sym} jetzt zum Marktpreis schliessen?`)) return;
+            const price = state.prices[sym] || p.entry;
+            const r = broker.close(sym, price, 1);
+            if (r) announce(`Position ${sym.replace("/", " gegen ")} manuell geschlossen. ${r.pnl >= 0 ? "Gewinn" : "Verlust"} ${Math.abs(r.pnl).toFixed(2)} Dollar.`, r.pnl >= 0 ? "success" : "warn");
+            renderAll();
+        };
+    });
 }
 
 function renderMatrix() {
@@ -370,11 +414,18 @@ function renderStrategies() {
 
 function renderFng() {
     const el = $("#fng-value");
-    if (!state.fng) { el.textContent = "–"; return; }
-    el.textContent = state.fng.value;
+    if (!state.fng) return;
+    const v = state.fng.value;
+    // rebuild inner content while keeping needle
+    el.innerHTML = v + '<div class="fng-needle" id="fng-needle"></div>';
+    const needle = $("#fng-needle");
+    // 0 → -135°, 100 → +135° (270° span across the arc)
+    const angle = -135 + (v / 100) * 270;
+    if (needle) needle.style.transform = `translate(-50%, -90%) rotate(${angle}deg)`;
     $("#fng-class").textContent = state.fng.label;
-    const color = state.fng.value <= 24 ? "red" : state.fng.value <= 44 ? "amber" : state.fng.value >= 75 ? "red" : state.fng.value >= 55 ? "green" : "grey";
-    el.style.borderColor = `var(--${color})`;
+    const color = v <= 24 ? "var(--red)" : v <= 44 ? "var(--amber)"
+        : v >= 75 ? "var(--red)" : v >= 55 ? "var(--green)" : "var(--muted)";
+    el.style.color = color;
 }
 
 function updateModePill() {
@@ -1050,6 +1101,60 @@ function renderStrategyPerformance() {
         : "noch keine abgeschlossenen Trades";
 }
 
+// ============ NEW: 24h ticker snapshot ============
+async function refresh24hTickers() {
+    state.tickers = await window.TB.fetch24hTickers(CFG.symbols);
+    render24hTickers();
+}
+
+function render24hTickers() {
+    const el = $("#ticker24");
+    if (!el) return;
+    const data = state.tickers || {};
+    const rows = CFG.symbols.map((s) => {
+        const t = data[s];
+        if (!t) return `<tr><td>${s}</td><td colspan="4" style="color:var(--muted); text-align:center;">–</td></tr>`;
+        const chgCls = t.priceChangePct > 0 ? "pnl-pos" : t.priceChangePct < 0 ? "pnl-neg" : "";
+        const volM = t.volumeUSD / 1e6;
+        return `<tr>
+            <td>${s}</td>
+            <td class="num">${fmt(t.lastPrice, 4)}</td>
+            <td class="num ${chgCls}">${t.priceChangePct > 0 ? "+" : ""}${fmt(t.priceChangePct, 2)}%</td>
+            <td class="num" style="color:var(--muted); font-size:0.72rem;">${fmt(t.low, 4)}<br>${fmt(t.high, 4)}</td>
+            <td class="num">${fmt(volM, 1)}M</td>
+        </tr>`;
+    }).join("");
+    el.innerHTML = `<thead><tr><th>Symbol</th><th>Preis</th><th>24h %</th><th>24h Range</th><th>Vol $M</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
+// ============ NEW: portfolio allocation ============
+function renderAllocation() {
+    const el = $("#allocation");
+    const eq = broker.equity(state.prices);
+    const cashPct = broker.cash / eq * 100;
+    const positions = broker.positions;
+    const items = [{ label: "Cash", value: broker.cash, pct: cashPct, color: "#6b7891" }];
+    const palette = ["#4d94ff", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6", "#ec4899", "#84cc16", "#f97316", "#6366f1", "#0ea5e9", "#eab308"];
+    let colorIdx = 0;
+    for (const sym in positions) {
+        const p = positions[sym];
+        const price = state.prices[sym] || p.entry;
+        const value = p.side === "long" ? p.qty * price : p.qty * (2 * p.entry - price);
+        items.push({
+            label: sym.replace("/USDT", "") + " " + (p.side === "long" ? "L" : "S"),
+            value, pct: value / eq * 100, color: palette[colorIdx++ % palette.length],
+        });
+    }
+    const bar = items.map((i) => i.pct > 0
+        ? `<div style="flex-basis:${i.pct}%; background:${i.color};" title="${i.label} ${i.pct.toFixed(1)}%">${i.pct >= 6 ? i.label : ""}</div>`
+        : ""
+    ).join("");
+    const list = items.map((i) =>
+        `<div class="item"><span><span class="swatch" style="background:${i.color}"></span>${i.label}</span><span class="num">${fmt(i.value, 2)} · ${i.pct.toFixed(1)}%</span></div>`
+    ).join("");
+    el.innerHTML = `<div class="alloc-bar">${bar}</div><div class="alloc-list">${list}</div>`;
+}
+
 function renderAll() {
     const active = state.pending[0];
     let fallback = null;
@@ -1073,6 +1178,8 @@ function renderAll() {
     renderStrategyPerformance();
     renderAdaptiveWeights();
     renderFuturesTable();
+    render24hTickers();
+    renderAllocation();
     $("#peak-eq").textContent = money(state.peakEquity);
     checkWatchlist();
     checkWeeklyReport();
@@ -1209,6 +1316,7 @@ async function boot() {
     refreshFng();
     fetchNews().then(renderNewsList);
     fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable);
+    refresh24hTickers();
 
     // loops
     setInterval(scanAll, CFG.scanIntervalSec * 1000);
@@ -1216,6 +1324,7 @@ async function boot() {
     setInterval(refreshFng, 5 * 60 * 1000);
     setInterval(() => { fetchNews().then(renderNewsList); }, 5 * 60 * 1000);
     setInterval(() => { fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable); }, 3 * 60 * 1000);
+    setInterval(refresh24hTickers, 60 * 1000);
 }
 
 document.addEventListener("DOMContentLoaded", boot);
