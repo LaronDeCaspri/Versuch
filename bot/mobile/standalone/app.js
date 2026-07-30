@@ -3765,6 +3765,34 @@ const INFO_DB = {
             <p>Die 10 goldenen Regeln des Bots. Diese sind in Code gegossen und werden immer eingehalten. Perfekte Trader-Disziplin.</p>
         `,
     },
+    "live-patterns": {
+        title: "Live-Muster",
+        body: `
+            <p>Der Bot scannt jedes Symbol permanent nach <strong>23 Chart- und Candlestick-Mustern</strong>.</p>
+            <p>Wenn eines gefunden wird, siehst du hier:</p>
+            <ul>
+                <li>Welches Muster</li>
+                <li>Ob es bullish, bearish oder Umkehr signalisiert</li>
+                <li>Wie oft es historisch aufgetreten ist</li>
+                <li>Wie oft es "richtig" lag (Win-Rate aus BTC-Historie)</li>
+            </ul>
+            <p>Klick auf ein Muster → detaillierte Erklärung mit Beispiel-Chart.</p>
+        `,
+    },
+    "pattern-library": {
+        title: "Muster-Bibliothek",
+        body: `
+            <p>Alle 23 Muster mit ihrer historischen Erfolgsquote.</p>
+            <p>Zuerst muss die <strong>Historie geladen</strong> werden (5 Jahre BTC-Daily-Kerzen). Danach berechnet der Bot für jedes Muster:</p>
+            <ul>
+                <li>Wie oft es in der Historie vorkam</li>
+                <li>In wie viel % der Fälle die Vorhersage stimmte</li>
+                <li>Durchschnittlicher Return 10 Bars nach dem Muster</li>
+                <li>Bester und schlechtester beobachteter Trade</li>
+            </ul>
+            <div class="example">💡 Diese Statistiken werden vom Bot bei jedem Signal berücksichtigt. Muster mit &gt; 60% Win-Rate boosten den Konfluenz-Score.</div>
+        `,
+    },
     "danger-zone": {
         title: "Gefahren-Zone",
         body: `
@@ -3960,6 +3988,350 @@ renderAll = function() {
     _origRenderAllV8();
     renderRegimePanel();
     renderConfluencePanel();
+};
+
+// =====================================================================
+// v9: Historical data loading, pattern library, per-trade rationale,
+//      "Warum diesen Trade?" modal with pattern viz
+// =====================================================================
+
+// Pattern stats cache (loaded from localStorage or via computePatternStats)
+state.patternStats = JSON.parse(localStorage.getItem("tb_pattern_stats") || "{}");
+state.livePatterns = {};   // {symbol: {patternKey: metadata}}
+
+// ---- Detect patterns on every scan cycle ----
+function refreshLivePatterns() {
+    const out = {};
+    for (const sym of CFG.symbols) {
+        const c = state.candles[sym];
+        if (!c || c.length < 30) continue;
+        const found = window.TB.detectPatterns(c);
+        if (Object.keys(found).length) out[sym] = found;
+    }
+    state.livePatterns = out;
+    renderLivePatterns();
+}
+
+function renderLivePatterns() {
+    const el = $("#live-patterns");
+    if (!el) return;
+    const entries = Object.entries(state.livePatterns);
+    if (!entries.length) { el.textContent = "aktuell keine klaren Muster erkannt"; return; }
+    const rows = [];
+    for (const [sym, patterns] of entries) {
+        for (const [key, meta] of Object.entries(patterns)) {
+            const info = window.TB.PATTERN_INFO[key];
+            if (!info) continue;
+            const stats = state.patternStats[key];
+            const biasCls = info.bias === "bull" ? "high" : info.bias === "bear" ? "low" : "mid";
+            const biasBadge = info.bias === "bull" ? "▲ BULL"
+                            : info.bias === "bear" ? "▼ BEAR"
+                            : info.bias === "reversal" ? "↺ UMKEHR"
+                            : "→ FORTS.";
+            const statTxt = stats
+                ? `${(stats.winRate * 100).toFixed(0)}% Win-Rate · Ø ${stats.avgReturn >= 0 ? "+" : ""}${stats.avgReturn.toFixed(2)}%`
+                : "Statistik noch nicht berechnet";
+            rows.push(`<div class="pattern-row ${biasCls}" data-pkey="${key}">
+                <div>
+                    <strong>${sym}</strong> · <span style="color:var(--accent);">${info.name}</span>
+                    <div style="color:var(--muted); font-size:0.7rem;">${statTxt}</div>
+                </div>
+                <span class="conf-score ${biasCls}">${biasBadge}</span>
+            </div>`);
+        }
+    }
+    el.innerHTML = rows.join("") || "aktuell keine klaren Muster";
+    el.querySelectorAll(".pattern-row").forEach((r) => {
+        r.onclick = () => showPatternDetail(r.dataset.pkey);
+    });
+}
+
+function showPatternDetail(key) {
+    const info = window.TB.PATTERN_INFO[key];
+    if (!info) return;
+    const stats = state.patternStats[key];
+    const symbols = Object.entries(state.livePatterns)
+        .filter(([, ps]) => key in ps).map(([s]) => s);
+    $("#pattern-title").innerHTML = info.name;
+    $("#pattern-body").innerHTML = `
+        <div style="margin-bottom:12px; font-size:0.82rem; color:var(--muted);">
+            Typ: <strong style="color:var(--text)">${info.type === "chart" ? "Chart-Pattern" : "Candlestick"}</strong>
+            · Bias: <strong style="color:var(--text)">${info.bias.toUpperCase()}</strong>
+        </div>
+        <p>${info.desc}</p>
+        ${symbols.length ? `
+        <div class="example">
+            <strong>Aktuell erkannt bei:</strong> ${symbols.join(", ")}
+        </div>` : ""}
+        ${stats ? `
+        <div style="margin-top:12px;">
+            <strong style="color:var(--accent);">Historische Statistik (BTC ${stats.lookAheadBars} Bars):</strong>
+            <div class="mkt-grid" style="margin-top:8px;">
+                <div class="mkt-tile"><div class="k">Vorkommen</div><div class="v">${stats.count}</div></div>
+                <div class="mkt-tile"><div class="k">Win-Rate</div><div class="v" style="color:${stats.winRate >= 0.55 ? "var(--green)" : stats.winRate <= 0.45 ? "var(--red)" : "var(--amber)"}">${(stats.winRate * 100).toFixed(1)}%</div></div>
+                <div class="mkt-tile"><div class="k">Ø Return</div><div class="v" style="color:${stats.avgReturn > 0 ? "var(--green)" : "var(--red)"}">${stats.avgReturn >= 0 ? "+" : ""}${stats.avgReturn.toFixed(2)}%</div></div>
+                <div class="mkt-tile"><div class="k">Best/Worst</div><div class="v" style="font-size:0.75rem;">+${stats.bestReturn.toFixed(1)}%<br>${stats.worstReturn.toFixed(1)}%</div></div>
+            </div>
+        </div>` : `
+        <div class="warn">
+            Statistik noch nicht berechnet. Lade zuerst die Historie über den Button in der Muster-Bibliothek.
+        </div>`}
+    `;
+    $("#pattern-modal").classList.remove("hidden");
+}
+
+// ---- Load history + compute stats ----
+async function loadHistoryAndCalcStats() {
+    const btn = $("#load-history-btn");
+    const prog = $("#history-progress");
+    btn.disabled = true;
+    btn.textContent = "… lade Historie";
+    prog.style.display = "block";
+    prog.textContent = "Starte Lade-Vorgang …";
+    try {
+        const candles = await window.TB.fetchHistory("BTC/USDT", "1d", 5, (p) => {
+            prog.textContent = `${p.loaded} Kerzen geladen · älteste ${p.oldest.toLocaleDateString("de-DE")}`;
+        });
+        prog.textContent = `${candles.length} Kerzen geladen. Berechne Statistiken für 23 Muster …`;
+        state.btcHistory = candles;
+        const stats = {};
+        const patternKeys = Object.keys(window.TB.PATTERN_INFO);
+        for (let i = 0; i < patternKeys.length; i++) {
+            const key = patternKeys[i];
+            prog.textContent = `${candles.length} Kerzen · Analysiere Muster ${i + 1}/${patternKeys.length}: ${window.TB.PATTERN_INFO[key].name}`;
+            await new Promise((r) => setTimeout(r, 5));
+            const s = window.TB.computePatternStats(candles, key, 10);
+            if (s) stats[key] = s;
+        }
+        state.patternStats = stats;
+        localStorage.setItem("tb_pattern_stats", JSON.stringify(stats));
+        prog.textContent = `Fertig — ${Object.keys(stats).length} Muster analysiert, ${candles.length} Kerzen ausgewertet.`;
+        renderPatternLibrary();
+        announce(`Historie geladen: ${candles.length} BTC-Kerzen seit ${new Date(candles[0].ts).toLocaleDateString("de-DE")}. Statistik für ${Object.keys(stats).length} Muster berechnet.`, "success");
+    } catch (e) {
+        prog.textContent = "Fehler: " + e.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "📚 Historie neu laden";
+    }
+}
+
+function renderPatternLibrary() {
+    const el = $("#pattern-library");
+    if (!el) return;
+    const stats = state.patternStats;
+    const info = window.TB.PATTERN_INFO;
+    const keys = Object.keys(info);
+    const rows = keys.map((k) => {
+        const s = stats[k];
+        const i = info[k];
+        const biasCls = i.bias === "bull" ? "high" : i.bias === "bear" ? "low" : "mid";
+        const biasSym = i.bias === "bull" ? "▲" : i.bias === "bear" ? "▼" : "↺";
+        const statTxt = s
+            ? `<span style="color:${s.winRate >= 0.55 ? "var(--green)" : s.winRate <= 0.45 ? "var(--red)" : "var(--amber)"};"><strong>${(s.winRate * 100).toFixed(0)}%</strong></span> · ${s.count} Vorkommen · Ø ${s.avgReturn >= 0 ? "+" : ""}${s.avgReturn.toFixed(2)}%`
+            : `<span style="color:var(--muted);">noch nicht analysiert</span>`;
+        return `<div class="pattern-row ${biasCls}" data-pkey="${k}">
+            <div>
+                <strong>${biasSym} ${i.name}</strong>
+                <div style="color:var(--muted); font-size:0.7rem;">${statTxt}</div>
+            </div>
+            <span class="conf-score ${biasCls}">${i.type === "chart" ? "CHART" : "CANDLE"}</span>
+        </div>`;
+    }).join("");
+    el.innerHTML = rows;
+    el.querySelectorAll(".pattern-row").forEach((r) => r.onclick = () => showPatternDetail(r.dataset.pkey));
+}
+
+// ---- Enhance makePending with full rationale ----
+const _origMakePendingV9 = makePending;
+makePending = function(symbol, sig, candles, price) {
+    const pending = _origMakePendingV9(symbol, sig, candles, price);
+    if (!pending) return null;
+    // detect patterns at signal time
+    const patterns = window.TB.detectPatterns(candles);
+    const patternList = Object.keys(patterns).map((k) => ({
+        key: k, info: window.TB.PATTERN_INFO[k], stats: state.patternStats[k],
+    }));
+    // regime already stored by v8 wrapper
+    const reg = pending.regime || (window.TB.detectRegime(
+        window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles)));
+    // indicators snapshot
+    const c = window.TB.closes(candles), h = window.TB.highs(candles), l = window.TB.lows(candles);
+    const i = c.length - 1;
+    const rsiVal = window.TB.rsi(c, 14)[i];
+    const macdRes = window.TB.macd(c);
+    const adxVal = window.TB.adx(h, l, c, 14)[i];
+    const e20 = window.TB.ema(c, 20)[i], e50 = window.TB.ema(c, 50)[i], e200 = window.TB.ema(c, 200)[i];
+    const atrVal = window.TB.atr(h, l, c, 14)[i];
+    const atrPct = (atrVal / price) * 100;
+    // human-readable explanation
+    const reasons = [];
+    if (pending.side === "long") {
+        if (e20 > e50) reasons.push("<strong>Kurzfristig-Trend nach oben</strong>: EMA20 über EMA50");
+        if (c[i] > e200) reasons.push("<strong>Langfristig-Trend nach oben</strong>: Preis über EMA200");
+        if (rsiVal < 40) reasons.push(`<strong>RSI zeigt Kauf-Zone</strong>: ${rsiVal.toFixed(1)} (überverkauft)`);
+        if (rsiVal >= 40 && rsiVal < 65) reasons.push(`<strong>RSI im Momentum-Bereich</strong>: ${rsiVal.toFixed(1)}`);
+        if (macdRes.hist[i] > 0) reasons.push("<strong>MACD-Histogramm positiv</strong>: Momentum steigt");
+        if (adxVal > 25) reasons.push(`<strong>Starker Trend</strong>: ADX ${adxVal.toFixed(1)}`);
+    } else {
+        if (e20 < e50) reasons.push("<strong>Kurzfristig-Trend nach unten</strong>: EMA20 unter EMA50");
+        if (c[i] < e200) reasons.push("<strong>Langfristig-Trend nach unten</strong>: Preis unter EMA200");
+        if (rsiVal > 60) reasons.push(`<strong>RSI zeigt Verkauf-Zone</strong>: ${rsiVal.toFixed(1)} (überkauft)`);
+        if (macdRes.hist[i] < 0) reasons.push("<strong>MACD-Histogramm negativ</strong>: Momentum fällt");
+        if (adxVal > 25) reasons.push(`<strong>Starker Trend</strong>: ADX ${adxVal.toFixed(1)}`);
+    }
+    // pattern reasons
+    for (const p of patternList) {
+        if (!p.info) continue;
+        if ((pending.side === "long" && (p.info.bias === "bull" || p.info.bias === "reversal"))
+         || (pending.side === "short" && (p.info.bias === "bear" || p.info.bias === "reversal"))) {
+            const winrate = p.stats ? ` · historisch ${(p.stats.winRate * 100).toFixed(0)}% Win-Rate` : "";
+            reasons.push(`<strong>${p.info.name}</strong> erkannt${winrate}`);
+        }
+    }
+    pending.rationale = {
+        patterns: patternList,
+        regime: reg,
+        indicators: { rsi: rsiVal, macdHist: macdRes.hist[i], adx: adxVal,
+                     ema20: e20, ema50: e50, ema200: e200, atrPct },
+        reasons,
+        confluenceScore: pending.confluenceScore,
+        confluenceSide: pending.confluenceSide,
+        strategies: sig.signals.map((s) => ({ name: s.strategy, reason: s.reason })),
+    };
+    return pending;
+};
+
+// ---- Attach rationale to positions when confirmed ----
+const _origConfirmPending = confirmPending;
+confirmPending = function(p) {
+    _origConfirmPending(p);
+    const pos = broker.positions[p.symbol];
+    if (pos && p.rationale) {
+        pos.rationale = p.rationale;
+        broker.save();
+    }
+};
+
+// ---- "Warum?" modal ----
+function showWhy(source) {
+    // source is either a pending signal or a position
+    const r = source.rationale;
+    if (!r) {
+        $("#why-body").innerHTML = "<p>Für diesen Trade wurde keine Begründung gespeichert (evtl. vor v9 eröffnet oder manuell).</p>";
+    } else {
+        const patternBlock = r.patterns.filter((p) => p.info).map((p) => {
+            const stats = p.stats
+                ? `<small style="color:var(--muted);">${(p.stats.winRate * 100).toFixed(0)}% Win-Rate über ${p.stats.count} Vorkommen</small>`
+                : `<small style="color:var(--muted);">(Statistik unbekannt)</small>`;
+            return `<li><strong>${p.info.name}</strong> — ${p.info.desc}<br>${stats}</li>`;
+        }).join("");
+        $("#why-body").innerHTML = `
+            <p style="font-size:0.82rem; color:var(--muted); margin-bottom:14px;">
+                ${source.symbol || source.meta?.symbol || ""} · ${(source.side || "").toUpperCase()}
+                · Score ${source.score?.toFixed?.(2) || "–"}
+            </p>
+
+            <h3 style="margin-top:0; color:var(--accent); font-size:1rem;">🎯 Warum eröffnet?</h3>
+            <ul style="line-height:1.6; margin:0 0 14px;">
+                ${r.reasons.map((rr) => `<li>${rr}</li>`).join("")}
+            </ul>
+
+            ${patternBlock ? `
+            <h3 style="color:var(--accent); font-size:1rem;">📊 Erkannte Muster</h3>
+            <ul style="line-height:1.5; margin:0 0 14px; font-size:0.85rem;">
+                ${patternBlock}
+            </ul>` : ""}
+
+            <h3 style="color:var(--accent); font-size:1rem;">🌡 Markt-Regime</h3>
+            <div class="example" style="font-size:0.85rem;">
+                <strong>${r.regime.trend.toUpperCase()}</strong> Trend (ADX ${r.regime.adx.toFixed(1)})
+                · <strong>${r.regime.volatility.toUpperCase()}</strong> Volatilität (ATR ${r.regime.atrPct.toFixed(2)}%)
+                <br><small>${r.regime.recommend}</small>
+            </div>
+
+            <h3 style="color:var(--accent); font-size:1rem;">🔬 Indikatoren-Snapshot</h3>
+            <div class="mkt-grid">
+                <div class="mkt-tile"><div class="k">RSI</div><div class="v">${r.indicators.rsi?.toFixed(1) || "–"}</div></div>
+                <div class="mkt-tile"><div class="k">MACD-Hist</div><div class="v">${r.indicators.macdHist?.toFixed(3) || "–"}</div></div>
+                <div class="mkt-tile"><div class="k">ADX</div><div class="v">${r.indicators.adx?.toFixed(1) || "–"}</div></div>
+                <div class="mkt-tile"><div class="k">ATR%</div><div class="v">${r.indicators.atrPct?.toFixed(2) || "–"}%</div></div>
+                <div class="mkt-tile"><div class="k">EMA20</div><div class="v" style="font-size:0.75rem;">${r.indicators.ema20?.toFixed(2) || "–"}</div></div>
+                <div class="mkt-tile"><div class="k">EMA50</div><div class="v" style="font-size:0.75rem;">${r.indicators.ema50?.toFixed(2) || "–"}</div></div>
+                <div class="mkt-tile"><div class="k">EMA200</div><div class="v" style="font-size:0.75rem;">${r.indicators.ema200?.toFixed(2) || "–"}</div></div>
+                <div class="mkt-tile"><div class="k">Konfluenz</div><div class="v" style="color:var(--green);">${r.confluenceScore || "–"}/12</div></div>
+            </div>
+
+            <h3 style="color:var(--accent); font-size:1rem;">🧠 Zustimmende Strategien (${r.strategies.length})</h3>
+            <ul style="font-size:0.85rem; line-height:1.5; margin:0;">
+                ${r.strategies.map((s) => `<li><strong>${s.name.replace(/_/g, " ")}</strong>: ${s.reason}</li>`).join("")}
+            </ul>
+        `;
+    }
+    $("#why-modal").classList.remove("hidden");
+}
+
+// ---- Extend position cards with "Warum?" button ----
+const _origRenderPositions = renderPositions;
+renderPositions = function() {
+    _origRenderPositions();
+    const el = $("#positions");
+    if (!el) return;
+    // add "Warum?" button next to each pos-card's btn-row
+    el.querySelectorAll(".pos-card").forEach((card) => {
+        if (card.querySelector(".pos-why")) return;
+        const btnRow = card.querySelector(".btn-row");
+        const symSpan = card.querySelector(".pos-symbol");
+        const symbol = symSpan?.textContent;
+        if (btnRow && symbol) {
+            const why = document.createElement("button");
+            why.className = "ghost pos-why";
+            why.style.cssText = "flex:1; font-size:0.75rem; padding:6px 8px; color:var(--accent); border-color:var(--accent);";
+            why.textContent = "❓ Warum?";
+            why.onclick = () => {
+                const pos = broker.positions[symbol];
+                if (pos) showWhy({ symbol, side: pos.side, score: 0, rationale: pos.rationale });
+            };
+            btnRow.insertBefore(why, btnRow.firstChild);
+        }
+    });
+};
+
+// ---- Extend signal tile with "Warum?" button ----
+const _origRenderSignalTile = renderSignalTile;
+renderSignalTile = function(pending, fallback) {
+    _origRenderSignalTile(pending, fallback);
+    if (pending && pending.rationale) {
+        const tile = $("#signal-tile");
+        if (tile && !tile.querySelector(".signal-why")) {
+            const btnRow = tile.querySelector(".btn-row");
+            if (btnRow) {
+                const why = document.createElement("button");
+                why.className = "signal-why";
+                why.style.cssText = "background:transparent; border:1px solid var(--accent); color:var(--accent); padding:12px; border-radius:8px; font-weight:700; cursor:pointer; margin-top:6px; width:100%;";
+                why.textContent = "❓ Warum dieser Trade?";
+                why.onclick = () => showWhy(pending);
+                tile.querySelector(".sizing-rule")?.before(why);
+            }
+        }
+    }
+};
+
+// ---- Modal close bindings ----
+document.addEventListener("DOMContentLoaded", () => {
+    $("#why-close")?.addEventListener("click", () => $("#why-modal").classList.add("hidden"));
+    $("#why-modal")?.addEventListener("click", (e) => { if (e.target.id === "why-modal") $("#why-modal").classList.add("hidden"); });
+    $("#pattern-close")?.addEventListener("click", () => $("#pattern-modal").classList.add("hidden"));
+    $("#pattern-modal")?.addEventListener("click", (e) => { if (e.target.id === "pattern-modal") $("#pattern-modal").classList.add("hidden"); });
+    $("#load-history-btn")?.addEventListener("click", loadHistoryAndCalcStats);
+});
+
+// ---- Extend renderAll ----
+const _origRenderAllV9 = renderAll;
+renderAll = function() {
+    _origRenderAllV9();
+    refreshLivePatterns();
+    renderPatternLibrary();
 };
 
 document.addEventListener("DOMContentLoaded", () => {

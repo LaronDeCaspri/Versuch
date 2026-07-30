@@ -220,6 +220,367 @@ function detectRegime(h, l, c) {
     };
 }
 
+// =========================================================================
+// v9: Candlestick + Chart Pattern Detection Engine
+// Pattern descriptions in plain German, historical stats via computeStats
+// =========================================================================
+
+const PATTERN_INFO = {
+    "doji":              { name: "Doji", type: "candle", bias: "reversal", desc: "Der Kurs schliesst fast dort wo er eröffnet hat. Zeigt Unentschlossenheit — Käufer und Verkäufer im Gleichgewicht. Oft Vorbote einer Trendumkehr." },
+    "hammer":            { name: "Hammer", type: "candle", bias: "bull", desc: "Kleiner Körper oben, langer Docht nach unten. Käufer haben die Verkäufer nach starkem Abverkauf zurückgedrängt. Bullisches Umkehrsignal." },
+    "shooting_star":     { name: "Shooting Star", type: "candle", bias: "bear", desc: "Kleiner Körper unten, langer Docht nach oben. Verkäufer haben eine Rally abgewürgt. Bärisches Umkehrsignal." },
+    "bull_engulfing":    { name: "Bullish Engulfing", type: "candle", bias: "bull", desc: "Grüne Kerze verschlingt die vorherige rote komplett. Käufer übernehmen aggressiv die Kontrolle — starkes Kauf-Signal." },
+    "bear_engulfing":    { name: "Bearish Engulfing", type: "candle", bias: "bear", desc: "Rote Kerze verschlingt die vorherige grüne. Verkäufer sind zurück in der Kontrolle — starkes Verkauf-Signal." },
+    "morning_star":      { name: "Morning Star", type: "candle", bias: "bull", desc: "3-Kerzen-Muster: grosse rote → kleine Kerze → grosse grüne. Der Boden ist erreicht, Trendwende bullish." },
+    "evening_star":      { name: "Evening Star", type: "candle", bias: "bear", desc: "3-Kerzen-Muster: grosse grüne → kleine Kerze → grosse rote. Das Top ist erreicht, Trendwende bearish." },
+    "harami":            { name: "Harami", type: "candle", bias: "reversal", desc: "Kleine Kerze innerhalb der vorherigen grossen. Zeigt nachlassenden Trend-Druck — mögliche Umkehr." },
+    "piercing":          { name: "Piercing Line", type: "candle", bias: "bull", desc: "Rote Kerze, dann grüne die mehr als halb in die rote hineinschliesst. Bullishe Umkehr im Abwärtstrend." },
+    "dark_cloud":        { name: "Dark Cloud Cover", type: "candle", bias: "bear", desc: "Grüne Kerze, dann rote die mehr als halb in die grüne hineinschliesst. Bearishe Umkehr im Aufwärtstrend." },
+    "three_soldiers":    { name: "Drei weisse Soldaten", type: "candle", bias: "bull", desc: "Drei aufeinanderfolgende grüne Kerzen, jede höher als die letzte. Sehr starkes bullishes Momentum." },
+    "three_crows":       { name: "Drei schwarze Raben", type: "candle", bias: "bear", desc: "Drei aufeinanderfolgende rote Kerzen, jede tiefer als die letzte. Sehr starkes bearishes Momentum." },
+    "double_top":        { name: "Doppel-Top", type: "chart", bias: "bear", desc: "Kurs testet zweimal denselben Widerstand und wird abgewiesen. Klassisches Umkehrsignal — der Trend endet, Verkäufer übernehmen." },
+    "double_bottom":     { name: "Doppel-Boden", type: "chart", bias: "bull", desc: "Kurs testet zweimal denselben Support und hält. Klassisches bullishes Umkehrsignal — Käufer bekommen die Kontrolle." },
+    "hns":               { name: "Head &amp; Shoulders", type: "chart", bias: "bear", desc: "Drei Peaks: linke Schulter, Kopf (höchster), rechte Schulter. Bruch der Nackenlinie = starkes Verkaufssignal. Ziel: Höhe des Kopfes nach unten." },
+    "inv_hns":           { name: "Inverse Head &amp; Shoulders", type: "chart", bias: "bull", desc: "Umgedreht: drei Tiefs mit dem mittleren am tiefsten. Klassisches Boden-Muster — Trendumkehr nach oben." },
+    "asc_triangle":      { name: "Aufsteigendes Dreieck", type: "chart", bias: "bull", desc: "Waagerechter Widerstand oben + steigende Tiefs unten. Käufer werden aggressiver — Ausbruch nach oben wahrscheinlich." },
+    "desc_triangle":     { name: "Absteigendes Dreieck", type: "chart", bias: "bear", desc: "Waagerechter Support unten + fallende Highs oben. Verkäufer werden aggressiver — Ausbruch nach unten wahrscheinlich." },
+    "sym_triangle":      { name: "Symmetrisches Dreieck", type: "chart", bias: "continuation", desc: "Konvergierende Trendlinien. Konsolidierung — Bruch in Trendrichtung wahrscheinlich." },
+    "bull_flag":         { name: "Bull-Flagge", type: "chart", bias: "bull", desc: "Steile Rally + kurze Konsolidierung im Abwärts-Kanal. Fortsetzung des Aufwärtstrends nach Ausbruch." },
+    "bear_flag":         { name: "Bear-Flagge", type: "chart", bias: "bear", desc: "Steiler Absturz + kurze Konsolidierung im Aufwärts-Kanal. Fortsetzung des Abwärtstrends nach Ausbruch." },
+    "rising_wedge":      { name: "Steigender Keil", type: "chart", bias: "bear", desc: "Steigende Highs + steigende Tiefs, aber konvergierend. Trotz Anstieg schwächelt Momentum — bearishe Umkehr." },
+    "falling_wedge":     { name: "Fallender Keil", type: "chart", bias: "bull", desc: "Fallende Highs + fallende Tiefs, aber konvergierend. Verkäufer verlieren Momentum — bullishe Umkehr." },
+    "cup_handle":        { name: "Cup and Handle", type: "chart", bias: "bull", desc: "U-förmiger Boden + kurze Konsolidierung rechts. William-O'Neil-Klassiker — sehr bullishes Fortsetzungsmuster." },
+};
+
+// -------- CANDLESTICK PATTERNS --------
+function _bodySize(c)  { return Math.abs(c.close - c.open); }
+function _upperWick(c) { return c.high - Math.max(c.open, c.close); }
+function _lowerWick(c) { return Math.min(c.open, c.close) - c.low; }
+function _range(c)     { return c.high - c.low; }
+
+function _detectDoji(c) {
+    const rng = _range(c);
+    if (rng === 0) return false;
+    return _bodySize(c) / rng < 0.10;
+}
+function _detectHammer(c) {
+    const rng = _range(c);
+    if (rng === 0) return false;
+    const body = _bodySize(c);
+    return _lowerWick(c) > 2 * body && _upperWick(c) < body * 0.5 && body / rng > 0.1;
+}
+function _detectShootingStar(c) {
+    const rng = _range(c);
+    if (rng === 0) return false;
+    const body = _bodySize(c);
+    return _upperWick(c) > 2 * body && _lowerWick(c) < body * 0.5 && body / rng > 0.1;
+}
+function _detectBullEngulfing(prev, curr) {
+    return prev.close < prev.open
+        && curr.close > curr.open
+        && curr.open < prev.close
+        && curr.close > prev.open;
+}
+function _detectBearEngulfing(prev, curr) {
+    return prev.close > prev.open
+        && curr.close < curr.open
+        && curr.open > prev.close
+        && curr.close < prev.open;
+}
+function _detectMorningStar(c1, c2, c3) {
+    const bear1 = c1.close < c1.open && _bodySize(c1) / _range(c1) > 0.5;
+    const small2 = _bodySize(c2) / _range(c1) < 0.3;
+    const bull3 = c3.close > c3.open && c3.close > (c1.open + c1.close) / 2;
+    return bear1 && small2 && bull3;
+}
+function _detectEveningStar(c1, c2, c3) {
+    const bull1 = c1.close > c1.open && _bodySize(c1) / _range(c1) > 0.5;
+    const small2 = _bodySize(c2) / _range(c1) < 0.3;
+    const bear3 = c3.close < c3.open && c3.close < (c1.open + c1.close) / 2;
+    return bull1 && small2 && bear3;
+}
+function _detectHarami(prev, curr) {
+    const prevBody = _bodySize(prev);
+    const currBody = _bodySize(curr);
+    if (prevBody < 1e-9 || currBody / prevBody > 0.6) return false;
+    const prevTop = Math.max(prev.open, prev.close);
+    const prevBot = Math.min(prev.open, prev.close);
+    return Math.max(curr.open, curr.close) < prevTop && Math.min(curr.open, curr.close) > prevBot;
+}
+function _detectPiercing(prev, curr) {
+    if (prev.close >= prev.open) return false;             // prev must be red
+    if (curr.close <= curr.open) return false;             // curr must be green
+    const prevMid = (prev.open + prev.close) / 2;
+    return curr.open < prev.close && curr.close > prevMid && curr.close < prev.open;
+}
+function _detectDarkCloud(prev, curr) {
+    if (prev.close <= prev.open) return false;             // prev must be green
+    if (curr.close >= curr.open) return false;             // curr must be red
+    const prevMid = (prev.open + prev.close) / 2;
+    return curr.open > prev.close && curr.close < prevMid && curr.close > prev.open;
+}
+function _detectThreeSoldiers(c1, c2, c3) {
+    return c1.close > c1.open && c2.close > c2.open && c3.close > c3.open
+        && c2.close > c1.close && c3.close > c2.close
+        && c2.open > c1.open && c3.open > c2.open;
+}
+function _detectThreeCrows(c1, c2, c3) {
+    return c1.close < c1.open && c2.close < c2.open && c3.close < c3.open
+        && c2.close < c1.close && c3.close < c2.close
+        && c2.open < c1.open && c3.open < c2.open;
+}
+
+// -------- CHART PATTERNS (need swings) --------
+function _findSwings(candles, lookback = 5) {
+    // pivot-based swing detection: bar is a swing high if higher than N bars each side
+    const swings = [];
+    for (let i = lookback; i < candles.length - lookback; i++) {
+        let isHigh = true, isLow = true;
+        for (let j = 1; j <= lookback; j++) {
+            if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) isHigh = false;
+            if (candles[i].low  >= candles[i - j].low  || candles[i].low  >= candles[i + j].low)  isLow = false;
+        }
+        if (isHigh) swings.push({ i, type: "high", price: candles[i].high, ts: candles[i].ts });
+        else if (isLow) swings.push({ i, type: "low", price: candles[i].low, ts: candles[i].ts });
+    }
+    return swings;
+}
+
+function _detectDoubleTop(candles, swings, tolPct = 0.02) {
+    if (swings.length < 3) return null;
+    const recent = swings.slice(-6).filter((s) => s.type === "high");
+    if (recent.length < 2) return null;
+    const [a, b] = recent.slice(-2);
+    if (Math.abs(a.price - b.price) / a.price > tolPct) return null;
+    // require a low between them
+    const between = swings.filter((s) => s.i > a.i && s.i < b.i && s.type === "low");
+    if (!between.length) return null;
+    const valley = Math.min(...between.map((s) => s.price));
+    if (valley >= a.price * 0.98) return null;                  // require meaningful valley
+    return { peaks: [a, b], neckline: valley, priceTarget: valley - (a.price - valley) };
+}
+
+function _detectDoubleBottom(candles, swings, tolPct = 0.02) {
+    if (swings.length < 3) return null;
+    const recent = swings.slice(-6).filter((s) => s.type === "low");
+    if (recent.length < 2) return null;
+    const [a, b] = recent.slice(-2);
+    if (Math.abs(a.price - b.price) / a.price > tolPct) return null;
+    const between = swings.filter((s) => s.i > a.i && s.i < b.i && s.type === "high");
+    if (!between.length) return null;
+    const peak = Math.max(...between.map((s) => s.price));
+    if (peak <= a.price * 1.02) return null;
+    return { troughs: [a, b], neckline: peak, priceTarget: peak + (peak - a.price) };
+}
+
+function _detectHns(candles, swings) {
+    if (swings.length < 5) return null;
+    const highs = swings.slice(-10).filter((s) => s.type === "high");
+    if (highs.length < 3) return null;
+    const [ls, head, rs] = highs.slice(-3);
+    // head must be higher than shoulders, shoulders roughly equal
+    if (head.price <= ls.price || head.price <= rs.price) return null;
+    if (Math.abs(ls.price - rs.price) / ls.price > 0.05) return null;
+    const lows = swings.filter((s) => s.i > ls.i && s.i < rs.i && s.type === "low");
+    if (lows.length < 2) return null;
+    const neckline = (lows[0].price + lows[lows.length - 1].price) / 2;
+    return { leftShoulder: ls, head, rightShoulder: rs, neckline,
+             priceTarget: neckline - (head.price - neckline) };
+}
+
+function _detectInvHns(candles, swings) {
+    if (swings.length < 5) return null;
+    const lows = swings.slice(-10).filter((s) => s.type === "low");
+    if (lows.length < 3) return null;
+    const [ls, head, rs] = lows.slice(-3);
+    if (head.price >= ls.price || head.price >= rs.price) return null;
+    if (Math.abs(ls.price - rs.price) / ls.price > 0.05) return null;
+    const highs = swings.filter((s) => s.i > ls.i && s.i < rs.i && s.type === "high");
+    if (highs.length < 2) return null;
+    const neckline = (highs[0].price + highs[highs.length - 1].price) / 2;
+    return { leftShoulder: ls, head, rightShoulder: rs, neckline,
+             priceTarget: neckline + (neckline - head.price) };
+}
+
+function _detectTriangle(candles, swings) {
+    if (swings.length < 4) return null;
+    const highs = swings.slice(-8).filter((s) => s.type === "high").slice(-3);
+    const lows  = swings.slice(-8).filter((s) => s.type === "low").slice(-3);
+    if (highs.length < 2 || lows.length < 2) return null;
+    const hFirst = highs[0].price, hLast = highs[highs.length - 1].price;
+    const lFirst = lows[0].price, lLast = lows[lows.length - 1].price;
+    const hSlope = (hLast - hFirst) / hFirst;
+    const lSlope = (lLast - lFirst) / lFirst;
+    // ascending: flat top (|hSlope| < 1%), rising bottoms (lSlope > 2%)
+    if (Math.abs(hSlope) < 0.01 && lSlope > 0.02) return { kind: "asc_triangle", res: hLast, sup: lLast };
+    if (Math.abs(lSlope) < 0.01 && hSlope < -0.02) return { kind: "desc_triangle", res: hLast, sup: lLast };
+    if (hSlope < -0.01 && lSlope > 0.01) return { kind: "sym_triangle", res: hLast, sup: lLast };
+    return null;
+}
+
+function _detectWedge(candles, swings) {
+    if (swings.length < 4) return null;
+    const highs = swings.slice(-8).filter((s) => s.type === "high").slice(-3);
+    const lows  = swings.slice(-8).filter((s) => s.type === "low").slice(-3);
+    if (highs.length < 2 || lows.length < 2) return null;
+    const hSlope = (highs[highs.length - 1].price - highs[0].price) / highs[0].price;
+    const lSlope = (lows[lows.length - 1].price - lows[0].price) / lows[0].price;
+    // rising wedge: both up but highs slope < lows slope (converging up)
+    if (hSlope > 0.01 && lSlope > 0.02 && lSlope > hSlope) return { kind: "rising_wedge" };
+    if (hSlope < -0.02 && lSlope < -0.01 && hSlope < lSlope) return { kind: "falling_wedge" };
+    return null;
+}
+
+function _detectFlag(candles) {
+    // simple: last 20 bars, find strong impulse (10+ bars) then small counter-move (5-8 bars)
+    if (candles.length < 25) return null;
+    const impulse = candles.slice(-20, -8);
+    const flag = candles.slice(-8);
+    const impStart = impulse[0].close, impEnd = impulse[impulse.length - 1].close;
+    const impMove = (impEnd - impStart) / impStart;
+    if (Math.abs(impMove) < 0.05) return null;                  // impulse < 5% = not strong enough
+    const flagStart = flag[0].close, flagEnd = flag[flag.length - 1].close;
+    const flagMove = (flagEnd - flagStart) / flagStart;
+    // flag counter-move should be < 40% of impulse and OPPOSITE direction
+    if (Math.abs(flagMove) > Math.abs(impMove) * 0.4) return null;
+    if (impMove > 0 && flagMove < 0) return { kind: "bull_flag", impMove, flagMove };
+    if (impMove < 0 && flagMove > 0) return { kind: "bear_flag", impMove, flagMove };
+    return null;
+}
+
+function _detectCupHandle(candles, swings) {
+    // Simplified: find U-shape in last 30-60 bars + small pullback at end
+    if (candles.length < 40) return null;
+    const window = candles.slice(-40);
+    const highs = window.map((c) => c.high);
+    const lefth = highs[0], righth = highs[highs.length - 1];
+    if (Math.abs(lefth - righth) / lefth > 0.05) return null;   // rim heights similar
+    const bottom = Math.min(...highs);
+    const bottomIdx = highs.indexOf(bottom);
+    if (bottomIdx < 8 || bottomIdx > 32) return null;           // bottom near middle
+    if ((lefth - bottom) / lefth < 0.10) return null;           // meaningful cup depth
+    // handle: small pullback in last 5-8 bars
+    const handle = candles.slice(-8);
+    const handleLow = Math.min(...handle.map((c) => c.low));
+    if (handleLow < bottom + (lefth - bottom) * 0.5) return null;  // handle too deep
+    return { rim: (lefth + righth) / 2, cupDepth: lefth - bottom };
+}
+
+// Main detector — returns { patternKey: metadata }
+function detectPatterns(candles) {
+    if (!candles || candles.length < 30) return {};
+    const found = {};
+    const n = candles.length;
+    // candlestick — last 3 bars
+    if (n >= 1) {
+        const c = candles[n - 1];
+        if (_detectDoji(c))         found.doji = { at: n - 1 };
+        if (_detectHammer(c))       found.hammer = { at: n - 1 };
+        if (_detectShootingStar(c)) found.shooting_star = { at: n - 1 };
+    }
+    if (n >= 2) {
+        const prev = candles[n - 2], curr = candles[n - 1];
+        if (_detectBullEngulfing(prev, curr)) found.bull_engulfing = { at: n - 1 };
+        if (_detectBearEngulfing(prev, curr)) found.bear_engulfing = { at: n - 1 };
+        if (_detectHarami(prev, curr))         found.harami = { at: n - 1 };
+        if (_detectPiercing(prev, curr))       found.piercing = { at: n - 1 };
+        if (_detectDarkCloud(prev, curr))      found.dark_cloud = { at: n - 1 };
+    }
+    if (n >= 3) {
+        const c1 = candles[n - 3], c2 = candles[n - 2], c3 = candles[n - 1];
+        if (_detectMorningStar(c1, c2, c3))    found.morning_star = { at: n - 1 };
+        if (_detectEveningStar(c1, c2, c3))    found.evening_star = { at: n - 1 };
+        if (_detectThreeSoldiers(c1, c2, c3))  found.three_soldiers = { at: n - 1 };
+        if (_detectThreeCrows(c1, c2, c3))     found.three_crows = { at: n - 1 };
+    }
+    // chart patterns
+    const swings = _findSwings(candles, 5);
+    if (swings.length >= 3) {
+        const dt = _detectDoubleTop(candles, swings);
+        if (dt) found.double_top = dt;
+        const db = _detectDoubleBottom(candles, swings);
+        if (db) found.double_bottom = db;
+        const hns = _detectHns(candles, swings);
+        if (hns) found.hns = hns;
+        const ihns = _detectInvHns(candles, swings);
+        if (ihns) found.inv_hns = ihns;
+        const tri = _detectTriangle(candles, swings);
+        if (tri) found[tri.kind] = tri;
+        const wed = _detectWedge(candles, swings);
+        if (wed) found[wed.kind] = wed;
+    }
+    const flg = _detectFlag(candles);
+    if (flg) found[flg.kind] = flg;
+    const cup = _detectCupHandle(candles, swings);
+    if (cup) found.cup_handle = cup;
+    return found;
+}
+
+// Compute historical stats for a pattern across a candle series
+// For each occurrence: return N bars later, mark win if bias-correct
+function computePatternStats(candles, patternKey, lookAheadBars = 10) {
+    const info = PATTERN_INFO[patternKey];
+    if (!info) return null;
+    const occurrences = [];
+    // scan through history detecting only THIS pattern per bar
+    for (let i = 30; i < candles.length - lookAheadBars; i++) {
+        const slice = candles.slice(0, i + 1);
+        const detected = detectPatterns(slice);
+        if (!(patternKey in detected)) continue;
+        const startPrice = candles[i].close;
+        const futureBars = candles.slice(i + 1, i + 1 + lookAheadBars);
+        const endPrice = futureBars[futureBars.length - 1].close;
+        const returnPct = (endPrice - startPrice) / startPrice * 100;
+        const win = info.bias === "bull" ? returnPct > 0
+                  : info.bias === "bear" ? returnPct < 0
+                  : Math.abs(returnPct) > 0.5;                 // reversal: any move
+        occurrences.push({ i, startPrice, endPrice, returnPct, win });
+    }
+    if (!occurrences.length) return null;
+    const wins = occurrences.filter((o) => o.win).length;
+    const avgReturn = occurrences.reduce((s, o) => s + o.returnPct, 0) / occurrences.length;
+    const bestReturn = Math.max(...occurrences.map((o) => o.returnPct));
+    const worstReturn = Math.min(...occurrences.map((o) => o.returnPct));
+    return {
+        count: occurrences.length,
+        winRate: wins / occurrences.length,
+        avgReturn, bestReturn, worstReturn,
+        lookAheadBars,
+    };
+}
+
+// Chain-fetch historical klines back N years
+async function fetchHistory(symbol, interval = "1d", years = 5, progressCb = null) {
+    const sym = symbol.replace("/", "");
+    const intervalMs = {
+        "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+        "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800,
+    }[interval] * 1000;
+    const perBatch = 1000;
+    const now = Date.now();
+    const startTs = now - years * 365 * 86400 * 1000;
+    let all = [];
+    let endTime = now;
+    let requests = 0;
+    while (endTime > startTs && requests < 100) {              // safety cap
+        const url = `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${interval}&endTime=${endTime}&limit=${perBatch}`;
+        const raw = await fetch(url).then((r) => r.json()).catch(() => []);
+        if (!Array.isArray(raw) || !raw.length) break;
+        const batch = raw.map((k) => ({
+            ts: k[0], open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5],
+        }));
+        all = batch.concat(all);
+        endTime = batch[0].ts - 1;
+        requests++;
+        if (progressCb) progressCb({ loaded: all.length, requests, oldest: new Date(batch[0].ts) });
+        if (batch.length < perBatch) break;
+        await new Promise((r) => setTimeout(r, 150));           // rate-limit friendly
+    }
+    // dedupe by ts
+    const seen = new Set();
+    return all.filter((c) => { if (seen.has(c.ts)) return false; seen.add(c.ts); return true; });
+}
+
 // Confluence score — how many independent bullish/bearish signals agree
 function confluenceScore(candles) {
     if (!candles || candles.length < 100) return null;
@@ -1433,6 +1794,7 @@ function normalPdf(x, mean, std) {
 return {
     sma, ema, rsi, macd, bollinger, atr, adx, donchian, obv, stoch, williamsR, cci, mfi,
     ichimoku, vwap, vwapBands, keltner, chandelier, detectDivergence, detectRegime, confluenceScore,
+    detectPatterns, computePatternStats, fetchHistory, PATTERN_INFO,
     closes, highs, lows, vols,
     STRATEGIES, ensemble,
     planTrade, forecast, assessRisk,
