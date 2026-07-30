@@ -925,7 +925,7 @@ async function runBacktest(symbol, days) {
         }
     } catch (e) { el.textContent = "Fehler beim Laden: " + e.message; return; }
 
-    const bt = new window.TB.PaperBroker(10000);
+    const bt = new window.TB.PaperBroker(10000, { isolated: true });
     let trades = 0, wins = 0, losses = 0;
     const equity = [];
     for (let i = 220; i < candles.length; i++) {
@@ -946,7 +946,9 @@ async function runBacktest(symbol, days) {
                 const atrVal = atrArr[atrArr.length - 1];
                 const equity_ = bt.equity({ [symbol]: price });
                 const plan = window.TB.planTrade(result.side, price, atrVal, equity_,
-                    { baseRiskPct: 0.5, atrStopMult: 1.8, tpMultiples: [2.0, 3.5, 5.0], riskPctPerTrade: 0.5 });
+                    { riskPctPerTrade: CFG.baseRiskPct, atrStopMult: CFG.atrStopMult,
+                      tpMultiples: CFG.tpMultiples,
+                      maxNotionalPctPerPosition: CFG.maxNotionalPctPerPosition });
                 if (plan && plan.size > 0) {
                     bt.submit(symbol, result.side, plan.size, price,
                         { stop: plan.stop, take_profits: plan.take_profits,
