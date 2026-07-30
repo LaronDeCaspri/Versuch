@@ -295,6 +295,23 @@ button.ghost { background: transparent; }
     transform: translateX(-50%);
     box-shadow: 0 0 8px rgba(238, 242, 247, 0.5);
 }
+.fng-composite {
+    margin-top: 14px; padding: 12px;
+    background: var(--bg-2); border-radius: 8px;
+    border: 1px solid var(--border);
+}
+.fng-comp-head { display: flex; justify-content: space-between; align-items: baseline; }
+.fng-comp-head span { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; }
+.fng-comp-head strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+.fng-comp-hint { color: var(--muted); font-size: 0.7rem; margin: 6px 0 10px; }
+.fng-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 6px; }
+.fng-part {
+    padding: 5px 8px; background: rgba(255,255,255,0.03);
+    border-radius: 6px; font-size: 0.72rem; text-align: center;
+    border: 1px solid var(--border);
+}
+.fng-part .fp-k { display: block; color: var(--muted); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.fng-part .fp-v { font-weight: 700; font-variant-numeric: tabular-nums; }
 .fng-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.7px; }
 .fng-class { font-size: 1.05rem; font-weight: 700; margin: 2px 0 6px; }
 .fng-hint { color: var(--text-2); font-size: 0.75rem; }
@@ -350,20 +367,47 @@ button.ghost { background: transparent; }
 .pos-grid .v { font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
 
 /* -------------------- portfolio allocation -------------------- */
-.alloc-bar {
-    display: flex; height: 22px;
-    border-radius: 6px; overflow: hidden;
-    background: var(--bg-2); margin-bottom: 8px;
+.alloc-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding-bottom: 10px; margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
 }
-.alloc-bar div {
+.alloc-header span { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.7px; }
+.alloc-header strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+
+.alloc-bar-large {
+    display: flex; height: 28px;
+    border-radius: 8px; overflow: hidden;
+    background: var(--bg-2); margin-bottom: 16px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.4);
+}
+.alloc-seg {
     height: 100%; display: flex; align-items: center; justify-content: center;
-    font-size: 0.65rem; font-weight: 700; color: white;
-    transition: flex-basis 0.4s;
-    min-width: 0;
+    font-size: 0.68rem; font-weight: 700; color: white;
+    transition: width 0.4s;
+    min-width: 0; overflow: hidden;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
 }
-.alloc-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 0.78rem; }
-.alloc-list .item { display: flex; justify-content: space-between; }
-.alloc-list .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+.alloc-list-v2 { display: flex; flex-direction: column; gap: 10px; }
+.alloc-row {
+    padding: 10px;
+    background: var(--bg-2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+.alloc-row-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 0.88rem; margin-bottom: 6px;
+}
+.alloc-row-head .swatch {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; margin-right: 8px; vertical-align: middle;
+    box-shadow: 0 0 6px currentColor;
+}
+.alloc-row-bar { height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+.alloc-row-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+.alloc-row-foot { text-align: right; color: var(--muted); font-size: 0.72rem; margin-top: 4px; }
 
 /* -------------------- patterns -------------------- */
 .pattern-card {
@@ -671,6 +715,15 @@ footer {
     border-radius: 6px;
     font-size: 0.78rem; color: var(--amber);
 }
+
+.sizing-rule {
+    margin-top: 12px; padding: 12px;
+    background: rgba(77,148,255,0.08);
+    border: 1px solid rgba(77,148,255,0.3);
+    border-radius: 10px; text-align: left;
+}
+.sizing-rule .risk-title { color: var(--accent); }
+.sizing-rule .row { font-size: 0.82rem; padding: 5px 0; }
 
 /* -------------------- trade journal -------------------- */
 .journal-controls {

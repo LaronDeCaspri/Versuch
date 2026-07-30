@@ -134,8 +134,16 @@ function renderSignalTile(pending, fallback) {
                 <button class="confirm" id="confirm-btn">✓ BESTÄTIGEN</button>
                 <button class="danger" id="cancel-btn">✕ VERWERFEN</button>
             </div>
-            <div style="margin-top:10px; font-size:0.72rem; color:var(--muted); text-align:left;">
-                Dynamisches Risiko: ${(pending.dynRiskPct || CFG.baseRiskPct).toFixed(2)}% des Depots
+            <div class="sizing-rule">
+                <div class="risk-title">Sizing-Regel · was investiert der Bot?</div>
+                <div class="row"><span>Investment (Notional)</span><strong class="num">${fmt(pending.qty * pending.entry, 2)} USDT · ${fmt(pending.qty * pending.entry / broker.cash * 100, 1)}% des Cash</strong></div>
+                <div class="row"><span>Cash frei nach Trade</span><strong class="num">${fmt(broker.cash - pending.qty * pending.entry, 2)} USDT</strong></div>
+                <div class="row"><span>Risiko-Anteil</span><strong class="num">${(pending.dynRiskPct || CFG.baseRiskPct).toFixed(2)}% des Equity · max ${money(pending.riskAmount)} Verlust bei Stop</strong></div>
+                <div class="row" style="border-bottom:none;"><span>Position-Cap</span><strong class="num">${CFG.maxNotionalPctPerPosition}% des Equity max pro Position</strong></div>
+                <div style="margin-top:8px; font-size:0.7rem; color:var(--muted); line-height:1.4;">
+                    <b>Regel:</b> Kelly-optimiert wenn ≥ 20 Trades im Journal, sonst Score-basiert (0,5-3% Risiko).
+                    Der Bot bindet nie mehr Cash als vorhanden und deckelt jede Position auf ${CFG.maxNotionalPctPerPosition}% des Equity — bei ${CFG.maxOpenPositions} Positionen sind ${(CFG.maxNotionalPctPerPosition * CFG.maxOpenPositions).toFixed(0)}% investiert, der Rest ist Cash-Puffer.
+                </div>
             </div>
         `;
         $("#confirm-btn").onclick = () => confirmPending(pending);
@@ -467,12 +475,160 @@ function cancelPending(p) {
     renderAll();
 }
 
+// Kelly Criterion — computes optimal fraction from historical trades
+// Returns { edge, kelly, halfKelly } or null if insufficient data
+function computeKelly() {
+    const trades = _pairTrades();
+    if (trades.length < 20) return null;
+    const wins = trades.filter((t) => t.pnl > 0);
+    const losses = trades.filter((t) => t.pnl < 0);
+    if (!wins.length || !losses.length) return null;
+    const winRate = wins.length / trades.length;
+    const avgWin = wins.reduce((s, t) => s + t.pnl, 0) / wins.length;
+    const avgLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0) / losses.length);
+    if (avgLoss <= 0) return null;
+    const R = avgWin / avgLoss;                                    // reward:risk
+    const kelly = (winRate * (R + 1) - 1) / R;                     // classic Kelly
+    return {
+        winRate, avgWin, avgLoss, R,
+        edge: winRate * avgWin - (1 - winRate) * avgLoss,
+        kelly,
+        halfKelly: Math.max(0, kelly * 0.5),                        // safety-halved
+    };
+}
+
 function dynamicRiskPct(score, riskScore) {
-    // Score 3 → base risk, higher score linearly up to max risk
+    // Prefer Kelly-based sizing if we have enough historical trades
+    const k = computeKelly();
+    if (k && k.kelly > 0) {
+        // half-Kelly in percent, capped
+        const kellyPct = Math.max(CFG.baseRiskPct * 0.5,
+                          Math.min(CFG.maxRiskPct, k.halfKelly * 100));
+        // score boost still applies on top (multiplicative)
+        const boost = 0.5 + Math.max(0, Math.min(1, (score - 2.0) / 3.0)) * 0.5;
+        return Math.max(CFG.baseRiskPct * 0.5,
+                Math.min(CFG.maxRiskPct, kellyPct * boost));
+    }
+    // Fallback: score-based scaling from before Kelly has enough data
     const scoreBoost = Math.min(Math.max((score - 2.0) / 3.0, 0), 1);
     const riskDampen = 1 - Math.min(riskScore / 100, 0.7);
     const pct = CFG.baseRiskPct + (CFG.maxRiskPct - CFG.baseRiskPct) * scoreBoost * riskDampen;
     return Math.max(CFG.baseRiskPct * 0.5, Math.min(CFG.maxRiskPct, pct));
+}
+
+// ============ VaR + Expected Shortfall ============
+// Compute per-position and portfolio 1-day 95% VaR + ES from realized vol
+function computePortfolioRisk() {
+    const positions = broker.positions;
+    let totalVaR = 0, totalES = 0;
+    const perPos = [];
+    for (const sym in positions) {
+        const p = positions[sym];
+        const candles = state.candles[sym];
+        if (!candles || candles.length < 30) continue;
+        const price = state.prices[sym] || p.entry;
+        const value = p.side === "long" ? p.qty * price : -p.qty * price;
+        // Compute daily volatility from log returns (last 30 bars scaled to 1d)
+        const closes = window.TB.closes(candles).slice(-96);          // ~24h at 15m
+        if (closes.length < 20) continue;
+        const rets = [];
+        for (let i = 1; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
+        const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
+        const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / rets.length;
+        const dailyVol = Math.sqrt(variance) * Math.sqrt(96);         // 96 bars = 1 day at 15m
+        const abs = Math.abs(value);
+        const var95 = 1.645 * abs * dailyVol;                          // 95% parametric VaR (1-day)
+        const es95 = 2.063 * abs * dailyVol;                           // 95% Expected Shortfall
+        totalVaR += var95;
+        totalES += es95;
+        perPos.push({ symbol: sym, value: abs, dailyVol, var95, es95 });
+    }
+    return { totalVaR, totalES, perPos };
+}
+
+// ============ CUSUM structural break on equity returns ============
+// Detects sudden performance regime shifts. Trigger: cumulative sum of
+// (return - mean) exceeds K * historical stddev in negative direction.
+function structuralBreakDetection() {
+    const hist = state.equityHistory;
+    if (hist.length < 40) return null;
+    const rets = [];
+    for (let i = 1; i < hist.length; i++) {
+        const r = (hist[i].eq - hist[i - 1].eq) / (hist[i - 1].eq || 1);
+        if (isFinite(r)) rets.push(r);
+    }
+    if (rets.length < 30) return null;
+    // Baseline from first half, monitor second half
+    const half = Math.floor(rets.length / 2);
+    const baseline = rets.slice(0, half);
+    const monitor = rets.slice(half);
+    const mean = baseline.reduce((s, r) => s + r, 0) / baseline.length;
+    const std = Math.sqrt(baseline.reduce((s, r) => s + (r - mean) ** 2, 0) / baseline.length) || 1e-9;
+    let cusum_pos = 0, cusum_neg = 0;
+    const K = 0.5 * std;                    // reference value
+    const H = 5 * std;                      // decision threshold
+    let breakDetected = false;
+    for (const r of monitor) {
+        cusum_pos = Math.max(0, cusum_pos + (r - mean) - K);
+        cusum_neg = Math.min(0, cusum_neg + (r - mean) + K);
+        if (cusum_pos > H || Math.abs(cusum_neg) > H) breakDetected = true;
+    }
+    return {
+        breakDetected,
+        cusum_pos, cusum_neg,
+        baseline_mean: mean, baseline_std: std,
+        current_mean: monitor.reduce((s, r) => s + r, 0) / monitor.length,
+    };
+}
+
+// ============ Composite F&G from Binance data ============
+async function computeBinanceCompositeFng() {
+    try {
+        const btcCandles = state.candles["BTC/USDT"];
+        if (!btcCandles || btcCandles.length < 100) return null;
+        const closes = window.TB.closes(btcCandles);
+        // 1. RSI 14 on BTC → high RSI = greed
+        const rsi = window.TB.rsi(closes, 14);
+        const rsiVal = rsi[rsi.length - 1];
+        const rsiScore = Math.max(0, Math.min(100, rsiVal || 50));
+        // 2. Volatility → high vol = fear
+        const highs = window.TB.highs(btcCandles), lows = window.TB.lows(btcCandles);
+        const atr = window.TB.atr(highs, lows, closes, 14);
+        const atrPct = atr[atr.length - 1] / closes[closes.length - 1] * 100;
+        // ATR% > 2 = fear (score 0), ATR% < 0.5 = greed (score 100)
+        const volScore = Math.max(0, Math.min(100, (2.0 - atrPct) / 1.5 * 100));
+        // 3. Drawdown from recent high (100 bars)
+        const hh = Math.max(...closes.slice(-100));
+        const dd = (hh - closes[closes.length - 1]) / hh * 100;
+        // dd > 20% = extreme fear, dd < 1% = greed
+        const ddScore = Math.max(0, Math.min(100, (20 - dd) / 19 * 100));
+        // 4. Funding rate from futures data
+        let fundingScore = 50;
+        const futures = state.futuresData?.find?.((f) => f.symbol === "BTC/USDT");
+        if (futures?.funding != null) {
+            // funding > 0.05% = greed, < -0.05% = fear
+            fundingScore = Math.max(0, Math.min(100, 50 + futures.funding * 500));
+        }
+        // 5. Long/Short ratio
+        let lsScore = 50;
+        if (futures?.longShort != null) {
+            // L/S > 3 = crowded long = greed, < 0.7 = crowded short = fear
+            lsScore = Math.max(0, Math.min(100, (futures.longShort - 1) * 25 + 50));
+        }
+        // Weighted composite
+        const composite = Math.round(
+            rsiScore * 0.30 + volScore * 0.20 + ddScore * 0.20 +
+            fundingScore * 0.15 + lsScore * 0.15
+        );
+        const label = composite <= 20 ? "Extreme Angst" : composite <= 40 ? "Angst"
+                    : composite >= 80 ? "Extreme Gier" : composite >= 60 ? "Gier" : "Neutral";
+        return {
+            value: composite, label,
+            components: { rsi: Math.round(rsiScore), vol: Math.round(volScore),
+                          dd: Math.round(ddScore), funding: Math.round(fundingScore),
+                          longShort: Math.round(lsScore) },
+        };
+    } catch (e) { return null; }
 }
 
 function correlationOf(symbolA, symbolB) {
@@ -1097,18 +1253,33 @@ async function runBacktest(symbol, days) {
     const bt = new window.TB.PaperBroker(10000, { isolated: true });
     let trades = 0, wins = 0, losses = 0;
     const equity = [];
+    const tradePnls = [];               // for Monte-Carlo permutation
+    const SLIPPAGE_BPS = 5;             // 5 basis points = 0.05% slippage per trade
+    const LATENCY_BARS = 1;             // signal detected at bar N, executed at bar N+1
+    let pendingSignal = null;
     for (let i = 220; i < candles.length; i++) {
         const win = candles.slice(Math.max(0, i - 500), i + 1);
         const price = candles[i].close;
+        // apply slippage on price for stop/tp checks
         const events = bt.onPrice(symbol, price);
         for (const ev of events) {
             if (ev.kind === "tp" || ev.kind === "sl") {
                 trades++;
                 if (ev.pnl > 0) wins++;
                 else if (ev.pnl < 0) losses++;
+                tradePnls.push(ev.pnl);
             }
         }
-        if (!bt.positions[symbol] && i % 4 === 0) {                // scan every 4 bars = 1h
+        // execute delayed signal from previous scan
+        if (pendingSignal && !bt.positions[symbol]) {
+            const p = pendingSignal;
+            const slipMult = p.side === "long" ? (1 + SLIPPAGE_BPS / 10000) : (1 - SLIPPAGE_BPS / 10000);
+            const execPrice = price * slipMult;                       // pay slippage on entry
+            bt.submit(symbol, p.side, p.size, execPrice,
+                { stop: p.stop, take_profits: p.take_profits, strategy: p.strategy });
+            pendingSignal = null;
+        }
+        if (!bt.positions[symbol] && !pendingSignal && i % 4 === 0) {
             const result = window.TB.ensemble(win, CFG.strictMinScore, CFG.strictAgreement);
             if (result.side) {
                 const atrArr = window.TB.atr(window.TB.highs(win), window.TB.lows(win), window.TB.closes(win), 14);
@@ -1119,9 +1290,9 @@ async function runBacktest(symbol, days) {
                       tpMultiples: CFG.tpMultiples,
                       maxNotionalPctPerPosition: CFG.maxNotionalPctPerPosition });
                 if (plan && plan.size > 0) {
-                    bt.submit(symbol, result.side, plan.size, price,
-                        { stop: plan.stop, take_profits: plan.take_profits,
-                          strategy: result.signals.map((s) => s.strategy).join(",") });
+                    // Delay execution by LATENCY_BARS
+                    pendingSignal = { ...plan,
+                        strategy: result.signals.map((s) => s.strategy).join(",") };
                 }
             }
         }
@@ -1130,6 +1301,40 @@ async function runBacktest(symbol, days) {
     const finalEq = bt.equity({ [symbol]: candles[candles.length - 1].close });
     const pnl = finalEq - 10000;
     const wr = trades ? (wins / trades * 100) : 0;
+
+    // ---- Monte-Carlo permutation of trade order to estimate DD distribution ----
+    let mcMedianDD = 0, mcP95DD = 0, mcP99DD = 0, mcMaxDD = 0;
+    if (tradePnls.length >= 5) {
+        const permutations = 1000;
+        const dds = [];
+        for (let sim = 0; sim < permutations; sim++) {
+            // Shuffle
+            const shuffled = tradePnls.slice();
+            for (let k = shuffled.length - 1; k > 0; k--) {
+                const j = Math.floor(Math.random() * (k + 1));
+                [shuffled[k], shuffled[j]] = [shuffled[j], shuffled[k]];
+            }
+            let eq = 10000, peak = 10000, worst = 0;
+            for (const p of shuffled) {
+                eq += p;
+                if (eq > peak) peak = eq;
+                const dd = (peak - eq) / peak * 100;
+                if (dd > worst) worst = dd;
+            }
+            dds.push(worst);
+        }
+        dds.sort((a, b) => a - b);
+        mcMedianDD = dds[Math.floor(dds.length * 0.5)];
+        mcP95DD = dds[Math.floor(dds.length * 0.95)];
+        mcP99DD = dds[Math.floor(dds.length * 0.99)];
+        mcMaxDD = dds[dds.length - 1];
+    }
+    // measured drawdown in the actual observed path
+    let obsPeak = 10000, obsDD = 0;
+    for (const p of equity) {
+        obsPeak = Math.max(obsPeak, p.eq);
+        obsDD = Math.max(obsDD, (obsPeak - p.eq) / obsPeak * 100);
+    }
 
     // mini sparkline
     const minEq = Math.min(...equity.map((p) => p.eq));
@@ -1151,8 +1356,20 @@ async function runBacktest(symbol, days) {
             <polyline points="${line}" fill="none" stroke="${pnl >= 0 ? "var(--green)" : "var(--red)"}" stroke-width="1.5"/>
         </svg>
         <div style="text-align:center;margin-top:6px;font-size:0.72rem;color:var(--muted);">
-            ${equity.length} Bars simuliert · Start 10 000 USDT · Strikte Filter (Score ≥ 3.0, Agreement ≥ 3)
-        </div>`;
+            ${equity.length} Bars simuliert · Start 10 000 USDT · Slippage 5 bps + 1-Bar-Latency · Strikte Filter (Score ≥ 3.0, Agreement ≥ 3)
+        </div>
+        ${tradePnls.length >= 5 ? `
+        <div class="risk-block" style="margin-top:12px;">
+            <div class="risk-title"><span>Monte-Carlo Drawdown-Verteilung</span><span style="color:var(--muted); font-size:0.7rem;">1000 Permutationen</span></div>
+            <div class="row"><span>Beobachtet (dieser Pfad)</span><strong class="num">-${fmt(obsDD, 2)}%</strong></div>
+            <div class="row"><span>Median-DD über alle Reihenfolgen</span><strong class="num">-${fmt(mcMedianDD, 2)}%</strong></div>
+            <div class="row"><span>95%-Perzentil</span><strong class="num" style="color:var(--amber)">-${fmt(mcP95DD, 2)}%</strong></div>
+            <div class="row"><span>99%-Perzentil (fast worst-case)</span><strong class="num" style="color:var(--red)">-${fmt(mcP99DD, 2)}%</strong></div>
+            <div class="row" style="border-bottom:none;"><span>Absoluter MC-Max-DD</span><strong class="num" style="color:var(--red)">-${fmt(mcMaxDD, 2)}%</strong></div>
+            <div style="margin-top:6px; font-size:0.7rem; color:var(--muted); line-height:1.4;">
+                Bei ungünstiger Reihenfolge der gleichen Trades erwarte Drawdown bis <b>${fmt(mcP99DD, 1)}%</b>. Passe das Depot entsprechend an.
+            </div>
+        </div>` : ""}`;
     announce(`Backtest fertig. In ${days} Tagen: ${trades} Trades, ${wr.toFixed(0)}% Win-Rate, PnL ${pnl.toFixed(2)} Dollar.`);
 }
 
@@ -1249,28 +1466,45 @@ function render24hTickers() {
 function renderAllocation() {
     const el = $("#allocation");
     const eq = broker.equity(state.prices);
-    const cashPct = broker.cash / eq * 100;
+    const cashPct = Math.max(0, broker.cash / eq * 100);
     const positions = broker.positions;
-    const items = [{ label: "Cash", value: broker.cash, pct: cashPct, color: "#6b7891" }];
     const palette = ["#4d94ff", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6", "#ec4899", "#84cc16", "#f97316", "#6366f1", "#0ea5e9", "#eab308"];
+    const items = [{ label: "Cash", short: "Cash", value: broker.cash, pct: cashPct, color: "#6b7891", side: null }];
     let colorIdx = 0;
     for (const sym in positions) {
         const p = positions[sym];
         const price = state.prices[sym] || p.entry;
-        const value = p.side === "long" ? p.qty * price : p.qty * (2 * p.entry - price);
+        const value = p.side === "long" ? p.qty * price : Math.max(0, p.qty * (2 * p.entry - price));
         items.push({
-            label: sym.replace("/USDT", "") + " " + (p.side === "long" ? "L" : "S"),
+            label: sym.replace("/USDT", "") + (p.side === "long" ? " LONG" : " SHORT"),
+            short: sym.replace("/USDT", ""),
             value, pct: value / eq * 100, color: palette[colorIdx++ % palette.length],
+            side: p.side, symbol: sym,
         });
     }
-    const bar = items.map((i) => i.pct > 0
-        ? `<div style="flex-basis:${i.pct}%; background:${i.color};" title="${i.label} ${i.pct.toFixed(1)}%">${i.pct >= 6 ? i.label : ""}</div>`
+    items.sort((a, b) => b.pct - a.pct);
+    // stacked segment bar
+    const bar = items.map((i) => i.pct > 0.1
+        ? `<div class="alloc-seg" style="width:${i.pct}%; background:${i.color};" title="${i.label} ${i.pct.toFixed(1)}%">${i.pct >= 8 ? i.short : ""}</div>`
         : ""
     ).join("");
-    const list = items.map((i) =>
-        `<div class="item"><span><span class="swatch" style="background:${i.color}"></span>${i.label}</span><span class="num">${fmt(i.value, 2)} · ${i.pct.toFixed(1)}%</span></div>`
-    ).join("");
-    el.innerHTML = `<div class="alloc-bar">${bar}</div><div class="alloc-list">${list}</div>`;
+    // detailed rows with per-position mini-bar
+    const rows = items.map((i) => `
+        <div class="alloc-row">
+            <div class="alloc-row-head">
+                <span><span class="swatch" style="background:${i.color}"></span><strong>${i.label}</strong></span>
+                <span class="num"><strong>${fmt(i.value, 2)}</strong> <small style="color:var(--muted)">USDT</small></span>
+            </div>
+            <div class="alloc-row-bar"><div class="alloc-row-fill" style="width:${Math.min(i.pct, 100)}%; background:${i.color};"></div></div>
+            <div class="alloc-row-foot"><small>${i.pct.toFixed(1)}% des Depots</small></div>
+        </div>`).join("");
+    el.innerHTML = `
+        <div class="alloc-header">
+            <span>Gesamt-Equity</span>
+            <strong class="num">${fmt(eq, 2)} USDT</strong>
+        </div>
+        <div class="alloc-bar-large">${bar}</div>
+        <div class="alloc-list-v2">${rows}</div>`;
 }
 
 function renderAll() {
@@ -1298,9 +1532,50 @@ function renderAll() {
     renderFuturesTable();
     render24hTickers();
     renderAllocation();
+    renderVarEs();
+    renderKellyCell();
+    renderCompositeFng();
+    checkStructuralBreak();
     $("#peak-eq").textContent = money(state.peakEquity);
     checkWatchlist();
     checkWeeklyReport();
+}
+
+function renderVarEs() {
+    const r = computePortfolioRisk();
+    $("#var-cell").textContent = r.totalVaR > 0 ? "-" + money(r.totalVaR) : "0,00 USDT";
+    $("#es-cell").textContent = r.totalES > 0 ? "-" + money(r.totalES) : "0,00 USDT";
+}
+function renderKellyCell() {
+    const k = computeKelly();
+    if (!k) { $("#kelly-cell").textContent = "warten auf ≥20 Trades"; return; }
+    const pct = (k.halfKelly * 100).toFixed(2);
+    const color = k.kelly > 0.02 ? "var(--green)" : k.kelly > 0 ? "var(--amber)" : "var(--red)";
+    $("#kelly-cell").innerHTML = `<span style="color:${color}">${pct}% Half-Kelly</span> <small style="color:var(--muted)">(R=${k.R.toFixed(2)}, WR=${(k.winRate*100).toFixed(0)}%)</small>`;
+}
+
+async function renderCompositeFng() {
+    const c = await computeBinanceCompositeFng();
+    if (!c) { $("#fng-binance").textContent = "–"; return; }
+    const color = c.value <= 20 ? "var(--red)" : c.value <= 40 ? "var(--amber)"
+                : c.value >= 80 ? "var(--red)" : c.value >= 60 ? "var(--green)" : "var(--muted)";
+    $("#fng-binance").innerHTML = `<span style="color:${color}">${c.value} · ${c.label}</span>`;
+    const parts = c.components;
+    $("#fng-parts").innerHTML = `
+        <div class="fng-part"><span class="fp-k">RSI</span><span class="fp-v">${parts.rsi}</span></div>
+        <div class="fng-part"><span class="fp-k">Vol</span><span class="fp-v">${parts.vol}</span></div>
+        <div class="fng-part"><span class="fp-k">DD</span><span class="fp-v">${parts.dd}</span></div>
+        <div class="fng-part"><span class="fp-k">Funding</span><span class="fp-v">${parts.funding}</span></div>
+        <div class="fng-part"><span class="fp-k">L/S</span><span class="fp-v">${parts.longShort}</span></div>`;
+}
+
+let _lastCusumAlert = 0;
+function checkStructuralBreak() {
+    const cb = structuralBreakDetection();
+    if (!cb || !cb.breakDetected) return;
+    if (Date.now() - _lastCusumAlert < 6 * 3600 * 1000) return;      // rate-limit alerts to 6h
+    _lastCusumAlert = Date.now();
+    announce("Strukturbruch erkannt. Die Live-Performance weicht signifikant vom historischen Muster ab. Bitte Bot pausieren und Setup prüfen.", "alert");
 }
 
 // =========== event bindings ============================================

@@ -72,6 +72,9 @@
         <div class="row"><span>Offene Positionen</span><strong class="num" id="pos-count">0</strong></div>
         <div class="row"><span>Realisierter PnL</span><strong class="num" id="pnl">0,00 USDT</strong></div>
         <div class="row"><span>Peak-Equity</span><strong class="num" id="peak-eq">–</strong></div>
+        <div class="row"><span>VaR (1 Tag · 95%)</span><strong class="num" id="var-cell" style="color:var(--amber)">–</strong></div>
+        <div class="row"><span>Expected Shortfall (95%)</span><strong class="num" id="es-cell" style="color:var(--red)">–</strong></div>
+        <div class="row"><span>Kelly-Fraction</span><strong class="num" id="kelly-cell">–</strong></div>
         <div id="equity-chart-wrap"><svg id="equity-chart" viewBox="0 0 400 100" preserveAspectRatio="none"></svg></div>
         <div class="btn-row">
             <button id="btn-scan" class="primary">Jetzt scannen</button>
@@ -139,8 +142,18 @@
             <div>
                 <div class="fng-label">Marktstimmung</div>
                 <div id="fng-class" class="fng-class">lade …</div>
-                <div class="fng-hint">&lt; 20 = extreme Angst · &gt; 80 = extreme Gier</div>
+                <div class="fng-hint">&lt; 20 = extreme Angst · &gt; 80 = extreme Gier · Quelle: alternative.me</div>
             </div>
+        </div>
+        <div class="fng-composite">
+            <div class="fng-comp-head">
+                <span>Composite F&amp;G (Binance-Daten)</span>
+                <strong class="num" id="fng-binance">–</strong>
+            </div>
+            <div class="fng-comp-hint">
+                Aus BTC-RSI + ATR-Vola + Drawdown + Funding-Rate + Long/Short-Ratio berechnet.
+            </div>
+            <div id="fng-parts" class="fng-parts"></div>
         </div>
     </section>
 
