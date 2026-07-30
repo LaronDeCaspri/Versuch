@@ -648,6 +648,7 @@ function assessRisk(plan, candles, openPositions, equity) {
 
 // ---------- paper broker with localStorage persistence ----------
 class PaperBroker {
+    static SCHEMA_VERSION = 2;                                // bump when accounting logic changes
     constructor(startingBalance = 10000, opts = {}) {
         this.startingBalance = startingBalance;
         this.isolated = !!opts.isolated;                       // no localStorage in isolated mode
@@ -658,6 +659,7 @@ class PaperBroker {
             this.cash = this.startingBalance;
             this.positions = {};
             this.journal = [];
+            this.schemaVersion = PaperBroker.SCHEMA_VERSION;
             return;
         }
         const raw = localStorage.getItem("tb_broker");
@@ -668,6 +670,18 @@ class PaperBroker {
                 this.positions = d.positions || {};
                 this.journal = d.journal || [];
                 this.startingBalance = d.startingBalance || 10000;
+                this.schemaVersion = d.schemaVersion || 0;
+                if (this.schemaVersion < PaperBroker.SCHEMA_VERSION) {
+                    console.warn("[TB] broker schema outdated, migrating (closing all positions).");
+                    const kept = this.journal.filter((e) => e.kind === "close");
+                    this.cash = this.startingBalance;
+                    this.positions = {};
+                    this.journal = kept;
+                    this.schemaVersion = PaperBroker.SCHEMA_VERSION;
+                    this.save();
+                    try { window.dispatchEvent(new CustomEvent("tb-autoheal")); } catch (e) {}
+                    return;
+                }
                 this._autoHeal();
                 return;
             } catch (e) { /* fall through */ }
@@ -675,6 +689,7 @@ class PaperBroker {
         this.cash = this.startingBalance;
         this.positions = {};
         this.journal = [];
+        this.schemaVersion = PaperBroker.SCHEMA_VERSION;
         this.save();
     }
     _autoHeal() {
@@ -696,6 +711,7 @@ class PaperBroker {
         localStorage.setItem("tb_broker", JSON.stringify({
             cash: this.cash, positions: this.positions, journal: this.journal,
             startingBalance: this.startingBalance,
+            schemaVersion: PaperBroker.SCHEMA_VERSION,
         }));
     }
     reset() {
@@ -704,12 +720,16 @@ class PaperBroker {
         this.load();
     }
     equity(marks) {
+        // LONG: cash decreased at open by qty*entry, current value = qty*price.
+        //   equity contribution = +qty*price  →  net = cash + qty*price
+        // SHORT: cash increased at open by qty*entry (sale proceeds), buy-back cost = qty*price.
+        //   equity contribution = -qty*price  →  net = cash - qty*price = orig + qty*(entry-price)
         let e = this.cash;
         for (const sym in this.positions) {
             const p = this.positions[sym];
             const price = (marks || {})[sym] || p.entry;
             if (p.side === "long") e += p.qty * price;
-            else e += p.qty * (2 * p.entry - price);
+            else e -= p.qty * price;
         }
         return e;
     }
@@ -748,8 +768,15 @@ class PaperBroker {
         if (!p) return null;
         const qty = p.qty * Math.min(fraction, 1);
         let pnl;
-        if (p.side === "long") { pnl = (price - p.entry) * qty; this.cash += qty * price; }
-        else { pnl = (p.entry - price) * qty; this.cash += qty * (2 * p.entry - price); }
+        if (p.side === "long") {
+            // sell qty units at current price
+            pnl = (price - p.entry) * qty;
+            this.cash += qty * price;
+        } else {
+            // buy back qty units at current price to close short
+            pnl = (p.entry - price) * qty;
+            this.cash -= qty * price;
+        }
         p.qty -= qty;
         if (p.qty <= 1e-12) delete this.positions[symbol];
         this.journal.push({
