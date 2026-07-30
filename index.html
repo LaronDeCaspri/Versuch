@@ -1,256 +1,160 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Electro Train Studio — Ausbildungsverwaltung für den Elektro-Betrieb</title>
-<meta name="description" content="Ein System für Betrieb, Ausbilder, Azubi und Eltern: Aufgaben, Nachweise und das digitale Berichtsheft laufen zusammen. Demo anfragen.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+    <meta name="theme-color" content="#0a0e17">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Trading Bot</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="app.css">
 </head>
 <body>
 
-<header class="site-header">
-  <div class="site-header__inner">
-    <a href="#top" class="brand">
-      <span class="brand__mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M13 1 4 14h6l-2 9 10-14h-7l2-8z" fill="currentColor"/></svg>
-      </span>
-      <span class="brand__name">ELECTRO TRAIN<span class="brand__studio">STUDIO</span></span>
-    </a>
-    <nav class="site-nav" aria-label="Hauptnavigation">
-      <a href="#rollen">Rollen</a>
-      <a href="#ablauf">Ablauf</a>
-      <a href="#berichtsheft">Berichtsheft</a>
-    </nav>
-    <a href="#demo" class="btn btn--primary btn--small">Demo anfragen</a>
-  </div>
+<div id="news-popup" class="news-popup hidden">
+    <div class="news-popup-title"></div>
+    <div class="news-popup-summary"></div>
+    <div class="news-popup-meta">
+        <span class="news-popup-source"></span>
+        <button class="news-popup-close ghost">Schliessen</button>
+    </div>
+</div>
+
+<header>
+    <div class="brand">
+        <div class="brand-mark">⌁</div>
+        <div>
+            <div style="letter-spacing:-0.5px;">Trading Bot</div>
+            <div style="color:var(--muted); font-size:0.68rem; font-weight:500; letter-spacing:0.5px; text-transform:uppercase;">Demo · Live-Daten · 10 000 USDT Spielgeld</div>
+        </div>
+    </div>
+    <div class="status-pills">
+        <div id="mode-pill" class="pill"><span class="dot"></span><span>Manuell</span></div>
+        <div id="status-pill" class="pill on"><span class="dot"></span><span>Live</span></div>
+    </div>
 </header>
 
-<main id="top">
+<main>
 
-  <section class="hero">
-    <div class="hero__copy">
-      <p class="eyebrow"><span class="eyebrow__dot" aria-hidden="true"></span>AUSBILDUNGSVERWALTUNG &middot; ELEKTROHANDWERK</p>
-      <h1 class="hero__headline">Die Ausbildung —<br><em>verschaltet.</em></h1>
-      <p class="hero__sub">Aufgaben, Nachweise und Freigaben laufen in einem System zusammen. Betrieb, Ausbilder, Azubi und Eltern sehen jeweils genau ihren Ausschnitt — verbunden über ein gemeinsames Berichtsheft.</p>
-      <div class="hero__actions">
-        <a href="#demo" class="btn btn--primary">Demo anfragen</a>
-        <a href="#rollen" class="btn btn--ghost">Rollen ansehen ↓</a>
-      </div>
-    </div>
+    <!-- big signal tile -->
+    <section id="signal-tile" class="signal grey">
+        <div class="signal-badge">Handelsentscheidung</div>
+        <div class="signal-label">HALTEN</div>
+        <div class="signal-symbol">–</div>
+        <div class="signal-price num">Lade Live-Daten von Binance ...</div>
+    </section>
 
-    <div class="panel" role="group" aria-label="Rollenansicht-Vorschau">
-      <div class="panel__tabs" role="tablist" aria-label="Rolle wählen">
-        <button class="panel__tab is-active" role="tab" aria-selected="true" data-role="betrieb">Betrieb</button>
-        <button class="panel__tab" role="tab" aria-selected="false" data-role="ausbilder">Ausbilder</button>
-        <button class="panel__tab" role="tab" aria-selected="false" data-role="azubi">Azubi</button>
-        <button class="panel__tab" role="tab" aria-selected="false" data-role="eltern">Eltern</button>
-      </div>
-
-      <div class="panel__stage">
-        <svg id="circuitDiagram" viewBox="0 0 320 240" class="circuit-diagram" aria-hidden="true">
-          <g class="traces" stroke="var(--navy-line)" stroke-width="2" fill="none">
-            <path data-trace="betrieb" d="M160 120 L 70 55"/>
-            <path data-trace="ausbilder" d="M160 120 L 250 55"/>
-            <path data-trace="azubi" d="M160 120 L 250 185"/>
-            <path data-trace="eltern" d="M160 120 L 70 185"/>
-          </g>
-
-          <g class="hub">
-            <rect x="120" y="95" width="80" height="50" rx="8" fill="var(--navy-panel)" stroke="var(--amber)" stroke-width="1.5"/>
-            <text x="160" y="116" text-anchor="middle" class="hub__label">BERICHTSHEFT</text>
-            <text x="160" y="132" text-anchor="middle" class="hub__sub">gemeinsamer Nachweis</text>
-          </g>
-
-          <g class="role-node" data-role="betrieb" transform="translate(70,55)">
-            <circle r="26" class="role-node__circle"/>
-            <text class="role-node__label" y="5" text-anchor="middle">Betrieb</text>
-          </g>
-          <g class="role-node" data-role="ausbilder" transform="translate(250,55)">
-            <circle r="26" class="role-node__circle"/>
-            <text class="role-node__label" y="5" text-anchor="middle">Ausbilder</text>
-          </g>
-          <g class="role-node" data-role="azubi" transform="translate(250,185)">
-            <circle r="26" class="role-node__circle"/>
-            <text class="role-node__label" y="5" text-anchor="middle">Azubi</text>
-          </g>
-          <g class="role-node" data-role="eltern" transform="translate(70,185)">
-            <circle r="26" class="role-node__circle"/>
-            <text class="role-node__label" y="5" text-anchor="middle">Eltern</text>
-          </g>
-        </svg>
-      </div>
-
-      <div class="panel__readout">
-        <p class="panel__readout-text" id="roleDescription">Organisation, Pakete, Nutzer, Standorte und Ausbildungsstand im Überblick.</p>
-        <div class="panel__stats" id="roleStats">
-          <div class="stat"><span class="stat__value">12</span><span class="stat__label">aktive Azubis</span></div>
-          <div class="stat"><span class="stat__value">3</span><span class="stat__label">Standorte</span></div>
+    <!-- Jarvis -->
+    <section class="card">
+        <h2>Jarvis · Sprachassistent <span class="badge" id="jarvis-badge">deaktiviert</span></h2>
+        <div id="jarvis-panel">
+            <div id="jarvis-orb">J</div>
+            <div id="jarvis-status">
+                <div class="title">Jarvis bereit</div>
+                <div class="subtitle">Spricht Signale, Take-Profits und Stops auf Deutsch. Läuft komplett im Browser – keine Cloud, keine Kosten.</div>
+            </div>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="rollen" class="roles-section">
-    <h2 class="section-title">Vier Rollen, ein System</h2>
-    <p class="section-lead">Jeder sieht genau das, was seine Rolle braucht — nicht mehr, nicht weniger.</p>
-
-    <div class="role-cards">
-      <article class="role-card">
-        <span class="role-card__tag">Betrieb</span>
-        <h3>Organisation im Überblick</h3>
-        <p>Organisation, Pakete, Nutzer, Standorte und Ausbildungsstand im Überblick.</p>
-        <div class="mockup mockup--betrieb" aria-hidden="true">
-          <span class="mockup__bar" style="--w:82%"></span>
-          <span class="mockup__bar" style="--w:56%"></span>
-          <span class="mockup__bar" style="--w:94%"></span>
-          <span class="mockup__bar" style="--w:40%"></span>
+        <div id="jarvis-controls">
+            <button id="jarvis-toggle">Jarvis aktivieren</button>
+            <select id="jarvis-voice-picker" title="Stimme"></select>
         </div>
-        <a href="#" class="role-card__link">Mehr erfahren →</a>
-      </article>
+        <div id="jarvis-log"></div>
+    </section>
 
-      <article class="role-card">
-        <span class="role-card__tag">Ausbilder</span>
-        <h3>Ohne Suchaufwand prüfen</h3>
-        <p>Unterricht, Abgaben, Feedback und Berichtsheftprüfung ohne Suchaufwand.</p>
-        <div class="mockup mockup--ausbilder" aria-hidden="true">
-          <span class="mockup__check">✓ Woche 12 geprüft</span>
-          <span class="mockup__check mockup__check--pending">◦ Woche 13 offen</span>
-          <span class="mockup__check">✓ Woche 11 geprüft</span>
+    <!-- portfolio -->
+    <section class="card">
+        <h2>Portfolio <span class="badge">Paper</span></h2>
+        <div class="row"><span>Equity</span><strong class="num" id="equity">10 000,00 USDT</strong></div>
+        <div class="row"><span>Cash</span><strong class="num" id="cash">10 000,00 USDT</strong></div>
+        <div class="row"><span>Offene Positionen</span><strong class="num" id="pos-count">0</strong></div>
+        <div class="row"><span>Realisierter PnL</span><strong class="num" id="pnl">0,00 USDT</strong></div>
+        <div class="btn-row">
+            <button id="btn-scan" class="primary">Jetzt scannen</button>
+            <button id="btn-reset" class="danger">Reset</button>
         </div>
-        <a href="#" class="role-card__link">Mehr erfahren →</a>
-      </article>
-
-      <article class="role-card">
-        <span class="role-card__tag">Azubi</span>
-        <h3>Aufgaben verstehen und nachweisen</h3>
-        <p>Aufgaben verstehen, bearbeiten, nachweisen und Rückmeldung erhalten.</p>
-        <div class="mockup mockup--azubi" aria-hidden="true">
-          <span class="mockup__task">Schaltplan lesen — fällig Mo</span>
-          <span class="mockup__task">Sicherung prüfen — fällig Di</span>
+        <div class="toggle-row">
+            <div class="lbl"><strong id="mode-label">Manuell (Demo)</strong> – Signale bestätigen · Vollautomatik wenn an</div>
+            <div id="mode-toggle" class="toggle"></div>
         </div>
-        <a href="#" class="role-card__link">Mehr erfahren →</a>
-      </article>
+    </section>
 
-      <article class="role-card">
-        <span class="role-card__tag">Eltern</span>
-        <h3>Einblick ohne Eingriff</h3>
-        <p>Freigegebene Informationen sehen, ohne in die Ausbildung einzugreifen.</p>
-        <div class="mockup mockup--eltern" aria-hidden="true">
-          <span class="mockup__info">Letzter Eintrag: Mo, 14:20</span>
-          <span class="mockup__info">Status: auf Kurs</span>
+    <!-- multi-tf matrix -->
+    <section class="card">
+        <h2>Multi-Timeframe Alignment</h2>
+        <div id="matrix" class="matrix"></div>
+    </section>
+
+    <!-- fear & greed -->
+    <section class="card">
+        <h2>Fear &amp; Greed Index</h2>
+        <div class="fng">
+            <div class="fng-dial"><div class="fng-inner num" id="fng-value">–</div></div>
+            <div>
+                <div class="fng-label">Marktstimmung</div>
+                <div id="fng-class" class="fng-class">lade …</div>
+                <div class="fng-hint">&lt; 20 = extreme Angst · &gt; 80 = extreme Gier</div>
+            </div>
         </div>
-        <a href="#" class="role-card__link">Mehr erfahren →</a>
-      </article>
-    </div>
-  </section>
+    </section>
 
-  <section id="ablauf" class="flow-section">
-    <h2 class="section-title">So entsteht ein Eintrag</h2>
-    <p class="section-lead">Vier Schritte, vier Verantwortliche — automatisch verbunden.</p>
-
-    <ol class="flow">
-      <li class="flow__step">
-        <span class="flow__role">Ausbilder</span>
-        <span class="flow__text">stellt die Aufgabe ein</span>
-      </li>
-      <li class="flow__step">
-        <span class="flow__role">Azubi</span>
-        <span class="flow__text">bearbeitet und dokumentiert</span>
-      </li>
-      <li class="flow__step">
-        <span class="flow__role">Ausbilder</span>
-        <span class="flow__text">prüft und gibt Feedback</span>
-      </li>
-      <li class="flow__step flow__step--system">
-        <span class="flow__role">System</span>
-        <span class="flow__text">trägt automatisch ins Berichtsheft ein — Betrieb sieht den Status im Cockpit</span>
-      </li>
-    </ol>
-  </section>
-
-  <section id="berichtsheft" class="spec-section">
-    <h2 class="section-title">Vom Ordner zum System</h2>
-    <p class="section-lead">Das Berichtsheft bleibt Pflicht — wie es geführt wird, muss es nicht.</p>
-
-    <div class="spec-table" role="table" aria-label="Vergleich Papier- und digitales Berichtsheft">
-      <div class="spec-table__row spec-table__row--head" role="row">
-        <span role="columnheader"></span>
-        <span role="columnheader">Papier-Berichtsheft</span>
-        <span role="columnheader">Electro Train Studio</span>
-      </div>
-      <div class="spec-table__row" role="row">
-        <span role="rowheader">Prüfung durch Ausbilder</span>
-        <span class="spec-table__value" role="cell">wöchentlich, per Unterschrift</span>
-        <span class="spec-table__value spec-table__value--highlight" role="cell">laufend, digital</span>
-      </div>
-      <div class="spec-table__row" role="row">
-        <span role="rowheader">Nachweis bei der Kammer</span>
-        <span class="spec-table__value" role="cell">Ordner mitbringen</span>
-        <span class="spec-table__value spec-table__value--highlight" role="cell">Export als PDF</span>
-      </div>
-      <div class="spec-table__row" role="row">
-        <span role="rowheader">Verlustrisiko</span>
-        <span class="spec-table__value" role="cell">ein Heft, ein Ort</span>
-        <span class="spec-table__value spec-table__value--highlight" role="cell">gesichert, jederzeit abrufbar</span>
-      </div>
-      <div class="spec-table__row" role="row">
-        <span role="rowheader">Überblick für den Betrieb</span>
-        <span class="spec-table__value" role="cell">Nachfragen beim Ausbilder</span>
-        <span class="spec-table__value spec-table__value--highlight" role="cell">Cockpit in Echtzeit</span>
-      </div>
-    </div>
-  </section>
-
-  <section id="demo" class="cta-section">
-    <div class="cta-card">
-      <h2 class="section-title section-title--light">Demo anfragen</h2>
-      <p class="cta-card__lead">Wir zeigen dir das System an eurem eigenen Ausbildungsalltag — 30 Minuten, unverbindlich.</p>
-
-      <form class="contact-form" id="contactForm">
-        <div class="contact-form__grid">
-          <label class="field">
-            <span>Name</span>
-            <input type="text" name="name" required autocomplete="name">
-          </label>
-          <label class="field">
-            <span>Betrieb</span>
-            <input type="text" name="company" required autocomplete="organization">
-          </label>
+    <!-- TV chart -->
+    <section class="card">
+        <h2>Live-Chart <span class="badge">TradingView</span></h2>
+        <div class="btn-row" style="margin-bottom:8px;" id="tv-symbols"></div>
+        <div id="tv-wrap">
+            <iframe id="tv-iframe" src="" style="width:100%; height:100%; border:0;" allowfullscreen></iframe>
         </div>
-        <div class="contact-form__grid">
-          <label class="field">
-            <span>E-Mail</span>
-            <input type="email" name="email" required autocomplete="email">
-          </label>
-          <label class="field">
-            <span>Anzahl Azubis</span>
-            <select name="azubiCount">
-              <option>1–5</option>
-              <option>6–20</option>
-              <option>21–50</option>
-              <option>50+</option>
-            </select>
-          </label>
-        </div>
-        <button type="submit" class="btn btn--primary btn--full">Demo anfragen</button>
-        <p class="contact-form__confirm" id="formConfirm" role="status" aria-live="polite"></p>
-      </form>
-    </div>
-  </section>
+    </section>
+
+    <!-- positions -->
+    <section class="card">
+        <h2>Positionen</h2>
+        <div id="positions"></div>
+    </section>
+
+    <!-- signals log -->
+    <section class="card">
+        <h2>Letzte Scans</h2>
+        <div id="signals"></div>
+    </section>
+
+    <!-- journal -->
+    <section class="card">
+        <h2>Handels-Journal</h2>
+        <div id="journal"></div>
+    </section>
+
+    <!-- strategies chips -->
+    <section class="card">
+        <h2>Aktive Strategien <span class="badge" id="strat-count">–</span></h2>
+        <div id="strategies"></div>
+    </section>
+
+    <section class="card">
+        <h2>Rulebook</h2>
+        <ol id="rules">
+            <li>Kapitalerhalt zuerst, Gewinn danach.</li>
+            <li>Kein Trade ohne festgelegten Stop.</li>
+            <li>Risiko pro Trade ist fix, die Positionsgrösse passt sich an.</li>
+            <li>Konfluenz schlägt Überzeugung. Zwei unabhängige Signale oder kein Trade.</li>
+            <li>Höherer Zeitrahmen setzt Richtung, kleinerer Zeitrahmen den Trigger.</li>
+            <li>Volumen bestätigt Preis. Preis ohne Volumen ist Rauschen.</li>
+            <li>Nie hinterher rennen. Das nächste Setup kommt in Minuten.</li>
+            <li>Nach 3 Verlusten in Folge: Pause und Review.</li>
+            <li>Jeden Trade journalisieren: Setup, Idee, Ausführung, Ergebnis, Lektion.</li>
+            <li>Kill-Switch auf Tagesverlust und Drawdown ist nicht verhandelbar.</li>
+        </ol>
+    </section>
 
 </main>
 
-<footer class="site-footer">
-  <span>Electro Train Studio</span>
-  <span class="site-footer__muted">Ausbildungsverwaltung für den Elektro-Betrieb</span>
-</footer>
+<footer>Trading Bot · Läuft komplett im Browser · Live-Daten von Binance Public API · kein Server, keine Cloud, keine Kosten</footer>
 
-<script src="assets/vendor/gsap.min.js"></script>
-<script src="assets/vendor/ScrollTrigger.min.js"></script>
-<script src="script.js"></script>
+<script src="lib.js"></script>
+<script src="jarvis.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
