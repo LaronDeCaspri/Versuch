@@ -1166,6 +1166,20 @@ function renderBacktestOptions() {
     sel.innerHTML = CFG.symbols.map((s) => `<option value="${s}">${s}</option>`).join("");
 }
 
+window.addEventListener("tb-autoheal", () => {
+    state.equityHistory = [];
+    state.peakEquity = 10000;
+    state.dayStartEquity = 10000;
+    state.dayStartDate = new Date().toDateString();
+    state.halted = false;
+    localStorage.setItem("tb_peak_equity", "10000");
+    localStorage.setItem("tb_day_equity", "10000");
+    localStorage.setItem("tb_day_date", state.dayStartDate);
+    localStorage.setItem("tb_halted", "0");
+    localStorage.setItem("tb_equity_hist", "[]");
+    announce("Depot automatisch bereinigt. Fehlerhafte Positionen aus einer alten Version wurden entfernt. Start bei 10 000 USDT.", "alert");
+});
+
 async function boot() {
     renderStrategies();
     renderTvSelect();
