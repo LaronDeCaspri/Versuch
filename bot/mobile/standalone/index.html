@@ -122,9 +122,25 @@
     </section>
 
     <!-- journal -->
-    <section class="card">
-        <h2>Handels-Journal</h2>
-        <div id="journal"></div>
+    <section class="card" id="journal-section">
+        <h2>Handels-Journal <span class="badge">Steuer-tauglich</span></h2>
+        <div class="journal-controls">
+            <div class="journal-tabs">
+                <button data-view="day" class="jv-tab primary">Tag</button>
+                <button data-view="month" class="jv-tab">Monat</button>
+                <button data-view="year" class="jv-tab">Jahr</button>
+                <button data-view="all" class="jv-tab">Gesamt</button>
+            </div>
+            <input type="date" id="journal-date" class="journal-date"/>
+        </div>
+        <div id="journal-summary" class="journal-summary"></div>
+        <div style="overflow-x:auto;">
+            <table id="journal-table" class="journal-table"></table>
+        </div>
+        <div class="btn-row" style="margin-top:12px;">
+            <button id="btn-export-csv">CSV exportieren</button>
+            <button id="btn-print" class="primary">Drucken / PDF</button>
+        </div>
     </section>
 
     <!-- strategies chips -->

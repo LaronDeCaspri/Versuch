@@ -346,6 +346,182 @@ function stratMegaConfluence(candles) {
     return null;
 }
 
+// ---------- trader personas ----------
+
+function stratSorosReflexivity(candles) {
+    const c = closes(candles), h = highs(candles), l = lows(candles);
+    if (c.length < 60) return null;
+    const a = atr(h, l, c, 14);
+    const i = c.length - 1;
+    const move = c[i] - c[i - 20];
+    const extension = move / a[i];
+    const d = donchian(h, l, 20);
+    const price = c[i];
+    if (extension > 4 && price < d.lower[i - 1])
+        return { side: "short", strength: 0.95, strategy: "soros_reflexivity",
+            reason: `Reflexives Top: 20-Bar-Extension ${extension.toFixed(1)}× ATR + Donchian-Bruch` };
+    if (extension < -4 && price > d.upper[i - 1])
+        return { side: "long", strength: 0.95, strategy: "soros_reflexivity",
+            reason: `Kapitulation-Reversal: ${extension.toFixed(1)}× ATR + Donchian-Hoch-Bruch` };
+    return null;
+}
+
+function stratBuffettValue(candles) {
+    const c = closes(candles), v = vols(candles);
+    if (c.length < 220) return null;
+    const i = c.length - 1;
+    let peak = -Infinity;
+    for (let j = i - 200; j <= i; j++) peak = Math.max(peak, c[j]);
+    const drawdown = (peak - c[i]) / peak;
+    const r = rsi(c, 14)[i];
+    const o = obv(c, v);
+    let oAvg = 0;
+    for (let j = i - 20; j < i; j++) oAvg += o[j];
+    oAvg /= 20;
+    const obvRising = o[i] > oAvg;
+    if (drawdown >= 0.30 && r < 35 && obvRising)
+        return { side: "long", strength: 0.85, strategy: "buffett_value",
+            reason: `Wert-Akkumulation: DD ${(drawdown*100).toFixed(1)}%, RSI ${r.toFixed(1)}, OBV steigt` };
+    return null;
+}
+
+function stratPtjCrash(candles) {
+    const c = closes(candles), h = highs(candles), l = lows(candles);
+    if (c.length < 220) return null;
+    const i = c.length - 1;
+    const a = atr(h, l, c, 14);
+    let avgAtr = 0, cnt = 0;
+    for (let j = Math.max(0, i - 49); j < i; j++) if (!isNaN(a[j])) { avgAtr += a[j]; cnt++; }
+    avgAtr /= Math.max(cnt, 1);
+    const volExp = a[i] > avgAtr * 1.5;
+    const e200 = ema(c, 200);
+    const brokeDn = c[i - 1] >= e200[i - 1] && c[i] < e200[i];
+    const brokeUp = c[i - 1] <= e200[i - 1] && c[i] > e200[i];
+    if (volExp && brokeDn)
+        return { side: "short", strength: 0.9, strategy: "ptj_crash",
+            reason: `Regime-Shift: ATR-Spike + EMA200-Bruch nach unten` };
+    if (volExp && brokeUp)
+        return { side: "long", strength: 0.9, strategy: "ptj_crash",
+            reason: `Regime-Shift: ATR-Spike + EMA200-Bruch nach oben` };
+    return null;
+}
+
+function stratPaulsonBubble(candles) {
+    const c = closes(candles);
+    if (c.length < 80) return null;
+    const i = c.length - 1;
+    const slopeNow = c[i] - c[i - 20];
+    const slopePrev = c[i - 20] - c[i - 40];
+    const r = rsi(c, 14)[i];
+    const bb = bollinger(c, 20, 2);
+    let walking = 0;
+    for (let j = i - 4; j <= i; j++) if (c[j] > bb.upper[j] * 0.99) walking++;
+    const o = candles[i].open, cl = candles[i].close;
+    const o1 = candles[i - 1].open, c1 = candles[i - 1].close;
+    const bearishEng = cl < o && c1 > o1 && cl < o1 && o > c1;
+    if (slopePrev > 0 && slopeNow > slopePrev * 2 && r > 80 && walking >= 3 && bearishEng)
+        return { side: "short", strength: 0.95, strategy: "paulson_bubble",
+            reason: `Bubble-Short: Slope×2 + RSI ${r.toFixed(1)} + oberes BB + Engulfing` };
+    return null;
+}
+
+function stratLivermorePivot(candles) {
+    const c = closes(candles), v = vols(candles);
+    const n = 60;
+    if (c.length < n + 5) return null;
+    const i = c.length - 1;
+    let hh = -Infinity, ll = Infinity, vAvg = 0;
+    for (let j = i - n; j < i; j++) {
+        hh = Math.max(hh, c[j]);
+        ll = Math.min(ll, c[j]);
+        vAvg += v[j];
+    }
+    vAvg /= n;
+    const volOk = v[i] > vAvg * 1.5;
+    if (c[i] > hh && volOk)
+        return { side: "long", strength: 0.9, strategy: "livermore_pivot",
+            reason: `Pivotaler Hoch-Bruch ${hh.toFixed(2)} mit Volumen ${(v[i]/vAvg).toFixed(1)}×` };
+    if (c[i] < ll && volOk)
+        return { side: "short", strength: 0.9, strategy: "livermore_pivot",
+            reason: `Pivotaler Tief-Bruch ${ll.toFixed(2)} mit Volumen ${(v[i]/vAvg).toFixed(1)}×` };
+    return null;
+}
+
+function stratDalioAllWeather(candles) {
+    const c = closes(candles), h = highs(candles), l = lows(candles);
+    if (c.length < 210) return null;
+    const i = c.length - 1;
+    const e20 = ema(c, 20), e200 = ema(c, 200);
+    const bothUp = c[i] > e20[i] && e20[i] > e200[i];
+    const bothDn = c[i] < e20[i] && e20[i] < e200[i];
+    const adxRes = adx(h, l, c, 14);
+    const regime = adxRes.adx[i] > 20 && adxRes.adx[i] < 40;
+    const prevAbove = c[i - 1] > e20[i - 1];
+    if (bothUp && regime && !prevAbove)
+        return { side: "long", strength: 0.75, strategy: "dalio_allweather",
+            reason: `Regime-Alignment aufwärts, ADX ${adxRes.adx[i].toFixed(1)}` };
+    if (bothDn && regime && prevAbove)
+        return { side: "short", strength: 0.75, strategy: "dalio_allweather",
+            reason: `Regime-Alignment abwärts, ADX ${adxRes.adx[i].toFixed(1)}` };
+    return null;
+}
+
+function stratTempletonPessimism(candles) {
+    const c = closes(candles);
+    if (c.length < 60) return null;
+    const i = c.length - 1;
+    const r = rsi(c, 14);
+    const rmin = Math.min(...r.slice(i - 20, i + 1).filter((x) => !isNaN(x)));
+    if (r[i] < 25 && r[i] > rmin && c[i] > c[i - 1])
+        return { side: "long", strength: 0.85, strategy: "templeton_pessimism",
+            reason: `Maximum Pessimismus: RSI ${r[i].toFixed(1)}, Wende beginnt` };
+    return null;
+}
+
+function stratAckmanConviction(candles) {
+    const c = closes(candles), h = highs(candles), l = lows(candles), v = vols(candles);
+    if (c.length < 210) return null;
+    const i = c.length - 1;
+    const e20 = ema(c, 20), e50 = ema(c, 50), e200 = ema(c, 200);
+    const adxRes = adx(h, l, c, 14);
+    const m = macd(c);
+    const mfiVal = mfi(h, l, c, v, 14)[i];
+    const stackUp = e20[i] > e50[i] && e50[i] > e200[i] && c[i] > e20[i];
+    const stackDn = e20[i] < e50[i] && e50[i] < e200[i] && c[i] < e20[i];
+    const hist3 = [m.hist[i - 2], m.hist[i - 1], m.hist[i]];
+    if (stackUp && adxRes.adx[i] > 25 && hist3.every((x) => x > 0) && mfiVal > 55)
+        return { side: "long", strength: 1.0, strategy: "ackman_conviction",
+            reason: `Konviktion long: EMA-Stack + ADX ${adxRes.adx[i].toFixed(1)} + MFI ${mfiVal.toFixed(1)}` };
+    if (stackDn && adxRes.adx[i] > 25 && hist3.every((x) => x < 0) && mfiVal < 45)
+        return { side: "short", strength: 1.0, strategy: "ackman_conviction",
+            reason: `Konviktion short: EMA-Stack + ADX ${adxRes.adx[i].toFixed(1)} + MFI ${mfiVal.toFixed(1)}` };
+    return null;
+}
+
+function stratWeinsteinStages(candles) {
+    const c = closes(candles), h = highs(candles), l = lows(candles), v = vols(candles);
+    if (c.length < 60) return null;
+    const i = c.length - 1;
+    const e30 = ema(c, 30);
+    const slope = e30[i] - e30[i - 10];
+    const adxRes = adx(h, l, c, 14);
+    let recentHi = -Infinity, recentLo = Infinity, vAvg = 0;
+    for (let j = i - 30; j < i; j++) {
+        recentHi = Math.max(recentHi, c[j]);
+        recentLo = Math.min(recentLo, c[j]);
+        vAvg += v[j];
+    }
+    vAvg /= 30;
+    const volOk = v[i] > vAvg * 1.4;
+    if (c[i] > recentHi && slope > 0 && adxRes.adx[i] > 20 && volOk)
+        return { side: "long", strength: 0.85, strategy: "weinstein_stages",
+            reason: `Weinstein Stufe 2: Ausbruch über ${recentHi.toFixed(2)}, EMA30 steigend` };
+    if (c[i] < recentLo && slope < 0 && adxRes.adx[i] > 20 && volOk)
+        return { side: "short", strength: 0.85, strategy: "weinstein_stages",
+            reason: `Weinstein Stufe 4: Bruch unter ${recentLo.toFixed(2)}, EMA30 fallend` };
+    return null;
+}
+
 const STRATEGIES = [
     { name: "ema_cross",          weight: 1.0, fn: stratEmaCross },
     { name: "macd_trend",         weight: 1.0, fn: stratMacd },
@@ -354,6 +530,15 @@ const STRATEGIES = [
     { name: "donchian_breakout",  weight: 1.0, fn: stratDonchianBreakout },
     { name: "mmcrypto_style",     weight: 1.4, fn: stratMmCrypto },
     { name: "mega_confluence",    weight: 1.6, fn: stratMegaConfluence },
+    { name: "soros_reflexivity",  weight: 1.3, fn: stratSorosReflexivity },
+    { name: "buffett_value",      weight: 1.2, fn: stratBuffettValue },
+    { name: "ptj_crash",          weight: 1.3, fn: stratPtjCrash },
+    { name: "paulson_bubble",     weight: 1.3, fn: stratPaulsonBubble },
+    { name: "livermore_pivot",    weight: 1.1, fn: stratLivermorePivot },
+    { name: "dalio_allweather",   weight: 1.0, fn: stratDalioAllWeather },
+    { name: "templeton_pessimism",weight: 1.1, fn: stratTempletonPessimism },
+    { name: "ackman_conviction",  weight: 1.5, fn: stratAckmanConviction },
+    { name: "weinstein_stages",   weight: 1.2, fn: stratWeinsteinStages },
 ];
 
 function ensemble(candles, minScore = 1.5, agreement = 2) {
