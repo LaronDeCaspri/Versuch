@@ -32,10 +32,47 @@
         </div>
     </div>
     <div class="status-pills">
+        <button id="theme-toggle" class="pill" title="Hell/Dunkel"><span>🌙</span></button>
         <div id="mode-pill" class="pill"><span class="dot"></span><span>Manuell</span></div>
         <div id="status-pill" class="pill on"><span class="dot"></span><span>Live</span></div>
     </div>
 </header>
+
+<!-- Onboarding modal (first launch only) -->
+<div id="onboarding" class="modal hidden">
+    <div class="modal-card">
+        <h2>Willkommen beim Trading Bot</h2>
+        <div id="onboarding-step" class="onboarding-step"></div>
+        <div class="btn-row">
+            <button id="ob-skip" class="ghost">Überspringen</button>
+            <button id="ob-next" class="primary">Weiter</button>
+        </div>
+    </div>
+</div>
+
+<!-- Manual order modal -->
+<div id="order-modal" class="modal hidden">
+    <div class="modal-card">
+        <h2 id="order-title">Manueller Trade</h2>
+        <div id="order-body"></div>
+        <div class="btn-row">
+            <button id="order-cancel" class="ghost">Abbrechen</button>
+            <button id="order-submit" class="primary">Bestätigen</button>
+        </div>
+    </div>
+</div>
+
+<!-- Partial close modal -->
+<div id="close-modal" class="modal hidden">
+    <div class="modal-card">
+        <h2>Position teilweise schliessen</h2>
+        <div id="close-body"></div>
+        <div class="btn-row">
+            <button id="close-cancel" class="ghost">Abbrechen</button>
+            <button id="close-submit" class="primary">Schliessen</button>
+        </div>
+    </div>
+</div>
 
 <main>
 
@@ -68,6 +105,7 @@
     <section class="card">
         <h2>Portfolio <span class="badge">Paper · 10 000 USDT Start</span></h2>
         <div class="row"><span>Equity</span><strong class="num" id="equity">10 000,00 USDT</strong></div>
+        <div class="row"><span>Equity in EUR</span><strong class="num" id="equity-eur">–</strong></div>
         <div class="row"><span>Cash</span><strong class="num" id="cash">10 000,00 USDT</strong></div>
         <div class="row"><span>Offene Positionen</span><strong class="num" id="pos-count">0</strong></div>
         <div class="row"><span>Realisierter PnL</span><strong class="num" id="pnl">0,00 USDT</strong></div>
@@ -75,6 +113,9 @@
         <div class="row"><span>VaR (1 Tag · 95%)</span><strong class="num" id="var-cell" style="color:var(--amber)">–</strong></div>
         <div class="row"><span>Expected Shortfall (95%)</span><strong class="num" id="es-cell" style="color:var(--red)">–</strong></div>
         <div class="row"><span>Kelly-Fraction</span><strong class="num" id="kelly-cell">–</strong></div>
+        <div class="row"><span>Rolling Sharpe (30d)</span><strong class="num" id="sharpe-cell">–</strong></div>
+        <div class="row"><span>Sortino (30d)</span><strong class="num" id="sortino-cell">–</strong></div>
+        <div class="row"><span>Calmar-Ratio</span><strong class="num" id="calmar-cell">–</strong></div>
         <div id="equity-chart-wrap"><svg id="equity-chart" viewBox="0 0 400 100" preserveAspectRatio="none"></svg></div>
         <div class="btn-row">
             <button id="btn-scan" class="primary">Jetzt scannen</button>
@@ -93,6 +134,18 @@
     <section class="card">
         <h2>Kill-Switch &amp; Risiko-Limits</h2>
         <div id="killswitch"></div>
+    </section>
+
+    <!-- market context -->
+    <section class="card">
+        <h2>Markt-Kontext <span class="badge">CoinGecko</span></h2>
+        <div id="market-ctx"></div>
+    </section>
+
+    <!-- on-chain metrics -->
+    <section class="card">
+        <h2>On-Chain (Bitcoin) <span class="badge">mempool.space</span></h2>
+        <div id="onchain"></div>
     </section>
 
     <!-- symbol picker -->
@@ -187,6 +240,24 @@
         <div style="overflow-x:auto;"><table id="futures-table" class="perf-table"></table></div>
     </section>
 
+    <!-- correlation heatmap -->
+    <section class="card">
+        <h2>Korrelations-Matrix <span class="badge">50 Bars</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Rote Zellen = hohe Korrelation. Zwei stark korrelierte Assets sind kein Diversifikationsschutz.
+        </div>
+        <div id="corr-matrix" style="overflow-x:auto;"></div>
+    </section>
+
+    <!-- return distribution histogram -->
+    <section class="card">
+        <h2>Return-Verteilung <span class="badge">Trade-PnL</span></h2>
+        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
+            Histogramm aller abgeschlossenen Trade-PnLs. Fette rechte Flanke = Trend-System, symmetrisch = Mean-Rev.
+        </div>
+        <div id="return-hist"></div>
+    </section>
+
     <!-- adaptive weights -->
     <section class="card">
         <h2>Adaptive Strategie-Gewichte <span class="badge">Self-improving</span></h2>
@@ -253,6 +324,18 @@
     <section class="card">
         <h2>Aktive Strategien <span class="badge" id="strat-count">–</span></h2>
         <div id="strategies"></div>
+    </section>
+
+    <!-- Notifications, Backup, Health, QR -->
+    <section class="card">
+        <h2>Benachrichtigungen &amp; Tools</h2>
+        <div id="tools-panel"></div>
+    </section>
+
+    <!-- Health status -->
+    <section class="card">
+        <h2>System-Health <span class="badge">API-Endpoints</span></h2>
+        <div id="health-panel"></div>
     </section>
 
     <section class="card">

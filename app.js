@@ -195,6 +195,21 @@ function renderPositions() {
         const r = p.original_stop ? Math.abs(p.entry - p.original_stop) : 0;
         const rMultiple = r > 0 ? (upnl / (r * p.qty)) : 0;
         const nextTp = p.take_profits?.[0]?.price;
+        // Erwarteter Gewinn: aus verbleibenden Take-Profits + Rest-Position "Full Run"
+        let expectedWeighted = 0, maxProfit = 0, lossAtStop = 0;
+        for (const tp of (p.take_profits || [])) {
+            const win = p.side === "long" ? (tp.price - p.entry) * tp.qty : (p.entry - tp.price) * tp.qty;
+            expectedWeighted += win;
+            maxProfit += win;
+        }
+        // Assume 50% chance of hitting first TP block, 30% mid, 20% final
+        if (p.stop) {
+            lossAtStop = p.side === "long"
+                ? (p.entry - p.stop) * p.qty
+                : (p.stop - p.entry) * p.qty;
+        }
+        const ev = expectedWeighted * 0.5 - lossAtStop * 0.5;   // simple 50/50 EV
+        const forecastClass = expectedWeighted >= 0 ? "pos" : "neg";
         return `
             <div class="pos-card">
                 <div class="pos-head">
@@ -217,8 +232,15 @@ function renderPositions() {
                     ${nextTp ? `<div><div class="k">Nächster TP</div><div class="v num" style="color:var(--green)">${fmt(nextTp, 4)}</div></div>` : ""}
                     ${p.trailing_moves ? `<div><div class="k">Stop nachgezogen</div><div class="v num">${p.trailing_moves}×</div></div>` : ""}
                 </div>
+                <div class="pos-forecast">
+                    <div><div class="k">Erwarteter Gewinn (TPs)</div><div class="v ${forecastClass}">+${fmt(expectedWeighted, 2)} USDT</div></div>
+                    <div><div class="k">Bei vollem Run</div><div class="v pos">+${fmt(maxProfit, 2)} USDT</div></div>
+                    <div><div class="k">Bei Stop-Loss</div><div class="v neg">-${fmt(Math.abs(lossAtStop), 2)} USDT</div></div>
+                    <div><div class="k">Erwartungswert (50/50)</div><div class="v ${ev >= 0 ? "pos" : "neg"}">${ev >= 0 ? "+" : "-"}${fmt(Math.abs(ev), 2)} USDT</div></div>
+                </div>
                 <div class="btn-row" style="margin-top:8px;">
-                    <button class="ghost pos-close" data-sym="${k}" style="flex:1; font-size:0.78rem; padding:6px 8px;">Position jetzt schliessen</button>
+                    <button class="ghost pos-partial" data-sym="${k}" style="flex:1; font-size:0.75rem; padding:6px 8px;">Teilweise schliessen</button>
+                    <button class="ghost pos-close" data-sym="${k}" style="flex:1; font-size:0.75rem; padding:6px 8px;">Voll schliessen</button>
                 </div>
             </div>`;
     }).join("");
@@ -227,12 +249,15 @@ function renderPositions() {
             const sym = btn.dataset.sym;
             const p = pos[sym];
             if (!p) return;
-            if (!confirm(`Position ${sym} jetzt zum Marktpreis schliessen?`)) return;
+            if (!confirm(`Position ${sym} jetzt zum Marktpreis vollständig schliessen?`)) return;
             const price = state.prices[sym] || p.entry;
             const r = broker.close(sym, price, 1);
             if (r) announce(`Position ${sym.replace("/", " gegen ")} manuell geschlossen. ${r.pnl >= 0 ? "Gewinn" : "Verlust"} ${Math.abs(r.pnl).toFixed(2)} Dollar.`, r.pnl >= 0 ? "success" : "warn");
             renderAll();
         };
+    });
+    el.querySelectorAll(".pos-partial").forEach((btn) => {
+        btn.onclick = () => openPartialCloseModal(btn.dataset.sym);
     });
 }
 
@@ -1732,6 +1757,672 @@ async function boot() {
     setInterval(() => { fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable); }, 3 * 60 * 1000);
     setInterval(refresh24hTickers, 60 * 1000);
 }
+
+// ============ v6: THEME TOGGLE ============
+function initTheme() {
+    const saved = localStorage.getItem("tb_theme") || "dark";
+    document.documentElement.setAttribute("data-theme", saved);
+    const btn = document.getElementById("theme-toggle");
+    if (btn) {
+        btn.querySelector("span").textContent = saved === "light" ? "☀" : "🌙";
+        btn.onclick = () => {
+            const cur = document.documentElement.getAttribute("data-theme") || "dark";
+            const next = cur === "light" ? "dark" : "light";
+            document.documentElement.setAttribute("data-theme", next);
+            localStorage.setItem("tb_theme", next);
+            btn.querySelector("span").textContent = next === "light" ? "☀" : "🌙";
+        };
+    }
+}
+
+// ============ v6: BACKUP / RESTORE ============
+function exportBackup() {
+    const dump = {};
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("tb_")) dump[k] = localStorage.getItem(k);
+    }
+    dump._exported_at = new Date().toISOString();
+    dump._schema = "trading-bot-v6";
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `tradingbot_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    announce("Backup als JSON exportiert.", "success");
+}
+
+function importBackup(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const dump = JSON.parse(e.target.result);
+            if (dump._schema !== "trading-bot-v6" && dump._schema !== "trading-bot-v5") {
+                if (!confirm("Backup-Schema unbekannt. Trotzdem importieren?")) return;
+            }
+            if (!confirm(`Backup vom ${dump._exported_at || "?"} importieren? Alle aktuellen Daten werden ersetzt.`)) return;
+            for (const k in dump) {
+                if (k.startsWith("tb_")) localStorage.setItem(k, dump[k]);
+            }
+            announce("Backup wiederhergestellt. App wird neu geladen.", "success");
+            setTimeout(() => location.reload(), 800);
+        } catch (err) {
+            alert("Backup fehlerhaft: " + err.message);
+        }
+    };
+    reader.readAsText(file);
+}
+
+// ============ v6: HEALTH STATUS ============
+const HEALTH_ENDPOINTS = [
+    { name: "Binance Spot API", url: "https://api.binance.com/api/v3/ping" },
+    { name: "Binance Futures API", url: "https://fapi.binance.com/fapi/v1/ping" },
+    { name: "alternative.me F&G", url: "https://api.alternative.me/fng/?limit=1" },
+    { name: "CoinGecko", url: "https://api.coingecko.com/api/v3/ping" },
+    { name: "Frankfurter EUR", url: "https://api.frankfurter.app/latest?from=USD&to=EUR" },
+    { name: "mempool.space", url: "https://mempool.space/api/v1/fees/recommended" },
+    { name: "rss2json (news)", url: "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fdecrypt.co%2Ffeed" },
+];
+
+async function checkHealth() {
+    const el = $("#health-panel");
+    if (!el) return;
+    el.innerHTML = HEALTH_ENDPOINTS.map((e) => `<div class="health-row" data-name="${e.name}"><span><span class="health-dot pending"></span>${e.name}</span><span style="color:var(--muted); font-size:0.72rem;">…prüfe</span></div>`).join("");
+    for (const ep of HEALTH_ENDPOINTS) {
+        const start = performance.now();
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 5000);
+            const res = await fetch(ep.url, { signal: controller.signal });
+            clearTimeout(timer);
+            const ms = Math.round(performance.now() - start);
+            const row = el.querySelector(`[data-name="${ep.name}"]`);
+            if (!row) continue;
+            const ok = res.ok;
+            const cls = ok ? (ms > 2000 ? "warn" : "ok") : "err";
+            row.innerHTML = `<span><span class="health-dot ${cls}"></span>${ep.name}</span><span style="color:var(--muted); font-size:0.72rem;">${res.status} · ${ms} ms</span>`;
+        } catch (err) {
+            const row = el.querySelector(`[data-name="${ep.name}"]`);
+            if (row) row.innerHTML = `<span><span class="health-dot err"></span>${ep.name}</span><span style="color:var(--red); font-size:0.72rem;">unerreichbar</span>`;
+        }
+    }
+}
+
+// ============ v6: MARKET CONTEXT ============
+async function refreshMarketCtx() {
+    const [global, trending] = await Promise.all([
+        window.TB.fetchGlobalMarket(),
+        window.TB.fetchTrending(),
+    ]);
+    state.marketGlobal = global;
+    state.trending = trending;
+    renderMarketCtx();
+}
+
+function renderMarketCtx() {
+    const el = $("#market-ctx");
+    if (!el) return;
+    const g = state.marketGlobal;
+    const t = state.trending || [];
+    if (!g && !t.length) { el.textContent = "lade …"; return; }
+    const mcapT = g?.totalMcap ? (g.totalMcap / 1e12).toFixed(2) + " T$" : "–";
+    const volB = g?.totalVolume ? (g.totalVolume / 1e9).toFixed(1) + " B$" : "–";
+    const chgCls = g?.mcapChange24h > 0 ? "pnl-pos" : g?.mcapChange24h < 0 ? "pnl-neg" : "";
+    const chg = g?.mcapChange24h != null ? `${g.mcapChange24h > 0 ? "+" : ""}${g.mcapChange24h.toFixed(2)}%` : "–";
+    el.innerHTML = `
+        <div class="mkt-grid">
+            <div class="mkt-tile"><div class="k">BTC Dominance</div><div class="v">${g?.btcDominance != null ? g.btcDominance.toFixed(1) + "%" : "–"}</div></div>
+            <div class="mkt-tile"><div class="k">ETH Dominance</div><div class="v">${g?.ethDominance != null ? g.ethDominance.toFixed(1) + "%" : "–"}</div></div>
+            <div class="mkt-tile"><div class="k">Total Mcap</div><div class="v">${mcapT}</div></div>
+            <div class="mkt-tile"><div class="k">24h Volume</div><div class="v">${volB}</div></div>
+            <div class="mkt-tile"><div class="k">24h Änderung</div><div class="v ${chgCls}">${chg}</div></div>
+            <div class="mkt-tile"><div class="k">Aktive Coins</div><div class="v">${g?.activeCoins ?? "–"}</div></div>
+        </div>
+        ${t.length ? `
+        <div style="margin-top:8px; font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px;">Trending gerade</div>
+        <div class="trend-list" style="margin-top:6px;">
+            ${t.map((c) => `<span class="trend-chip">🔥 ${c.symbol.toUpperCase()}${c.rank ? ` · #${c.rank}` : ""}</span>`).join("")}
+        </div>` : ""}`;
+}
+
+// ============ v6: ON-CHAIN ============
+async function refreshOnChain() {
+    state.onchain = await window.TB.fetchOnChain();
+    renderOnChain();
+}
+
+function renderOnChain() {
+    const el = $("#onchain");
+    if (!el) return;
+    const d = state.onchain;
+    if (!d) { el.textContent = "lade …"; return; }
+    const hashEH = d.hashrate ? (d.hashrate / 1e18).toFixed(1) + " EH/s" : "–";
+    const diffT = d.difficulty ? (d.difficulty / 1e12).toFixed(2) + " T" : "–";
+    el.innerHTML = `
+        <div class="onchain-grid">
+            <div class="mkt-tile"><div class="k">Hashrate</div><div class="v">${hashEH}</div></div>
+            <div class="mkt-tile"><div class="k">Difficulty</div><div class="v">${diffT}</div></div>
+            <div class="mkt-tile"><div class="k">Mempool</div><div class="v">${d.mempoolSize != null ? fmt(d.mempoolSize, 0) : "–"} tx</div></div>
+            <div class="mkt-tile"><div class="k">Fast Fee</div><div class="v">${d.fastFee ?? "–"} sat/vB</div></div>
+            <div class="mkt-tile"><div class="k">30min Fee</div><div class="v">${d.halfFee ?? "–"} sat/vB</div></div>
+            <div class="mkt-tile"><div class="k">1h Fee</div><div class="v">${d.hourFee ?? "–"} sat/vB</div></div>
+        </div>`;
+}
+
+// ============ v6: EUR CONVERSION ============
+async function refreshEurRate() {
+    state.eurRate = await window.TB.fetchEurRate();
+    renderEurRow();
+}
+
+function renderEurRow() {
+    const el = $("#equity-eur");
+    if (!el) return;
+    if (!state.eurRate) { el.textContent = "–"; return; }
+    const eq = broker.equity(state.prices);
+    const eur = eq * state.eurRate;
+    el.textContent = eur.toLocaleString("de-DE", { maximumFractionDigits: 2 }) + " EUR";
+}
+
+// ============ v6: CORRELATION HEATMAP ============
+function renderCorrelationMatrix() {
+    const el = $("#corr-matrix");
+    if (!el) return;
+    // Use top 8 symbols by candles-available for speed
+    const syms = CFG.symbols.filter((s) => state.candles[s] && state.candles[s].length >= 50).slice(0, 10);
+    if (syms.length < 2) { el.textContent = "lade Kursdaten …"; return; }
+    let html = '<table class="corr-table"><thead><tr><th></th>';
+    for (const s of syms) html += `<th>${s.replace("/USDT", "")}</th>`;
+    html += "</tr></thead><tbody>";
+    for (const a of syms) {
+        html += `<tr><th>${a.replace("/USDT", "")}</th>`;
+        for (const b of syms) {
+            const c = a === b ? 1 : correlationOf(a, b);
+            const absC = Math.abs(c);
+            let bg;
+            if (c >= 0) {
+                // red gradient for positive correlation
+                const alpha = Math.min(0.85, absC);
+                bg = `rgba(239, 68, 68, ${alpha})`;
+            } else {
+                // green for negative (rare, valuable)
+                const alpha = Math.min(0.85, absC);
+                bg = `rgba(34, 197, 94, ${alpha})`;
+            }
+            html += `<td class="corr-cell" style="background:${bg}">${c.toFixed(2)}</td>`;
+        }
+        html += "</tr>";
+    }
+    html += "</tbody></table>";
+    el.innerHTML = html;
+}
+
+// ============ v6: RETURN DISTRIBUTION HISTOGRAM ============
+function renderReturnHistogram() {
+    const el = $("#return-hist");
+    if (!el) return;
+    const trades = _pairTrades();
+    if (trades.length < 3) { el.textContent = "warten auf ≥ 3 abgeschlossene Trades"; return; }
+    const pnls = trades.map((t) => t.pnl);
+    const min = Math.min(...pnls);
+    const max = Math.max(...pnls);
+    const range = max - min || 1;
+    const bins = 15;
+    const binSize = range / bins;
+    const counts = new Array(bins).fill(0);
+    for (const v of pnls) {
+        const idx = Math.min(bins - 1, Math.floor((v - min) / binSize));
+        counts[idx]++;
+    }
+    const maxCount = Math.max(...counts);
+    const bars = counts.map((c, i) => {
+        const height = maxCount ? (c / maxCount * 100) : 0;
+        const centre = min + (i + 0.5) * binSize;
+        const color = centre < 0 ? "var(--red)" : "var(--green)";
+        return `<div class="hist-bar" style="height:${height}%; background:${color};" title="${centre.toFixed(2)} USDT · ${c} Trades"></div>`;
+    }).join("");
+    const mean = pnls.reduce((s, v) => s + v, 0) / pnls.length;
+    const stddev = Math.sqrt(pnls.reduce((s, v) => s + (v - mean) ** 2, 0) / pnls.length);
+    el.innerHTML = `
+        <div class="hist-bars">${bars}</div>
+        <div class="hist-labels"><span>${min.toFixed(2)}</span><span>0</span><span>${max.toFixed(2)}</span></div>
+        <div style="margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); gap:6px;">
+            <div class="mkt-tile"><div class="k">Mittelwert</div><div class="v" style="font-size:0.9rem;">${mean >= 0 ? "+" : ""}${mean.toFixed(2)}</div></div>
+            <div class="mkt-tile"><div class="k">Std-Abw.</div><div class="v" style="font-size:0.9rem;">${stddev.toFixed(2)}</div></div>
+            <div class="mkt-tile"><div class="k">Bester</div><div class="v pnl-pos" style="font-size:0.9rem;">+${max.toFixed(2)}</div></div>
+            <div class="mkt-tile"><div class="k">Schlechtester</div><div class="v pnl-neg" style="font-size:0.9rem;">${min.toFixed(2)}</div></div>
+        </div>`;
+}
+
+// ============ v6: ROLLING SHARPE / SORTINO / CALMAR ============
+function _dailyReturnsFromHistory() {
+    // Group equityHistory by day, take last equity per day, compute returns
+    const byDay = {};
+    for (const p of state.equityHistory) {
+        const day = new Date(p.ts).toDateString();
+        byDay[day] = p.eq;
+    }
+    const eqs = Object.values(byDay);
+    const rets = [];
+    for (let i = 1; i < eqs.length; i++) {
+        const r = (eqs[i] - eqs[i - 1]) / (eqs[i - 1] || 1);
+        if (isFinite(r)) rets.push(r);
+    }
+    return rets;
+}
+
+function renderRollingMetrics() {
+    const rets = _dailyReturnsFromHistory();
+    const sharpe = window.TB.rollingSharpe(rets, 30);
+    const sortino = window.TB.rollingSortino(rets, 30);
+    const calmar = window.TB.calmar(state.equityHistory);
+    const fmtRatio = (v) => v == null ? "–" : (v >= 0 ? "+" : "") + v.toFixed(2);
+    const colr = (v) => v == null ? "var(--muted)" : v >= 1 ? "var(--green)" : v >= 0 ? "var(--amber)" : "var(--red)";
+    const s = $("#sharpe-cell"), so = $("#sortino-cell"), c = $("#calmar-cell");
+    if (s) { s.textContent = fmtRatio(sharpe); s.style.color = colr(sharpe); }
+    if (so) { so.textContent = fmtRatio(sortino); so.style.color = colr(sortino); }
+    if (c) { c.textContent = fmtRatio(calmar); c.style.color = colr(calmar); }
+}
+
+// ============ v6: HALTEFRIST §23 EStG in journal (bonus render override) ============
+function renderJournalTaxHint() {
+    // add tax-hint spans to existing journal rows after render
+    const rows = document.querySelectorAll("#journal-table tbody tr");
+    const trades = _pairTrades().filter((t) => _inRange(t.close_ts, journalState.view, journalState.date));
+    trades.sort((a, b) => new Date(b.close_ts) - new Date(a.close_ts));
+    rows.forEach((tr, i) => {
+        const t = trades[i];
+        if (!t || !t.open_ts) return;
+        const days = (new Date(t.close_ts) - new Date(t.open_ts)) / (86400 * 1000);
+        const taxFree = days >= 365;
+        const badgeCls = taxFree ? "tax-free" : "tax-owed";
+        const badgeTxt = taxFree ? "§23 steuerfrei" : `${Math.round(days)}d — steuerpflichtig`;
+        const sideCell = tr.children[2];
+        if (sideCell && !sideCell.querySelector(".tax-hint")) {
+            sideCell.insertAdjacentHTML("beforeend", ` <span class="tax-hint ${badgeCls}" title="Haltedauer ${Math.round(days)} Tage">${badgeTxt}</span>`);
+        }
+    });
+}
+
+// ============ v6: MANUAL ORDER MODAL ============
+let _orderState = { symbol: null, side: "long", pctOfCash: 5 };
+function openManualOrderModal(symbol) {
+    _orderState = { symbol, side: "long", pctOfCash: 5 };
+    const modal = $("#order-modal");
+    $("#order-title").textContent = `Manueller Trade · ${symbol}`;
+    renderOrderModal();
+    modal.classList.remove("hidden");
+}
+
+function renderOrderModal() {
+    const body = $("#order-body");
+    const price = state.prices[_orderState.symbol] || 0;
+    const eq = broker.equity(state.prices);
+    const notional = broker.cash * _orderState.pctOfCash / 100;
+    const qty = notional / (price || 1);
+    const candles = state.candles[_orderState.symbol];
+    let atrPct = 2;
+    if (candles && candles.length >= 20) {
+        const atrArr = window.TB.atr(window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles), 14);
+        atrPct = (atrArr[atrArr.length - 1] / price) * 100;
+    }
+    const stopPct = atrPct * CFG.atrStopMult;
+    const stop = _orderState.side === "long" ? price * (1 - stopPct / 100) : price * (1 + stopPct / 100);
+    const risk = Math.abs(price - stop) * qty;
+    const tp1 = _orderState.side === "long" ? price + (price - stop) * CFG.tpMultiples[0] : price - (stop - price) * CFG.tpMultiples[0];
+    body.innerHTML = `
+        <div class="order-form">
+            <div style="font-size:0.82rem; color:var(--muted); margin-bottom:6px;">Live-Preis <strong style="color:var(--text)">${fmt(price, 4)} USDT</strong> · Cash <strong style="color:var(--text)">${fmt(broker.cash, 2)}</strong></div>
+            <label>Richtung</label>
+            <div class="side-buttons">
+                <button type="button" class="${_orderState.side === "long" ? "on long" : ""}" id="ord-long">▲ LONG</button>
+                <button type="button" class="${_orderState.side === "short" ? "on short" : ""}" id="ord-short">▼ SHORT</button>
+            </div>
+            <label>Grösse (% des Cash) — <strong style="color:var(--text)">${_orderState.pctOfCash}%</strong></label>
+            <input type="range" min="1" max="20" step="1" value="${_orderState.pctOfCash}" id="ord-pct" class="pct-slider"/>
+            <div class="order-preview">
+                <div class="row"><span>Notional</span><strong class="num">${fmt(notional, 2)} USDT</strong></div>
+                <div class="row"><span>Menge</span><strong class="num">${fmt(qty, 6)}</strong></div>
+                <div class="row"><span>Stop-Loss (${stopPct.toFixed(2)}%)</span><strong class="num" style="color:var(--red)">${fmt(stop, 4)}</strong></div>
+                <div class="row"><span>Max Verlust</span><strong class="num" style="color:var(--red)">-${fmt(risk, 2)} USDT</strong></div>
+                <div class="row" style="border-bottom:none;"><span>TP1 (${CFG.tpMultiples[0]}R)</span><strong class="num" style="color:var(--green)">${fmt(tp1, 4)}</strong></div>
+            </div>
+        </div>`;
+    $("#ord-long").onclick = () => { _orderState.side = "long"; renderOrderModal(); };
+    $("#ord-short").onclick = () => { _orderState.side = "short"; renderOrderModal(); };
+    $("#ord-pct").oninput = (e) => { _orderState.pctOfCash = parseInt(e.target.value); renderOrderModal(); };
+}
+
+function submitManualOrder() {
+    const price = state.prices[_orderState.symbol] || 0;
+    if (!price) { alert("Kein Live-Preis verfügbar."); return; }
+    const notional = broker.cash * _orderState.pctOfCash / 100;
+    const qty = notional / price;
+    const candles = state.candles[_orderState.symbol];
+    let atrVal = price * 0.02;
+    if (candles && candles.length >= 20) {
+        const atrArr = window.TB.atr(window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles), 14);
+        atrVal = atrArr[atrArr.length - 1];
+    }
+    const stop = _orderState.side === "long" ? price - atrVal * CFG.atrStopMult : price + atrVal * CFG.atrStopMult;
+    const tps = CFG.tpMultiples.map((m, i) => ({
+        price: _orderState.side === "long" ? price + (price - stop) * m : price - (stop - price) * m,
+        fraction: i === CFG.tpMultiples.length - 1 ? 1 / CFG.tpMultiples.length : 1 / CFG.tpMultiples.length,
+    }));
+    broker.submit(_orderState.symbol, _orderState.side, qty, price, {
+        stop, take_profits: tps, strategy: "manual",
+    });
+    $("#order-modal").classList.add("hidden");
+    announce(`Manueller ${_orderState.side === "long" ? "Kauf" : "Verkauf"} ausgeführt: ${_orderState.symbol} bei ${price.toFixed(2)}.`, "success");
+    renderAll();
+}
+
+// ============ v6: PARTIAL CLOSE MODAL ============
+let _partialState = { symbol: null, pct: 50 };
+function openPartialCloseModal(symbol) {
+    _partialState = { symbol, pct: 50 };
+    renderPartialClose();
+    $("#close-modal").classList.remove("hidden");
+}
+function renderPartialClose() {
+    const p = broker.positions[_partialState.symbol];
+    if (!p) return;
+    const price = state.prices[_partialState.symbol] || p.entry;
+    const closeQty = p.qty * _partialState.pct / 100;
+    const pnl = p.side === "long" ? (price - p.entry) * closeQty : (p.entry - price) * closeQty;
+    $("#close-body").innerHTML = `
+        <div style="font-size:0.82rem; color:var(--muted);">${_partialState.symbol} · ${p.side.toUpperCase()} · Menge <strong style="color:var(--text)">${fmt(p.qty, 6)}</strong></div>
+        <div class="pct-value">${_partialState.pct}%</div>
+        <input type="range" min="10" max="100" step="5" value="${_partialState.pct}" id="close-pct" class="pct-slider"/>
+        <div style="display:flex; justify-content:space-between; margin-top:4px; color:var(--muted); font-size:0.7rem;">
+            <span>10%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+        </div>
+        <div class="pct-preview">
+            <div class="row"><span>Zu schliessende Menge</span><strong class="num">${fmt(closeQty, 6)}</strong></div>
+            <div class="row"><span>Erlös bei ${fmt(price, 4)}</span><strong class="num">${fmt(closeQty * price, 2)} USDT</strong></div>
+            <div class="row"><span>Realisierter PnL</span><strong class="num" style="color:${pnl >= 0 ? "var(--green)" : "var(--red)"}">${pnl >= 0 ? "+" : ""}${fmt(pnl, 2)} USDT</strong></div>
+            <div class="row" style="border-bottom:none;"><span>Rest-Menge</span><strong class="num">${fmt(p.qty - closeQty, 6)}</strong></div>
+        </div>`;
+    $("#close-pct").oninput = (e) => { _partialState.pct = parseInt(e.target.value); renderPartialClose(); };
+}
+function submitPartialClose() {
+    const p = broker.positions[_partialState.symbol];
+    if (!p) return;
+    const price = state.prices[_partialState.symbol] || p.entry;
+    const r = broker.close(_partialState.symbol, price, _partialState.pct / 100);
+    $("#close-modal").classList.add("hidden");
+    if (r) announce(`${_partialState.pct}% von ${_partialState.symbol} geschlossen. ${r.pnl >= 0 ? "Gewinn" : "Verlust"} ${Math.abs(r.pnl).toFixed(2)} Dollar.`, r.pnl >= 0 ? "success" : "warn");
+    renderAll();
+}
+
+// ============ v6: PUSH NOTIFICATIONS + NTFY ============
+async function requestPushPermission() {
+    if (!("Notification" in window)) { alert("Dieser Browser unterstützt keine Notifications."); return; }
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+        new Notification("Trading Bot", { body: "Benachrichtigungen aktiv.", icon: "icon-192.png" });
+        localStorage.setItem("tb_push", "1");
+        announce("Push-Benachrichtigungen aktiviert.", "success");
+    } else {
+        alert("Berechtigung verweigert.");
+    }
+    renderToolsPanel();
+}
+
+function sendPushIfEnabled(title, body) {
+    if (localStorage.getItem("tb_push") === "1" && "Notification" in window && Notification.permission === "granted") {
+        try { new Notification(title, { body, icon: "icon-192.png", tag: "tb-alert" }); } catch (e) {}
+    }
+}
+
+async function sendNtfy(text) {
+    const topic = localStorage.getItem("tb_ntfy_topic");
+    if (!topic) return;
+    try {
+        await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+            method: "POST", body: text,
+            headers: { "Title": "Trading Bot", "Priority": "high", "Tags": "chart_with_upwards_trend" },
+        });
+    } catch (e) { /* silent */ }
+}
+
+// hook into announce so alerts go to push + ntfy too
+const _origAnnounce = announce;
+window.addEventListener("jarvis", (ev) => {
+    const d = ev.detail;
+    if (d && (d.level === "alert" || d.level === "success" || d.level === "warn")) {
+        sendPushIfEnabled("Trading Bot", d.text);
+        sendNtfy(d.text);
+    }
+});
+
+// ============ v6: TOOLS PANEL (backup, push, ntfy, QR, tax report) ============
+function renderToolsPanel() {
+    const el = $("#tools-panel");
+    if (!el) return;
+    const pushState = localStorage.getItem("tb_push") === "1" ? "✓ aktiv" : "aus";
+    const ntfyTopic = localStorage.getItem("tb_ntfy_topic") || "";
+    el.innerHTML = `
+        <div class="tools-actions">
+            <button class="ghost" id="tp-export">📥 Backup exportieren</button>
+            <button class="ghost" id="tp-import">📤 Backup importieren</button>
+            <button class="ghost" id="tp-push">🔔 Push (${pushState})</button>
+            <button class="ghost" id="tp-tax">📄 Steuerreport (Print)</button>
+            <button class="ghost" id="tp-qr">📱 QR für Handy</button>
+            <button class="ghost" id="tp-tour">🎓 Tour neu starten</button>
+        </div>
+        <input type="file" id="tp-import-file" accept=".json" style="display:none;"/>
+        <div style="margin-top:12px;">
+            <div style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px;">ntfy.sh Push-Topic (optional)</div>
+            <div class="ntfy-input">
+                <input type="text" id="ntfy-topic" placeholder="mein-trading-topic" value="${ntfyTopic}"/>
+                <button class="primary" id="ntfy-save">Speichern</button>
+            </div>
+            <div style="margin-top:4px; color:var(--muted); font-size:0.7rem;">
+                Empfange Alerts kostenlos auf dem Handy über die ntfy-App: einfach das gleiche Topic dort abonnieren.
+            </div>
+        </div>
+        <div id="qr-container"></div>`;
+    $("#tp-export").onclick = exportBackup;
+    $("#tp-import").onclick = () => $("#tp-import-file").click();
+    $("#tp-import-file").onchange = (e) => { if (e.target.files[0]) importBackup(e.target.files[0]); };
+    $("#tp-push").onclick = requestPushPermission;
+    $("#tp-tax").onclick = openTaxReport;
+    $("#tp-qr").onclick = () => renderQr(location.href);
+    $("#tp-tour").onclick = () => { localStorage.removeItem("tb_onboarded"); startOnboarding(); };
+    $("#ntfy-save").onclick = () => {
+        const v = $("#ntfy-topic").value.trim();
+        if (v) { localStorage.setItem("tb_ntfy_topic", v); sendNtfy("Trading Bot connected. Alerts kommen jetzt hierher."); announce("ntfy-Topic gespeichert.", "success"); }
+        else { localStorage.removeItem("tb_ntfy_topic"); announce("ntfy deaktiviert."); }
+    };
+}
+
+// ============ v6: QR CODE ============
+// simple inline QR encoder (uses public API as fallback since inline QR is heavy)
+function renderQr(url) {
+    const el = $("#qr-container");
+    if (!el) return;
+    const enc = encodeURIComponent(url);
+    // Use qrserver.com - free QR service, returns PNG. If unreachable fall back to plain text.
+    el.innerHTML = `
+        <div class="qr-wrap">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${enc}" alt="QR" style="max-width:180px; background:#fff; padding:6px; border-radius:6px;" onerror="this.parentElement.innerHTML='URL: ${url}';"/>
+            <div style="margin-top:8px; font-size:0.72rem; color:var(--muted);">Scanne mit dem Handy und speichere zum Startbildschirm.</div>
+            <div style="margin-top:4px; font-size:0.72rem; color:var(--text); word-break:break-all;">${url}</div>
+        </div>`;
+}
+
+// ============ v6: HTML TAX REPORT (print-friendly) ============
+function openTaxReport() {
+    const trades = _pairTrades().filter((t) => t.open_ts);
+    trades.sort((a, b) => new Date(a.close_ts) - new Date(b.close_ts));
+    const total = trades.reduce((s, t) => s + t.pnl, 0);
+    const wins = trades.filter((t) => t.pnl > 0);
+    const losses = trades.filter((t) => t.pnl < 0);
+    const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+    const netTaxable = trades.filter((t) => {
+        const days = (new Date(t.close_ts) - new Date(t.open_ts)) / (86400 * 1000);
+        return days < 365;
+    }).reduce((s, t) => s + t.pnl, 0);
+    const rows = trades.map((t) => {
+        const days = (new Date(t.close_ts) - new Date(t.open_ts)) / (86400 * 1000);
+        const taxFree = days >= 365;
+        return `<tr>
+            <td>${new Date(t.open_ts).toLocaleDateString("de-DE")}</td>
+            <td>${new Date(t.close_ts).toLocaleDateString("de-DE")}</td>
+            <td>${t.symbol}</td>
+            <td>${t.side}</td>
+            <td style="text-align:right;">${t.open_price.toFixed(4)}</td>
+            <td style="text-align:right;">${t.close_price.toFixed(4)}</td>
+            <td style="text-align:right;">${t.qty.toFixed(6)}</td>
+            <td style="text-align:right;">${Math.round(days)} Tage</td>
+            <td style="text-align:right; color:${t.pnl >= 0 ? "green" : "red"};">${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)}</td>
+            <td>${taxFree ? "§23 steuerfrei" : "steuerpflichtig"}</td>
+        </tr>`;
+    }).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Steuerreport § 23 EStG</title>
+        <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111; max-width: 1000px; margin: auto; }
+            h1 { color: #1e40af; margin-bottom: 4px; }
+            .meta { color: #555; margin-bottom: 24px; font-size: 0.9rem; }
+            .summary { background: #f1f5f9; padding: 16px; border-radius: 8px; margin-bottom: 24px; }
+            .summary .row { display: flex; justify-content: space-between; padding: 4px 0; }
+            table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+            th, td { border: 1px solid #cbd5e1; padding: 6px 8px; }
+            th { background: #e2e8f0; text-align: left; }
+            .footer { margin-top: 32px; color: #666; font-size: 0.8rem; border-top: 1px solid #cbd5e1; padding-top: 12px; }
+            @media print { body { padding: 8px; } }
+        </style></head>
+        <body>
+            <h1>Steuerreport für private Veräusserungsgeschäfte (§ 23 EStG)</h1>
+            <div class="meta">Erstellt am ${new Date().toLocaleString("de-DE")} · Trading Bot Demo · alle Beträge in USDT</div>
+            <div class="summary">
+                <div class="row"><span>Trades gesamt</span><strong>${trades.length}</strong></div>
+                <div class="row"><span>Bruttogewinn</span><strong>+${grossWin.toFixed(2)}</strong></div>
+                <div class="row"><span>Bruttoverlust</span><strong>-${grossLoss.toFixed(2)}</strong></div>
+                <div class="row"><span>Netto-PnL gesamt</span><strong>${total >= 0 ? "+" : ""}${total.toFixed(2)}</strong></div>
+                <div class="row"><span>Davon steuerpflichtig (Haltedauer &lt; 1 Jahr)</span><strong>${netTaxable >= 0 ? "+" : ""}${netTaxable.toFixed(2)}</strong></div>
+                <div class="row"><span>Steuerfreier Anteil (Haltedauer ≥ 1 Jahr, § 23 EStG)</span><strong>${(total - netTaxable) >= 0 ? "+" : ""}${(total - netTaxable).toFixed(2)}</strong></div>
+            </div>
+            <table>
+                <thead><tr>
+                    <th>Kauf</th><th>Verkauf</th><th>Symbol</th><th>Richtung</th>
+                    <th>Kaufpreis</th><th>Verkaufspreis</th><th>Menge</th>
+                    <th>Haltedauer</th><th>Gewinn/Verlust</th><th>Status</th>
+                </tr></thead>
+                <tbody>${rows || "<tr><td colspan='10' style='text-align:center;'>Keine Trades</td></tr>"}</tbody>
+            </table>
+            <div class="footer">
+                Hinweis: Dieses Dokument ist eine Aufstellung aus dem Demo-Konto zur Vorbereitung auf die Anlage SO. Keine Steuerberatung. Bei Krypto-zu-Krypto-Trades und komplexen Fällen bitte Steuerberater konsultieren. Haltefristen berechnet aus dem Zeitraum Kauf–Verkauf.
+            </div>
+        </body></html>`;
+    const win = window.open("", "_blank");
+    if (!win) { alert("Popup blockiert. Bitte Popups erlauben."); return; }
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 500);
+}
+
+// ============ v6: ONBOARDING TOUR ============
+const ONBOARD_STEPS = [
+    { title: "Willkommen", body: "Dieser Bot handelt mit 10 000 USDT Spielgeld auf Live-Binance-Kursen. Kein echtes Geld, kein Risiko — aber alles verhält sich wie im echten Markt." },
+    { title: "Live-Daten", body: "Jede Sekunde neue Preise von 30 Handelspaaren. 16 Strategien scannen parallel und bewerten jede Sekunde: kaufen, verkaufen oder halten." },
+    { title: "Signale bestätigen", body: "Im Manuell-Modus zeigt der Bot Setups an und du bestätigst. Im Automatik-Modus handelt er nur bei Score ≥ 3.0 und ≥ 3 unabhängigen Signalen." },
+    { title: "Kill-Switch", body: "Bei 4% Tages-Verlust oder 15% Drawdown pausiert der Bot automatisch. Der Kapitalerhalt hat immer Vorrang vor dem Gewinn." },
+    { title: "Steuer-tauglich", body: "Jeder Trade wird im Journal mit Haltedauer festgehalten. Trades über 1 Jahr sind nach § 23 EStG steuerfrei. Report drucken über 'Tools'." },
+    { title: "Los geht's", body: "Scroll nach unten, sieh dir die Sektionen an. Jarvis kannst du oben aktivieren — dann spricht er dir Signale auf Deutsch vor." },
+];
+let _obStep = 0;
+function startOnboarding() {
+    _obStep = 0;
+    $("#onboarding").classList.remove("hidden");
+    renderOnboarding();
+}
+function renderOnboarding() {
+    const s = ONBOARD_STEPS[_obStep];
+    const dots = ONBOARD_STEPS.map((_, i) => `<div class="ob-dot ${i <= _obStep ? "on" : ""}"></div>`).join("");
+    $("#onboarding-step").innerHTML = `
+        <div class="ob-progress">${dots}</div>
+        <h3>Schritt ${_obStep + 1} von ${ONBOARD_STEPS.length}: ${s.title}</h3>
+        <div>${s.body}</div>`;
+    $("#ob-next").textContent = _obStep === ONBOARD_STEPS.length - 1 ? "Loslegen" : "Weiter →";
+}
+function checkFirstLaunch() {
+    if (!localStorage.getItem("tb_onboarded")) {
+        setTimeout(startOnboarding, 800);
+    }
+}
+
+// ============ v6: hook manual-order into 24h ticker table ============
+const _origRender24 = render24hTickers;
+render24hTickers = function() {
+    _origRender24();
+    const el = $("#ticker24");
+    if (!el) return;
+    // add a "Trade" column click handler per row
+    const rows = el.querySelectorAll("tbody tr");
+    rows.forEach((tr, idx) => {
+        const sym = CFG.symbols[idx];
+        if (!sym || tr.querySelector(".ticker-trade")) return;
+        const lastCell = tr.children[0];
+        if (lastCell) {
+            lastCell.innerHTML += ` <span class="ticker-trade" data-sym="${sym}" title="Manuell traden">+ trade</span>`;
+        }
+    });
+    el.querySelectorAll(".ticker-trade").forEach((s) => {
+        s.onclick = () => openManualOrderModal(s.dataset.sym);
+    });
+};
+
+// ============ v6: bind onboarding + modal buttons ============
+document.addEventListener("DOMContentLoaded", () => {
+    const obNext = $("#ob-next");
+    const obSkip = $("#ob-skip");
+    if (obNext) obNext.onclick = () => {
+        _obStep++;
+        if (_obStep >= ONBOARD_STEPS.length) {
+            $("#onboarding").classList.add("hidden");
+            localStorage.setItem("tb_onboarded", "1");
+        } else renderOnboarding();
+    };
+    if (obSkip) obSkip.onclick = () => {
+        $("#onboarding").classList.add("hidden");
+        localStorage.setItem("tb_onboarded", "1");
+    };
+    $("#order-cancel")?.addEventListener("click", () => $("#order-modal").classList.add("hidden"));
+    $("#order-submit")?.addEventListener("click", submitManualOrder);
+    $("#close-cancel")?.addEventListener("click", () => $("#close-modal").classList.add("hidden"));
+    $("#close-submit")?.addEventListener("click", submitPartialClose);
+});
+
+// ============ v6: augment renderAll ============
+const _origRenderAll = renderAll;
+renderAll = function() {
+    _origRenderAll();
+    renderCorrelationMatrix();
+    renderReturnHistogram();
+    renderRollingMetrics();
+    renderEurRow();
+    renderJournalTaxHint();
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    initTheme();
+    renderToolsPanel();
+    checkFirstLaunch();
+    setTimeout(() => {
+        refreshMarketCtx();
+        refreshOnChain();
+        refreshEurRate();
+        checkHealth();
+    }, 2000);
+    setInterval(refreshMarketCtx, 5 * 60 * 1000);
+    setInterval(refreshOnChain, 5 * 60 * 1000);
+    setInterval(refreshEurRate, 15 * 60 * 1000);
+    setInterval(checkHealth, 10 * 60 * 1000);
+});
 
 document.addEventListener("DOMContentLoaded", boot);
 
