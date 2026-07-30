@@ -522,13 +522,17 @@ async function scanSymbol(symbol) {
         // handle open positions (stop/tp)
         const events = broker.onPrice(symbol, price);
         for (const ev of events) {
+            if (ev.kind === "trail") {
+                announce(`Trailing-Stop nachgezogen bei ${symbol.replace("/", " gegen ")} auf ${ev.newStop.toFixed(2)}. Gewinn abgesichert.`, "info");
+                continue;
+            }
             const verb = ev.kind === "sl" ? "Stop-Loss ausgelöst" : "Take-Profit erreicht";
             const level = ev.pnl >= 0 ? "success" : "warn";
             announce(`${verb} bei ${symbol.replace("/", " gegen ")}. ${ev.pnl >= 0 ? "Gewinn" : "Verlust"} ${Math.abs(ev.pnl).toFixed(2)} Dollar.`, level);
         }
 
         // ensemble
-        const result = window.TB.ensemble(candles, CFG.softMinScore, CFG.softAgreement);
+        const result = window.TB.ensemble(candles, CFG.softMinScore, CFG.softAgreement, state.adaptiveWeights);
         return { symbol, ...result, price };
     } catch (e) {
         return { symbol, error: e.message };
@@ -588,6 +592,10 @@ async function refreshPrices() {
             state.prices[s] = await window.TB.fetchPrice(s);
             const events = broker.onPrice(s, state.prices[s]);
             for (const ev of events) {
+                if (ev.kind === "trail") {
+                    announce(`Trailing-Stop nachgezogen bei ${s.replace("/", " gegen ")} auf ${ev.newStop.toFixed(2)}. Gewinn abgesichert.`, "info");
+                    continue;
+                }
                 const verb = ev.kind === "sl" ? "Stop-Loss ausgelöst" : "Take-Profit erreicht";
                 const level = ev.pnl >= 0 ? "success" : "warn";
                 announce(`${verb} bei ${s.replace("/", " gegen ")}. ${ev.pnl >= 0 ? "Gewinn" : "Verlust"} ${Math.abs(ev.pnl).toFixed(2)} Dollar.`, level);
@@ -798,6 +806,216 @@ function renderNewsList() {
     }).join("");
 }
 
+// ============ NEW: adaptive learning ============
+function computeAdaptiveWeights() {
+    const trades = _pairTrades().slice(-100);
+    const buckets = {};
+    for (const t of trades) {
+        const strats = (t.strategy || "").split(",").filter(Boolean);
+        for (const s of strats) {
+            if (!buckets[s]) buckets[s] = { wins: 0, total: 0, pnl: 0 };
+            buckets[s].total++;
+            buckets[s].pnl += t.pnl;
+            if (t.pnl > 0) buckets[s].wins++;
+        }
+    }
+    const weights = {};
+    for (const s in buckets) {
+        const b = buckets[s];
+        if (b.total < 5) { weights[s] = 1.0; continue; }
+        const wr = b.wins / b.total;
+        // wr 0.5 → 1.0, wr 0.7 → 1.4, wr 0.3 → 0.6
+        weights[s] = Math.max(0.3, Math.min(1.8, 0.5 + wr * 1.3));
+    }
+    state.adaptiveWeights = weights;
+    return weights;
+}
+
+function renderAdaptiveWeights() {
+    const w = computeAdaptiveWeights();
+    const el = $("#adaptive-weights");
+    if (!Object.keys(w).length) {
+        el.textContent = "noch nicht genug Daten (min. 5 Trades pro Strategie nötig)";
+        return;
+    }
+    const rows = Object.entries(w)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => {
+            const pct = ((v - 1) * 100);
+            const cls = v > 1.1 ? "pnl-pos" : v < 0.9 ? "pnl-neg" : "";
+            const bar = Math.min(100, v / 1.8 * 100);
+            const color = v > 1.1 ? "green" : v < 0.9 ? "red" : "yellow";
+            return `<div style="padding:6px 0;">
+                <div style="display:flex;justify-content:space-between;font-size:0.82rem;">
+                    <span>${k.replace(/_/g, " ")}</span>
+                    <span class="${cls}"><strong>${v.toFixed(2)}×</strong> ${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%</span>
+                </div>
+                <div class="ks-bar-bg"><div class="ks-bar-fill risk-color-${color}" style="width:${bar}%"></div></div>
+            </div>`;
+        }).join("");
+    el.innerHTML = rows;
+}
+
+// ============ NEW: futures data (funding, long/short, OI) ============
+async function fetchFuturesData(symbols) {
+    const out = [];
+    for (const sym of symbols) {
+        const s = sym.replace("/", "");
+        try {
+            const [fr, ls, oi] = await Promise.all([
+                fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${s}`).then((r) => r.json()).catch(() => null),
+                fetch(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${s}&period=1h&limit=1`).then((r) => r.json()).catch(() => null),
+                fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${s}`).then((r) => r.json()).catch(() => null),
+            ]);
+            out.push({
+                symbol: sym,
+                funding: fr?.lastFundingRate ? parseFloat(fr.lastFundingRate) * 100 : null,
+                longShort: ls?.[0]?.longShortRatio ? parseFloat(ls[0].longShortRatio) : null,
+                oi: oi?.openInterest ? parseFloat(oi.openInterest) : null,
+            });
+        } catch (e) { /* skip */ }
+    }
+    state.futuresData = out;
+    return out;
+}
+
+function renderFuturesTable() {
+    const data = state.futuresData || [];
+    const el = $("#futures-table");
+    if (!el) return;
+    if (!data.length) { el.innerHTML = "<tbody><tr><td>lade …</td></tr></tbody>"; return; }
+    const rows = data.map((d) => {
+        const fundingCls = d.funding == null ? "" : Math.abs(d.funding) > 0.05 ? "pnl-neg" : d.funding > 0 ? "pnl-pos" : "";
+        const lsCls = d.longShort == null ? "" : d.longShort > 2.5 || d.longShort < 0.6 ? "pnl-neg" : "";
+        return `<tr>
+            <td>${d.symbol}</td>
+            <td class="${fundingCls}">${d.funding == null ? "–" : (d.funding > 0 ? "+" : "") + d.funding.toFixed(4) + "%"}</td>
+            <td class="${lsCls}">${d.longShort == null ? "–" : d.longShort.toFixed(2)}</td>
+            <td>${d.oi == null ? "–" : fmt(d.oi, 0)}</td>
+        </tr>`;
+    }).join("");
+    el.innerHTML = `<thead><tr><th>Symbol</th><th>Funding 8h</th><th>L/S Ratio</th><th>Open Interest</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
+// ============ NEW: backtest ============
+async function runBacktest(symbol, days) {
+    const el = $("#bt-result");
+    el.textContent = "lade Historie …";
+    let candles;
+    try {
+        // Binance allows max 1000 candles/request. For long backtests we chain requests.
+        const perDay = 96;                                    // 15m candles per day
+        const needed = Math.min(days * perDay, 3000);
+        candles = await window.TB.fetchKlines(symbol, "15m", 1000);
+        if (needed > 1000) {
+            // fetch older chunks
+            const oldest = candles[0].ts;
+            const step = 15 * 60 * 1000;
+            let cursor = oldest - 1000 * step;
+            while (candles.length < needed && cursor > 0) {
+                const url = `https://api.binance.com/api/v3/klines?symbol=${symbol.replace("/", "")}&interval=15m&endTime=${cursor}&limit=1000`;
+                const raw = await fetch(url).then((r) => r.json());
+                if (!raw?.length) break;
+                candles = raw.map((k) => ({
+                    ts: k[0], open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5],
+                })).concat(candles);
+                cursor = raw[0][0] - 1000 * step;
+            }
+        }
+    } catch (e) { el.textContent = "Fehler beim Laden: " + e.message; return; }
+
+    const bt = new window.TB.PaperBroker(10000);
+    let trades = 0, wins = 0, losses = 0;
+    const equity = [];
+    for (let i = 220; i < candles.length; i++) {
+        const win = candles.slice(Math.max(0, i - 500), i + 1);
+        const price = candles[i].close;
+        const events = bt.onPrice(symbol, price);
+        for (const ev of events) {
+            if (ev.kind === "tp" || ev.kind === "sl") {
+                trades++;
+                if (ev.pnl > 0) wins++;
+                else if (ev.pnl < 0) losses++;
+            }
+        }
+        if (!bt.positions[symbol] && i % 4 === 0) {                // scan every 4 bars = 1h
+            const result = window.TB.ensemble(win, CFG.strictMinScore, CFG.strictAgreement);
+            if (result.side) {
+                const atrArr = window.TB.atr(window.TB.highs(win), window.TB.lows(win), window.TB.closes(win), 14);
+                const atrVal = atrArr[atrArr.length - 1];
+                const equity_ = bt.equity({ [symbol]: price });
+                const plan = window.TB.planTrade(result.side, price, atrVal, equity_,
+                    { baseRiskPct: 0.5, atrStopMult: 1.8, tpMultiples: [2.0, 3.5, 5.0], riskPctPerTrade: 0.5 });
+                if (plan && plan.size > 0) {
+                    bt.submit(symbol, result.side, plan.size, price,
+                        { stop: plan.stop, take_profits: plan.take_profits,
+                          strategy: result.signals.map((s) => s.strategy).join(",") });
+                }
+            }
+        }
+        equity.push({ ts: candles[i].ts, eq: bt.equity({ [symbol]: price }) });
+    }
+    const finalEq = bt.equity({ [symbol]: candles[candles.length - 1].close });
+    const pnl = finalEq - 10000;
+    const wr = trades ? (wins / trades * 100) : 0;
+
+    // mini sparkline
+    const minEq = Math.min(...equity.map((p) => p.eq));
+    const maxEq = Math.max(...equity.map((p) => p.eq));
+    const w = 400, h = 60;
+    const step = w / Math.max(equity.length - 1, 1);
+    const line = equity.map((p, i) => `${(i * step).toFixed(1)},${(h - (p.eq - minEq) / (maxEq - minEq || 1) * h).toFixed(1)}`).join(" ");
+    const startY = (h - (10000 - minEq) / (maxEq - minEq || 1) * h).toFixed(1);
+    const cls = pnl > 0 ? "pos" : pnl < 0 ? "neg" : "";
+    el.innerHTML = `
+        <div class="journal-summary" style="margin-top:12px;">
+            <div class="js-tile"><div class="k">Trades</div><div class="v">${trades}</div></div>
+            <div class="js-tile"><div class="k">Win-Rate</div><div class="v">${wr.toFixed(0)}%</div></div>
+            <div class="js-tile"><div class="k">End-Equity</div><div class="v">${fmt(finalEq, 0)}</div></div>
+            <div class="js-tile"><div class="k">PnL</div><div class="v ${cls}">${pnl >= 0 ? "+" : ""}${fmt(pnl, 2)}</div></div>
+        </div>
+        <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:80px;background:rgba(5,7,12,0.4);border-radius:8px;margin-top:8px;">
+            <line x1="0" y1="${startY}" x2="${w}" y2="${startY}" stroke="var(--muted)" stroke-dasharray="3 3" stroke-width="0.5"/>
+            <polyline points="${line}" fill="none" stroke="${pnl >= 0 ? "var(--green)" : "var(--red)"}" stroke-width="1.5"/>
+        </svg>
+        <div style="text-align:center;margin-top:6px;font-size:0.72rem;color:var(--muted);">
+            ${equity.length} Bars simuliert · Start 10 000 USDT · Strikte Filter (Score ≥ 3.0, Agreement ≥ 3)
+        </div>`;
+    announce(`Backtest fertig. In ${days} Tagen: ${trades} Trades, ${wr.toFixed(0)}% Win-Rate, PnL ${pnl.toFixed(2)} Dollar.`);
+}
+
+// ============ NEW: weekly report ============
+function checkWeeklyReport() {
+    const now = new Date();
+    const lastReport = parseInt(localStorage.getItem("tb_last_report") || "0");
+    // Sunday = 0, hour >= 20, and at least 20h since last report
+    if (now.getDay() === 0 && now.getHours() >= 20 && Date.now() - lastReport > 20 * 3600 * 1000) {
+        generateWeeklyReport();
+        localStorage.setItem("tb_last_report", String(Date.now()));
+    }
+}
+
+function generateWeeklyReport() {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const trades = _pairTrades().filter((t) => new Date(t.close_ts) >= weekAgo);
+    const wins = trades.filter((t) => t.pnl > 0).length;
+    const pnl = trades.reduce((s, t) => s + t.pnl, 0);
+    const wr = trades.length ? (wins / trades.length * 100) : 0;
+    const byStrategy = {};
+    for (const t of trades) {
+        const strats = (t.strategy || "").split(",").filter(Boolean);
+        for (const s of strats) {
+            byStrategy[s] = (byStrategy[s] || 0) + t.pnl;
+        }
+    }
+    const bestStrat = Object.entries(byStrategy).sort((a, b) => b[1] - a[1])[0];
+    const msg = `Wochen-Report: ${trades.length} Trades, Win-Rate ${wr.toFixed(0)} Prozent, PnL ${pnl.toFixed(2)} Dollar. ` +
+        (bestStrat ? `Beste Strategie: ${bestStrat[0].replace(/_/g, " ")} mit ${bestStrat[1].toFixed(2)} Dollar.` : "");
+    announce(msg, "alert");
+    return { trades: trades.length, wins, pnl, wr, bestStrat };
+}
+
 // ============ NEW: per-strategy performance ============
 function renderStrategyPerformance() {
     const trades = _pairTrades();
@@ -850,8 +1068,11 @@ function renderAll() {
     renderKillSwitch();
     renderWatchlist();
     renderStrategyPerformance();
+    renderAdaptiveWeights();
+    renderFuturesTable();
     $("#peak-eq").textContent = money(state.peakEquity);
     checkWatchlist();
+    checkWeeklyReport();
 }
 
 // =========== event bindings ============================================
@@ -936,12 +1157,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 });
 
+function renderBacktestOptions() {
+    const sel = $("#bt-symbol");
+    if (!sel) return;
+    sel.innerHTML = CFG.symbols.map((s) => `<option value="${s}">${s}</option>`).join("");
+}
+
 async function boot() {
     renderStrategies();
     renderTvSelect();
     updateModePill();
     renderSymbolPicker();
     renderWatchlistOptions();
+    renderBacktestOptions();
     renderAll();
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
     keepAwake();
@@ -949,16 +1177,28 @@ async function boot() {
         if (document.visibilityState === "visible") keepAwake();
     });
 
-    // initial scan + news
+    // hook up backtest button
+    const btBtn = $("#bt-run");
+    if (btBtn) {
+        btBtn.onclick = async () => {
+            btBtn.textContent = "läuft …"; btBtn.disabled = true;
+            await runBacktest($("#bt-symbol").value, parseInt($("#bt-days").value));
+            btBtn.textContent = "Backtest starten"; btBtn.disabled = false;
+        };
+    }
+
+    // initial scan + news + futures
     await scanAll();
     refreshFng();
     fetchNews().then(renderNewsList);
+    fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable);
 
     // loops
     setInterval(scanAll, CFG.scanIntervalSec * 1000);
     setInterval(refreshPrices, CFG.priceIntervalSec * 1000);
     setInterval(refreshFng, 5 * 60 * 1000);
     setInterval(() => { fetchNews().then(renderNewsList); }, 5 * 60 * 1000);
+    setInterval(() => { fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable); }, 3 * 60 * 1000);
 }
 
 document.addEventListener("DOMContentLoaded", boot);
