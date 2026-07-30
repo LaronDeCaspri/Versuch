@@ -104,13 +104,15 @@ function renderSignalTile(pending, fallback) {
         `;
         $("#confirm-btn").onclick = () => confirmPending(pending);
         $("#cancel-btn").onclick = () => cancelPending(pending);
-    } else if (fallback) {
-        tile.className = "signal " + (fallback.color || "grey");
+    } else {
+        const f = fallback || { action: "HALTEN", color: "grey", symbol: "–",
+            hint: state.lastScan ? "Kein konfluentes Setup — Bot bleibt geduldig" : "Lade Live-Daten von Binance ..." };
+        tile.className = "signal " + (f.color || "grey");
         tile.innerHTML = `
             <div class="signal-badge">Handelsentscheidung</div>
-            <div class="signal-label">${fallback.action || "HALTEN"}</div>
-            <div class="signal-symbol">${fallback.symbol || "–"}</div>
-            <div class="signal-price num">${fallback.hint || "Warte auf konfluentes Setup"}</div>`;
+            <div class="signal-label">${f.action}</div>
+            <div class="signal-symbol">${f.symbol || "–"}</div>
+            <div class="signal-price num">${f.hint || ""}</div>`;
     }
 }
 
@@ -190,21 +192,138 @@ function renderSignalsLog() {
     }).join("");
 }
 
+// -------- professional trade journal --------
+const journalState = {
+    view: localStorage.getItem("tb_journal_view") || "month",
+    date: localStorage.getItem("tb_journal_date") || new Date().toISOString().slice(0, 10),
+};
+
+function _pairTrades() {
+    // pair open + close entries to build a list of round-trips
+    const opens = {};
+    const trades = [];
+    for (const e of broker.journal) {
+        if (e.kind === "open") {
+            opens[e.symbol] = opens[e.symbol] || [];
+            opens[e.symbol].push({ ...e });
+        } else if (e.kind === "close") {
+            const stack = opens[e.symbol] || [];
+            const openEntry = stack.shift();
+            trades.push({
+                symbol: e.symbol,
+                side: openEntry?.side || e.side,
+                open_ts: openEntry?.ts,
+                close_ts: e.ts,
+                open_price: openEntry?.price || 0,
+                close_price: e.price,
+                qty: e.qty,
+                pnl: e.pnl || 0,
+                strategy: openEntry?.strategy || "",
+                holding_ms: openEntry ? new Date(e.ts) - new Date(openEntry.ts) : 0,
+            });
+        }
+    }
+    return trades;
+}
+
+function _inRange(ts, view, dateStr) {
+    if (view === "all") return true;
+    const t = new Date(ts);
+    const d = new Date(dateStr);
+    if (view === "day") return t.toDateString() === d.toDateString();
+    if (view === "month") return t.getFullYear() === d.getFullYear() && t.getMonth() === d.getMonth();
+    if (view === "year") return t.getFullYear() === d.getFullYear();
+    return true;
+}
+
+function _formatDuration(ms) {
+    if (!ms || ms < 0) return "–";
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s} s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h} h ${m % 60} min`;
+    return `${Math.floor(h / 24)} T ${h % 24} h`;
+}
+
 function renderJournal() {
-    const el = $("#journal");
-    const j = [...broker.journal].reverse().slice(0, 15);
-    if (!j.length) { el.textContent = "noch keine Trades"; return; }
-    el.innerHTML = j.map((e) => {
-        const t = new Date(e.ts).toLocaleTimeString("de-DE");
-        const isClose = e.kind === "close";
-        const pnl = isClose ? e.pnl : 0;
-        const pnlStr = isClose ? `<span class="num" style="color:${pnl >= 0 ? 'var(--green)' : 'var(--red)'}">${pnl >= 0 ? '+' : ''}${fmt(pnl, 2)}</span>` : "";
-        return `<div class="sig-row">
-            <span>${t}  ${e.kind === "open" ? "▶ open" : "◀ close"} ${e.symbol}<br><small>${e.strategy || ""}</small></span>
-            <span class="side-${e.side}">${e.side.toUpperCase()}</span>
-            ${pnlStr || `<span class="num">${fmt(e.price, 4)}</span>`}
-        </div>`;
+    const trades = _pairTrades().filter((t) => _inRange(t.close_ts, journalState.view, journalState.date));
+    trades.sort((a, b) => new Date(b.close_ts) - new Date(a.close_ts));
+
+    // summary
+    const wins = trades.filter((t) => t.pnl > 0);
+    const losses = trades.filter((t) => t.pnl < 0);
+    const pnl = trades.reduce((s, t) => s + t.pnl, 0);
+    const gross_profit = wins.reduce((s, t) => s + t.pnl, 0);
+    const gross_loss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+    const winRate = trades.length ? (wins.length / trades.length * 100) : 0;
+    const pf = gross_loss > 0 ? gross_profit / gross_loss : (wins.length ? Infinity : 0);
+    const best = trades.reduce((b, t) => t.pnl > (b?.pnl || -Infinity) ? t : b, null);
+    const worst = trades.reduce((b, t) => t.pnl < (b?.pnl || Infinity) ? t : b, null);
+
+    const pnlClass = pnl > 0.01 ? "pos" : pnl < -0.01 ? "neg" : "";
+    const bestStr = best ? `${best.pnl > 0 ? "+" : ""}${fmt(best.pnl, 2)}` : "–";
+    const worstStr = worst ? `${worst.pnl >= 0 ? "+" : ""}${fmt(worst.pnl, 2)}` : "–";
+
+    $("#journal-summary").innerHTML = `
+        <div class="js-tile"><div class="k">Trades</div><div class="v">${trades.length}</div></div>
+        <div class="js-tile"><div class="k">Win-Rate</div><div class="v">${fmt(winRate, 1)}%</div></div>
+        <div class="js-tile"><div class="k">Netto-PnL</div><div class="v ${pnlClass}">${pnl >= 0 ? "+" : ""}${fmt(pnl, 2)}</div></div>
+        <div class="js-tile"><div class="k">Bruttogewinn</div><div class="v pos">+${fmt(gross_profit, 2)}</div></div>
+        <div class="js-tile"><div class="k">Bruttoverlust</div><div class="v neg">-${fmt(gross_loss, 2)}</div></div>
+        <div class="js-tile"><div class="k">Profit-Faktor</div><div class="v">${isFinite(pf) ? fmt(pf, 2) : "∞"}</div></div>
+        <div class="js-tile"><div class="k">Bester Trade</div><div class="v pos">${bestStr}</div></div>
+        <div class="js-tile"><div class="k">Schlechtester</div><div class="v neg">${worstStr}</div></div>`;
+
+    // table
+    if (!trades.length) {
+        $("#journal-table").innerHTML = `<tbody><tr><td class="journal-empty">Keine Trades im gewählten Zeitraum</td></tr></tbody>`;
+        return;
+    }
+    const header = `<thead><tr>
+        <th>Datum</th><th>Symbol</th><th>Richtung</th><th>Einstieg</th>
+        <th>Ausstieg</th><th>Menge</th><th>Haltedauer</th>
+        <th>PnL (USDT)</th><th>Strategie</th>
+    </tr></thead>`;
+    const rows = trades.map((t) => {
+        const d = new Date(t.close_ts).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+        const tm = new Date(t.close_ts).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+        const pnlCls = t.pnl > 0 ? "pnl-pos" : t.pnl < 0 ? "pnl-neg" : "";
+        return `<tr>
+            <td>${d}<br><small style="color:var(--muted)">${tm}</small></td>
+            <td>${t.symbol}</td>
+            <td class="side-${t.side}">${t.side.toUpperCase()}</td>
+            <td class="num">${fmt(t.open_price, 4)}</td>
+            <td class="num">${fmt(t.close_price, 4)}</td>
+            <td class="num">${fmt(t.qty, 6)}</td>
+            <td>${_formatDuration(t.holding_ms)}</td>
+            <td class="num ${pnlCls}">${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl, 2)}</td>
+            <td><small>${t.strategy.split(",").slice(0, 2).join(", ") || "–"}</small></td>
+        </tr>`;
     }).join("");
+    $("#journal-table").innerHTML = header + `<tbody>${rows}</tbody>`;
+}
+
+function exportJournalCsv() {
+    const trades = _pairTrades().filter((t) => _inRange(t.close_ts, journalState.view, journalState.date));
+    trades.sort((a, b) => new Date(a.close_ts) - new Date(b.close_ts));
+    const header = ["Datum Ausstieg","Datum Einstieg","Symbol","Richtung","Einstiegspreis","Ausstiegspreis","Menge","Haltedauer (min)","PnL (USDT)","Strategie"];
+    const csv = [header.join(";")].concat(trades.map((t) => [
+        new Date(t.close_ts).toLocaleString("de-DE"),
+        t.open_ts ? new Date(t.open_ts).toLocaleString("de-DE") : "",
+        t.symbol, t.side, t.open_price.toFixed(6),
+        t.close_price.toFixed(6), t.qty.toFixed(8),
+        Math.round(t.holding_ms / 60000), t.pnl.toFixed(2),
+        (t.strategy || "").replace(/;/g, ",")
+    ].join(";"))).join("\n");
+    const bom = "﻿";
+    const blob = new Blob([bom + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `handelsjournal_${journalState.view}_${journalState.date}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
 }
 
 function renderStrategies() {
@@ -448,6 +567,32 @@ $("#mode-toggle").onclick = () => {
 document.querySelector(".news-popup-close")?.addEventListener("click", () => {
     document.querySelector(".news-popup").classList.add("hidden");
 });
+
+// Journal controls
+document.querySelectorAll(".jv-tab").forEach((btn) => {
+    btn.onclick = () => {
+        journalState.view = btn.dataset.view;
+        localStorage.setItem("tb_journal_view", journalState.view);
+        document.querySelectorAll(".jv-tab").forEach((b) => b.classList.toggle("primary", b === btn));
+        renderJournal();
+    };
+});
+const jd = $("#journal-date");
+if (jd) {
+    jd.value = journalState.date;
+    jd.onchange = () => {
+        journalState.date = jd.value || new Date().toISOString().slice(0, 10);
+        localStorage.setItem("tb_journal_date", journalState.date);
+        renderJournal();
+    };
+}
+$("#btn-export-csv")?.addEventListener("click", exportJournalCsv);
+$("#btn-print")?.addEventListener("click", () => {
+    document.getElementById("journal-section").dataset.printed = new Date().toLocaleString("de-DE");
+    window.print();
+});
+// activate the stored tab
+document.querySelectorAll(".jv-tab").forEach((b) => b.classList.toggle("primary", b.dataset.view === journalState.view));
 
 // =========== boot ============================================
 async function boot() {

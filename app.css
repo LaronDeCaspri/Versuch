@@ -439,6 +439,92 @@ footer {
     color: var(--muted); font-size: 0.75rem;
 }
 
+/* -------------------- trade journal -------------------- */
+.journal-controls {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin-bottom: 12px;
+}
+.journal-tabs { display: flex; gap: 4px; }
+.jv-tab {
+    flex: 0 0 auto; padding: 6px 12px; font-size: 0.8rem;
+    border-radius: 8px;
+}
+.jv-tab.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.journal-date {
+    padding: 7px 10px; font-size: 0.85rem;
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    font-family: inherit;
+    color-scheme: dark;
+}
+.journal-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px; margin-bottom: 14px;
+    padding: 12px; background: rgba(5,7,12,0.4);
+    border: 1px solid var(--border); border-radius: 10px;
+}
+.js-tile { text-align: center; }
+.js-tile .k {
+    font-size: 0.62rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+}
+.js-tile .v { font-size: 1.2rem; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.js-tile .v.pos { color: var(--green); }
+.js-tile .v.neg { color: var(--red); }
+
+.journal-table {
+    width: 100%; border-collapse: collapse; font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+.journal-table th, .journal-table td {
+    padding: 8px 10px; text-align: left;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.journal-table th {
+    color: var(--muted); font-size: 0.65rem;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    border-bottom: 1px solid var(--border-strong); font-weight: 600;
+}
+.journal-table tbody tr:hover td { background: rgba(255,255,255,0.02); }
+.journal-table td.num { text-align: right; }
+.journal-table td.pnl-pos { color: var(--green); font-weight: 600; }
+.journal-table td.pnl-neg { color: var(--red);   font-weight: 600; }
+.journal-empty { padding: 24px; text-align: center; color: var(--muted); }
+
+/* Print — extreme cleanup for tax paperwork */
+@media print {
+    body { background: #fff !important; color: #000 !important; padding: 0 !important; }
+    header, footer, #signal-tile, #jarvis-panel, .jarvis-controls,
+    #jarvis-log, #matrix, .toggle-row, .btn-row, .artifact-banner,
+    #tv-wrap, #tv-symbols, .signal-price, .fng,
+    #positions, #signals, #strategies, #rules, #news-popup,
+    #jarvis-controls, #dashboard, #signal-tile { display: none !important; }
+    main { padding: 0 !important; max-width: 100% !important; }
+    .card { background: #fff !important; border: 1px solid #ccc !important; box-shadow: none !important; break-inside: avoid; padding: 12px !important; }
+    .card h2 { color: #000 !important; }
+    #journal-section { display: block !important; }
+    .journal-summary { background: #f5f5f5 !important; border: 1px solid #ccc !important; }
+    .js-tile .k { color: #555 !important; }
+    .js-tile .v { color: #000 !important; }
+    .js-tile .v.pos { color: #16803a !important; }
+    .js-tile .v.neg { color: #b91c1c !important; }
+    .journal-table { color: #000 !important; font-size: 10pt; }
+    .journal-table th { color: #333 !important; border-bottom: 2px solid #333 !important; }
+    .journal-table td { border-bottom: 1px solid #ddd !important; }
+    .journal-table td.pnl-pos { color: #16803a !important; }
+    .journal-table td.pnl-neg { color: #b91c1c !important; }
+    .jv-tab, .journal-date { display: none !important; }
+    .journal-controls { display: none !important; }
+    #journal-section::before {
+        content: "Trading-Bot · Handels-Journal · Erstellt am " attr(data-printed);
+        display: block;
+        font-size: 12pt; font-weight: 700; margin-bottom: 12px;
+        padding-bottom: 8px; border-bottom: 2px solid #000;
+    }
+    .badge { display: none !important; }
+}
+
 /* -------------------- tv widget -------------------- */
 #tv-wrap {
     height: 380px; border-radius: var(--radius-sm);
