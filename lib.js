@@ -648,11 +648,18 @@ function assessRisk(plan, candles, openPositions, equity) {
 
 // ---------- paper broker with localStorage persistence ----------
 class PaperBroker {
-    constructor(startingBalance = 10000) {
+    constructor(startingBalance = 10000, opts = {}) {
         this.startingBalance = startingBalance;
+        this.isolated = !!opts.isolated;                       // no localStorage in isolated mode
         this.load();
     }
     load() {
+        if (this.isolated) {
+            this.cash = this.startingBalance;
+            this.positions = {};
+            this.journal = [];
+            return;
+        }
         const raw = localStorage.getItem("tb_broker");
         if (raw) {
             try {
@@ -670,12 +677,14 @@ class PaperBroker {
         this.save();
     }
     save() {
+        if (this.isolated) return;
         localStorage.setItem("tb_broker", JSON.stringify({
             cash: this.cash, positions: this.positions, journal: this.journal,
             startingBalance: this.startingBalance,
         }));
     }
     reset() {
+        if (this.isolated) { this.load(); return; }
         localStorage.removeItem("tb_broker");
         this.load();
     }
