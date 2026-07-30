@@ -83,6 +83,230 @@ function bollinger(arr, n = 20, k = 2) {
     return { mid: m, upper, lower, width };
 }
 
+// =========================================================================
+// v8: More indicators for confluence-based safer trades
+// =========================================================================
+
+// Ichimoku Cloud (Tenkan, Kijun, Senkou A/B, Chikou)
+function ichimoku(h, l, c, tenkanN = 9, kijunN = 26, senkouBN = 52, displace = 26) {
+    const highLow = (arr, n) => {
+        const out = new Array(arr.length).fill(NaN);
+        for (let i = n - 1; i < arr.length; i++) {
+            let hi = -Infinity, lo = Infinity;
+            for (let j = i - n + 1; j <= i; j++) {
+                if (h[j] > hi) hi = h[j];
+                if (l[j] < lo) lo = l[j];
+            }
+            out[i] = (hi + lo) / 2;
+        }
+        return out;
+    };
+    const tenkan = highLow(h, tenkanN);
+    const kijun = highLow(h, kijunN);
+    const senkouA = tenkan.map((v, i) => isNaN(v) || isNaN(kijun[i]) ? NaN : (v + kijun[i]) / 2);
+    const senkouB = highLow(h, senkouBN);
+    const chikou = c.map((_, i) => i >= displace ? c[i - displace] : NaN);
+    return { tenkan, kijun, senkouA, senkouB, chikou };
+}
+
+// VWAP — anchored to session start (first bar in the window)
+function vwap(h, l, c, v) {
+    const out = new Array(c.length).fill(NaN);
+    let cumPV = 0, cumV = 0;
+    for (let i = 0; i < c.length; i++) {
+        const typical = (h[i] + l[i] + c[i]) / 3;
+        cumPV += typical * v[i];
+        cumV += v[i];
+        out[i] = cumV > 0 ? cumPV / cumV : NaN;
+    }
+    return out;
+}
+
+// VWAP bands: 1 & 2 stddev from anchored VWAP
+function vwapBands(h, l, c, v) {
+    const mid = vwap(h, l, c, v);
+    const upper1 = new Array(c.length).fill(NaN);
+    const lower1 = new Array(c.length).fill(NaN);
+    const upper2 = new Array(c.length).fill(NaN);
+    const lower2 = new Array(c.length).fill(NaN);
+    let cumV = 0, cumVar = 0;
+    for (let i = 0; i < c.length; i++) {
+        cumV += v[i];
+        const typical = (h[i] + l[i] + c[i]) / 3;
+        cumVar += v[i] * (typical - mid[i]) ** 2;
+        const sd = cumV > 0 ? Math.sqrt(cumVar / cumV) : 0;
+        upper1[i] = mid[i] + sd;
+        lower1[i] = mid[i] - sd;
+        upper2[i] = mid[i] + 2 * sd;
+        lower2[i] = mid[i] - 2 * sd;
+    }
+    return { mid, upper1, lower1, upper2, lower2 };
+}
+
+// Keltner Channels — EMA(20) ± ATR(10) * mult
+function keltner(h, l, c, emaN = 20, atrN = 10, mult = 2) {
+    const m = ema(c, emaN);
+    const a = atr(h, l, c, atrN);
+    return {
+        mid: m,
+        upper: m.map((v, i) => v + mult * a[i]),
+        lower: m.map((v, i) => v - mult * a[i]),
+    };
+}
+
+// Chandelier Exit — trailing stop N*ATR from N-bar high (long) / low (short)
+function chandelier(h, l, c, n = 22, mult = 3) {
+    const a = atr(h, l, c, n);
+    const longStop = new Array(c.length).fill(NaN);
+    const shortStop = new Array(c.length).fill(NaN);
+    for (let i = n; i < c.length; i++) {
+        let hi = -Infinity, lo = Infinity;
+        for (let j = i - n + 1; j <= i; j++) {
+            if (h[j] > hi) hi = h[j];
+            if (l[j] < lo) lo = l[j];
+        }
+        longStop[i] = hi - mult * a[i];
+        shortStop[i] = lo + mult * a[i];
+    }
+    return { longStop, shortStop };
+}
+
+// RSI/MACD divergence detection (bullish or bearish)
+// Returns { bullish: bool, bearish: bool } based on recent swings
+function detectDivergence(closes, oscillator, lookback = 30) {
+    if (closes.length < lookback + 5) return { bullish: false, bearish: false };
+    const priceEnd = closes.length - 1;
+    // find last two significant lows in price + oscillator (bullish div)
+    // find last two significant highs (bearish div)
+    let bull = false, bear = false;
+    // simple: compare current vs bar 15 ago
+    const past = priceEnd - 15;
+    if (past > 0) {
+        const priceLower = closes[priceEnd] < closes[past] * 0.995;
+        const priceHigher = closes[priceEnd] > closes[past] * 1.005;
+        const oscHigher = oscillator[priceEnd] > oscillator[past];
+        const oscLower = oscillator[priceEnd] < oscillator[past];
+        bull = priceLower && oscHigher;
+        bear = priceHigher && oscLower;
+    }
+    return { bullish: bull, bearish: bear };
+}
+
+// Regime detection — trending vs ranging via ADX and Bollinger width
+function detectRegime(h, l, c) {
+    const adxVals = adx(h, l, c, 14);
+    const bb = bollinger(c, 20, 2);
+    const adxNow = adxVals[adxVals.length - 1];
+    const bbWidth = bb.width[bb.width.length - 1];
+    const atrVals = atr(h, l, c, 14);
+    const atrPct = (atrVals[atrVals.length - 1] / c[c.length - 1]) * 100;
+    let trend, volatility;
+    if (adxNow >= 25) trend = "trending";
+    else if (adxNow >= 18) trend = "weak-trend";
+    else trend = "ranging";
+    if (atrPct >= 4) volatility = "panic";
+    else if (atrPct >= 2) volatility = "high";
+    else if (atrPct >= 1) volatility = "normal";
+    else volatility = "calm";
+    return {
+        trend, volatility,
+        adx: adxNow, bbWidth, atrPct,
+        // recommended strategy family per regime
+        recommend: trend === "trending"
+            ? "Trend-Strategien (EMA-Cross, Donchian, MACD)"
+            : trend === "ranging"
+            ? "Mean-Rev-Strategien (RSI, Bollinger-Bounce)"
+            : "Vorsicht — gemischtes Regime, konservativ handeln",
+    };
+}
+
+// Confluence score — how many independent bullish/bearish signals agree
+function confluenceScore(candles) {
+    if (!candles || candles.length < 100) return null;
+    const c = closes(candles), h = highs(candles), l = lows(candles), v = vols(candles);
+    const i = c.length - 1;
+    const signals = { bull: [], bear: [] };
+    const push = (side, name) => signals[side].push(name);
+
+    // 1. EMA cross
+    const e20 = ema(c, 20), e50 = ema(c, 50), e200 = ema(c, 200);
+    if (e20[i] > e50[i] && c[i] > e200[i]) push("bull", "EMA-Trend");
+    if (e20[i] < e50[i] && c[i] < e200[i]) push("bear", "EMA-Trend");
+
+    // 2. MACD histogram
+    const mac = macd(c);
+    if (mac.hist[i] > 0 && mac.hist[i] > mac.hist[i - 1]) push("bull", "MACD");
+    if (mac.hist[i] < 0 && mac.hist[i] < mac.hist[i - 1]) push("bear", "MACD");
+
+    // 3. RSI
+    const r = rsi(c, 14);
+    if (r[i] < 30) push("bull", "RSI-oversold");
+    if (r[i] > 70) push("bear", "RSI-overbought");
+    if (r[i] > 55 && r[i] < 70) push("bull", "RSI-strength");
+    if (r[i] < 45 && r[i] > 30) push("bear", "RSI-weakness");
+
+    // 4. Bollinger position
+    const bb = bollinger(c, 20, 2);
+    if (c[i] < bb.lower[i]) push("bull", "BB-untere");
+    if (c[i] > bb.upper[i]) push("bear", "BB-obere");
+
+    // 5. Ichimoku cloud
+    const ich = ichimoku(h, l, c);
+    if (c[i] > Math.max(ich.senkouA[i], ich.senkouB[i])) push("bull", "Ichimoku-Cloud");
+    if (c[i] < Math.min(ich.senkouA[i], ich.senkouB[i])) push("bear", "Ichimoku-Cloud");
+
+    // 6. VWAP position
+    const vw = vwap(h, l, c, v);
+    if (c[i] > vw[i]) push("bull", "VWAP");
+    if (c[i] < vw[i]) push("bear", "VWAP");
+
+    // 7. Keltner breakout
+    const kc = keltner(h, l, c);
+    if (c[i] > kc.upper[i]) push("bull", "Keltner-Break");
+    if (c[i] < kc.lower[i]) push("bear", "Keltner-Break");
+
+    // 8. Divergence RSI
+    const div = detectDivergence(c, r, 30);
+    if (div.bullish) push("bull", "RSI-Divergenz");
+    if (div.bearish) push("bear", "RSI-Divergenz");
+
+    // 9. Stochastic
+    const st = stoch(h, l, c, 14, 3);
+    if (st.k[i] > st.d[i] && st.k[i] < 30) push("bull", "Stoch-Kreuz");
+    if (st.k[i] < st.d[i] && st.k[i] > 70) push("bear", "Stoch-Kreuz");
+
+    // 10. Volume above 20-avg (confirmation)
+    const volAvg = sma(v, 20)[i];
+    const volConfirm = v[i] > volAvg * 1.3;
+    if (volConfirm && signals.bull.length >= signals.bear.length) push("bull", "Volumen-Bestätigung");
+    if (volConfirm && signals.bear.length > signals.bull.length) push("bear", "Volumen-Bestätigung");
+
+    // 11. ADX trend strength
+    const adxVals = adx(h, l, c, 14);
+    if (adxVals[i] > 25) {
+        if (e20[i] > e50[i]) push("bull", "ADX-stark");
+        else push("bear", "ADX-stark");
+    }
+
+    // 12. Donchian breakout
+    const don = donchian(h, l, 20);
+    if (c[i] > don.upper[i - 1]) push("bull", "Donchian-High");
+    if (c[i] < don.lower[i - 1]) push("bear", "Donchian-Low");
+
+    const bullN = signals.bull.length;
+    const bearN = signals.bear.length;
+    const total = 12;
+    const net = bullN - bearN;
+    const side = net > 2 ? "long" : net < -2 ? "short" : "flat";
+    const score = Math.max(bullN, bearN);
+    return {
+        bull: signals.bull, bear: signals.bear,
+        bullCount: bullN, bearCount: bearN, total,
+        score, net, side,
+        confidence: score >= 8 ? "sehr hoch" : score >= 6 ? "hoch" : score >= 4 ? "mittel" : "niedrig",
+    };
+}
+
 function trueRange(h, l, c) {
     const out = [NaN];
     for (let i = 1; i < c.length; i++) {
@@ -1208,6 +1432,7 @@ function normalPdf(x, mean, std) {
 // ---------- exports ----------
 return {
     sma, ema, rsi, macd, bollinger, atr, adx, donchian, obv, stoch, williamsR, cci, mfi,
+    ichimoku, vwap, vwapBands, keltner, chandelier, detectDivergence, detectRegime, confluenceScore,
     closes, highs, lows, vols,
     STRATEGIES, ensemble,
     planTrade, forecast, assessRisk,

@@ -14,12 +14,60 @@
 </head>
 <body>
 
+<!-- news popup -->
 <div id="news-popup" class="news-popup hidden">
     <div class="news-popup-title"></div>
     <div class="news-popup-summary"></div>
     <div class="news-popup-meta">
         <span class="news-popup-source"></span>
         <button class="news-popup-close ghost">Schliessen</button>
+    </div>
+</div>
+
+<!-- info modal (opens when any ⓘ is tapped) -->
+<div id="info-modal" class="modal hidden">
+    <div class="modal-card info-modal-card">
+        <h2 id="info-title">Info</h2>
+        <div id="info-body"></div>
+        <div class="btn-row" style="margin-top:14px;">
+            <button class="primary" id="info-close">Verstanden</button>
+        </div>
+    </div>
+</div>
+
+<!-- onboarding -->
+<div id="onboarding" class="modal hidden">
+    <div class="modal-card">
+        <h2>Willkommen beim Trading Bot</h2>
+        <div id="onboarding-step" class="onboarding-step"></div>
+        <div class="btn-row">
+            <button id="ob-skip" class="ghost">Überspringen</button>
+            <button id="ob-next" class="primary">Weiter</button>
+        </div>
+    </div>
+</div>
+
+<!-- manual order modal -->
+<div id="order-modal" class="modal hidden">
+    <div class="modal-card">
+        <h2 id="order-title">Manueller Trade</h2>
+        <div id="order-body"></div>
+        <div class="btn-row">
+            <button id="order-cancel" class="ghost">Abbrechen</button>
+            <button id="order-submit" class="primary">Bestätigen</button>
+        </div>
+    </div>
+</div>
+
+<!-- partial close modal -->
+<div id="close-modal" class="modal hidden">
+    <div class="modal-card">
+        <h2>Position teilweise schliessen</h2>
+        <div id="close-body"></div>
+        <div class="btn-row">
+            <button id="close-cancel" class="ghost">Abbrechen</button>
+            <button id="close-submit" class="primary">Schliessen</button>
+        </div>
     </div>
 </div>
 
@@ -32,67 +80,68 @@
         </div>
     </div>
     <div class="status-pills">
-        <button id="lang-toggle" class="pill" title="Sprache"><span>DE</span></button>
-        <button id="theme-toggle" class="pill" title="Hell/Dunkel"><span>🌙</span></button>
         <div id="mode-pill" class="pill"><span class="dot"></span><span data-i18n="mode-manual">Manuell</span></div>
         <div id="status-pill" class="pill on"><span class="dot"></span><span>Live</span></div>
     </div>
 </header>
 
-<!-- Onboarding modal (first launch only) -->
-<div id="onboarding" class="modal hidden">
-    <div class="modal-card">
-        <h2>Willkommen beim Trading Bot</h2>
-        <div id="onboarding-step" class="onboarding-step"></div>
-        <div class="btn-row">
-            <button id="ob-skip" class="ghost">Überspringen</button>
-            <button id="ob-next" class="primary">Weiter</button>
-        </div>
-    </div>
-</div>
-
-<!-- Manual order modal -->
-<div id="order-modal" class="modal hidden">
-    <div class="modal-card">
-        <h2 id="order-title">Manueller Trade</h2>
-        <div id="order-body"></div>
-        <div class="btn-row">
-            <button id="order-cancel" class="ghost">Abbrechen</button>
-            <button id="order-submit" class="primary">Bestätigen</button>
-        </div>
-    </div>
-</div>
-
-<!-- Partial close modal -->
-<div id="close-modal" class="modal hidden">
-    <div class="modal-card">
-        <h2>Position teilweise schliessen</h2>
-        <div id="close-body"></div>
-        <div class="btn-row">
-            <button id="close-cancel" class="ghost">Abbrechen</button>
-            <button id="close-submit" class="primary">Schliessen</button>
-        </div>
-    </div>
-</div>
+<!-- MAIN TAB NAVIGATION -->
+<nav id="tabs" class="tab-nav">
+    <button class="tab-btn active" data-tab="dashboard"><span class="ic">📊</span><span>Übersicht</span></button>
+    <button class="tab-btn" data-tab="handeln"><span class="ic">💼</span><span>Handeln</span></button>
+    <button class="tab-btn" data-tab="markt"><span class="ic">🌍</span><span>Markt</span></button>
+    <button class="tab-btn" data-tab="analyse"><span class="ic">📈</span><span>Analyse</span></button>
+    <button class="tab-btn" data-tab="journal"><span class="ic">📒</span><span>Journal</span></button>
+    <button class="tab-btn" data-tab="einstellungen"><span class="ic">⚙</span><span>Einstellungen</span></button>
+</nav>
 
 <main>
 
-    <!-- big signal tile -->
-    <section id="signal-tile" class="signal grey">
-        <div class="signal-badge">Handelsentscheidung</div>
+<!-- =============================================================== -->
+<!-- TAB 1: ÜBERSICHT — Signal, Portfolio, Kill-Switch, Positionen  -->
+<!-- =============================================================== -->
+<section class="tab-pane active" data-pane="dashboard">
+
+    <div id="signal-tile" class="signal grey">
+        <div class="signal-badge">Handelsentscheidung <span class="info" data-info="signal">ⓘ</span></div>
         <div class="signal-label">HALTEN</div>
         <div class="signal-symbol">–</div>
         <div class="signal-price num">Lade Live-Daten von Binance ...</div>
-    </section>
+    </div>
 
-    <!-- Jarvis -->
-    <section class="card">
-        <h2>Jarvis · Sprachassistent <span class="badge" id="jarvis-badge">deaktiviert</span></h2>
+    <div class="card compact-portfolio">
+        <h2>Portfolio <span class="info" data-info="portfolio">ⓘ</span></h2>
+        <div class="mkt-grid">
+            <div class="mkt-tile"><div class="k">Equity</div><div class="v num" id="equity">10 000</div></div>
+            <div class="mkt-tile"><div class="k">EUR</div><div class="v num" id="equity-eur">–</div></div>
+            <div class="mkt-tile"><div class="k">Cash</div><div class="v num" id="cash">10 000</div></div>
+            <div class="mkt-tile"><div class="k">Positionen</div><div class="v num" id="pos-count">0</div></div>
+            <div class="mkt-tile"><div class="k">Real. PnL</div><div class="v num" id="pnl">0,00</div></div>
+            <div class="mkt-tile"><div class="k">Peak</div><div class="v num" id="peak-eq">–</div></div>
+        </div>
+        <div id="equity-chart-wrap"><svg id="equity-chart" viewBox="0 0 400 100" preserveAspectRatio="none"></svg></div>
+        <div class="btn-row" style="margin-top:12px;">
+            <button id="btn-scan" class="primary">Jetzt scannen</button>
+            <button id="btn-manual-trade" class="primary">+ Manueller Trade</button>
+        </div>
+        <div class="toggle-row" style="margin-top:10px;">
+            <div class="lbl"><strong id="mode-label">Manuell (Demo)</strong></div>
+            <div id="mode-toggle" class="toggle"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Kill-Switch &amp; Risiko <span class="info" data-info="killswitch">ⓘ</span></h2>
+        <div id="killswitch"></div>
+    </div>
+
+    <div class="card">
+        <h2>Jarvis · Sprach-KI <span class="badge" id="jarvis-badge">deaktiviert</span> <span class="info" data-info="jarvis">ⓘ</span></h2>
         <div id="jarvis-panel">
             <div id="jarvis-orb">J</div>
             <div id="jarvis-status">
                 <div class="title">Jarvis bereit</div>
-                <div class="subtitle">Spricht Signale, Take-Profits und Stops auf Deutsch. Läuft komplett im Browser – keine Cloud, keine Kosten.</div>
+                <div class="subtitle">Spricht Signale und Trades auf Deutsch.</div>
             </div>
         </div>
         <div id="jarvis-controls">
@@ -100,153 +149,30 @@
             <select id="jarvis-voice-picker" title="Stimme"></select>
         </div>
         <div id="jarvis-log"></div>
-    </section>
+    </div>
 
-    <!-- portfolio -->
-    <section class="card">
-        <h2>Portfolio <span class="badge">Paper · 10 000 USDT Start</span></h2>
-        <div class="row"><span>Equity</span><strong class="num" id="equity">10 000,00 USDT</strong></div>
-        <div class="row"><span>Equity in EUR</span><strong class="num" id="equity-eur">–</strong></div>
-        <div class="row"><span>Cash</span><strong class="num" id="cash">10 000,00 USDT</strong></div>
-        <div class="row"><span>Offene Positionen</span><strong class="num" id="pos-count">0</strong></div>
-        <div class="row"><span>Realisierter PnL</span><strong class="num" id="pnl">0,00 USDT</strong></div>
-        <div class="row"><span>Peak-Equity</span><strong class="num" id="peak-eq">–</strong></div>
-        <div class="row"><span>VaR (1 Tag · 95%)</span><strong class="num" id="var-cell" style="color:var(--amber)">–</strong></div>
-        <div class="row"><span>Expected Shortfall (95%)</span><strong class="num" id="es-cell" style="color:var(--red)">–</strong></div>
-        <div class="row"><span>Kelly-Fraction</span><strong class="num" id="kelly-cell">–</strong></div>
-        <div class="row"><span>Rolling Sharpe (30d)</span><strong class="num" id="sharpe-cell">–</strong></div>
-        <div class="row"><span>Sortino (30d)</span><strong class="num" id="sortino-cell">–</strong></div>
-        <div class="row"><span>Calmar-Ratio</span><strong class="num" id="calmar-cell">–</strong></div>
-        <div id="equity-chart-wrap"><svg id="equity-chart" viewBox="0 0 400 100" preserveAspectRatio="none"></svg></div>
-        <div class="btn-row">
-            <button id="btn-scan" class="primary">Jetzt scannen</button>
-            <button id="btn-reset" class="danger">Reset auf 10k</button>
-        </div>
-        <div class="btn-row" style="margin-top:6px;">
-            <button id="btn-nuke" class="danger" style="font-size:0.75rem; padding:8px;">🧨 Notfall: ALLES zurücksetzen (auch Journal, Watchlist, Alarme)</button>
-        </div>
-        <div class="toggle-row">
-            <div class="lbl"><strong id="mode-label">Manuell (Demo)</strong> – Signale bestätigen · Vollautomatik wenn an</div>
-            <div id="mode-toggle" class="toggle"></div>
-        </div>
-    </section>
-
-    <!-- kill switch panel -->
-    <section class="card">
-        <h2>Kill-Switch &amp; Risiko-Limits</h2>
-        <div id="killswitch"></div>
-    </section>
-
-    <!-- market context -->
-    <section class="card">
-        <h2>Markt-Kontext <span class="badge">CoinGecko</span></h2>
-        <div id="market-ctx"></div>
-    </section>
-
-    <!-- on-chain metrics -->
-    <section class="card">
-        <h2>On-Chain (Bitcoin) <span class="badge">mempool.space</span></h2>
-        <div id="onchain"></div>
-    </section>
-
-    <!-- symbol picker -->
-    <section class="card">
-        <h2>Handelspaare <span class="badge"><span id="sym-count">–</span> von <span id="sym-total">–</span> aktiv</span></h2>
-        <div id="symbol-picker"></div>
-    </section>
-
-    <!-- watchlist / price alerts -->
-    <section class="card">
-        <h2>Watchlist &amp; Preis-Alarme</h2>
-        <div class="watchlist-add">
-            <select id="watch-symbol"></select>
-            <select id="watch-direction">
-                <option value="above">steigt über</option>
-                <option value="below">fällt unter</option>
-            </select>
-            <input type="number" id="watch-price" placeholder="Preis" step="0.0001"/>
-            <button id="watch-add" class="primary">+</button>
-        </div>
-        <div id="watchlist"></div>
-    </section>
-
-    <!-- 24h market snapshot -->
-    <section class="card">
-        <h2>24h Marktübersicht <span class="badge">Binance</span></h2>
-        <div style="overflow-x:auto;"><table id="ticker24" class="perf-table"></table></div>
-    </section>
-
-    <!-- portfolio allocation -->
-    <section class="card">
-        <h2>Portfolio-Aufteilung</h2>
-        <div id="allocation"></div>
-    </section>
-
-    <!-- multi-tf matrix -->
-    <section class="card">
-        <h2>Multi-Timeframe Alignment</h2>
-        <div id="matrix" class="matrix"></div>
-    </section>
-
-    <!-- fear & greed -->
-    <section class="card">
-        <h2>Fear &amp; Greed Index</h2>
-        <div class="fng">
-            <div class="fng-dial"><div class="fng-inner num" id="fng-value">–<div class="fng-needle" id="fng-needle"></div></div></div>
-            <div>
-                <div class="fng-label">Marktstimmung</div>
-                <div id="fng-class" class="fng-class">lade …</div>
-                <div class="fng-hint">&lt; 20 = extreme Angst · &gt; 80 = extreme Gier · Quelle: alternative.me</div>
-            </div>
-        </div>
-        <div class="fng-composite">
-            <div class="fng-comp-head">
-                <span>Composite F&amp;G (Binance-Daten)</span>
-                <strong class="num" id="fng-binance">–</strong>
-            </div>
-            <div class="fng-comp-hint">
-                Aus BTC-RSI + ATR-Vola + Drawdown + Funding-Rate + Long/Short-Ratio berechnet.
-            </div>
-            <div id="fng-parts" class="fng-parts"></div>
-        </div>
-    </section>
-
-    <!-- TV chart -->
-    <section class="card">
-        <h2>Live-Chart <span class="badge">TradingView</span></h2>
-        <div class="btn-row" style="margin-bottom:8px;" id="tv-symbols"></div>
-        <div id="tv-wrap">
-            <iframe id="tv-iframe" src="" style="width:100%; height:100%; border:0;" allowfullscreen></iframe>
-        </div>
-    </section>
-
-    <!-- positions -->
-    <section class="card">
-        <h2>Positionen</h2>
+    <div class="card">
+        <h2>Offene Positionen <span class="info" data-info="positions">ⓘ</span></h2>
         <div id="positions"></div>
-    </section>
+    </div>
 
-    <!-- signals log -->
-    <section class="card">
-        <h2>Letzte Scans</h2>
-        <div id="signals"></div>
-    </section>
+</section>
 
-    <!-- futures data — funding & long/short -->
-    <section class="card">
-        <h2>Futures-Sentiment <span class="badge">Binance</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Extreme positive Funding = überkaufte Longs (Short-Warnung). Long/Short-Ratio &gt; 3 = crowded long.
+<!-- =============================================================== -->
+<!-- TAB 2: HANDELN — alle aktiven Order-Typen                       -->
+<!-- =============================================================== -->
+<section class="tab-pane" data-pane="handeln">
+
+    <div class="card">
+        <h2>Manueller Trade <span class="info" data-info="manual-trade">ⓘ</span></h2>
+        <div class="perf-hint">Direkt aus dem 24h-Ticker oder über den Button unten einen Trade platzieren.</div>
+        <div class="btn-row" style="margin-top:8px;">
+            <button id="btn-manual-trade-2" class="primary" style="grid-column: span 2;">+ Neuen Trade eröffnen</button>
         </div>
-        <div style="overflow-x:auto;"><table id="futures-table" class="perf-table"></table></div>
-    </section>
+    </div>
 
-    <!-- limit orders -->
-    <section class="card">
-        <h2>Limit-Orders <span class="badge" id="limit-count">0 offen</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Wartet bis der Preis dein Level erreicht, dann führt Bot automatisch aus.
-        </div>
+    <div class="card">
+        <h2>Limit-Orders <span class="badge" id="limit-count">0 offen</span> <span class="info" data-info="limit-orders">ⓘ</span></h2>
         <div class="watchlist-add">
             <select id="limit-symbol"></select>
             <select id="limit-side">
@@ -258,101 +184,158 @@
             <button id="limit-add" class="primary" style="grid-column: span 2;">+ Limit-Order</button>
         </div>
         <div id="limit-list"></div>
-    </section>
+    </div>
 
-    <!-- DCA scheduler -->
-    <section class="card">
-        <h2>DCA-Sparplan <span class="badge">Buffett-Style</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Kauft wöchentlich in BTC/ETH/BNB, aber nur wenn RSI &lt; 30 (überverkauft). "Be greedy when others are fearful."
-        </div>
+    <div class="card">
+        <h2>DCA-Sparplan <span class="badge">Buffett</span> <span class="info" data-info="dca">ⓘ</span></h2>
         <div id="dca-panel"></div>
-    </section>
+    </div>
 
-    <!-- Grid trading -->
-    <section class="card">
-        <h2>Grid-Trading <span class="badge">Range-Markt</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Setzt automatisch Kauf-Orders unter aktuellem Preis und Verkauf-Orders darüber im Raster. Ideal für seitwärts laufende Märkte.
-        </div>
+    <div class="card">
+        <h2>Grid-Trading <span class="badge">Range-Markt</span> <span class="info" data-info="grid">ⓘ</span></h2>
         <div id="grid-panel"></div>
-    </section>
+    </div>
 
-    <!-- Portfolio rebalancing -->
-    <section class="card">
-        <h2>Portfolio-Rebalancing <span class="badge">Ziel-Allokation</span></h2>
+    <div class="card">
+        <h2>Portfolio-Rebalancing <span class="info" data-info="rebalance">ⓘ</span></h2>
         <div id="rebalance-panel"></div>
-    </section>
+    </div>
 
-    <!-- Pair trading -->
-    <section class="card">
-        <h2>Pair-Trading <span class="badge">Market-neutral</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Long das relativ günstige Asset + Short das relativ teure. Verdient an Konvergenz, egal ob Markt steigt oder fällt.
-        </div>
+    <div class="card">
+        <h2>Pair-Trading <span class="badge">Market-neutral</span> <span class="info" data-info="pair">ⓘ</span></h2>
         <div id="pair-panel"></div>
-    </section>
+    </div>
 
-    <!-- economic calendar -->
-    <section class="card">
-        <h2>Makro-Kalender <span class="badge">FOMC · CPI · NFP · EZB</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Rote Zone = binnen 24h. Volatilität steigt bei Nachrichten stark — Positionsgrösse ggf. reduzieren.
+    <div class="card">
+        <h2>Watchlist &amp; Preis-Alarme <span class="info" data-info="watchlist">ⓘ</span></h2>
+        <div class="watchlist-add">
+            <select id="watch-symbol"></select>
+            <select id="watch-direction">
+                <option value="above">steigt über</option>
+                <option value="below">fällt unter</option>
+            </select>
+            <input type="number" id="watch-price" placeholder="Preis" step="0.0001"/>
+            <button id="watch-add" class="primary">+</button>
         </div>
-        <div id="econ-calendar"></div>
-    </section>
+        <div id="watchlist"></div>
+    </div>
 
-    <!-- whale transfers -->
-    <section class="card">
-        <h2>Whale-Transfers <span class="badge">&gt; 10 BTC</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Grosse Bitcoin-Bewegungen aus dem Mempool (mempool.space).
+    <div class="card">
+        <h2>Letzte Scans <span class="info" data-info="scans">ⓘ</span></h2>
+        <div id="signals"></div>
+    </div>
+
+</section>
+
+<!-- =============================================================== -->
+<!-- TAB 3: MARKT — Charts, Sentiment, News, Kalender                -->
+<!-- =============================================================== -->
+<section class="tab-pane" data-pane="markt">
+
+    <div class="card">
+        <h2>Fear &amp; Greed <span class="info" data-info="fng">ⓘ</span></h2>
+        <div class="fng">
+            <div class="fng-dial"><div class="fng-inner num" id="fng-value">–<div class="fng-needle" id="fng-needle"></div></div></div>
+            <div>
+                <div class="fng-label">Marktstimmung</div>
+                <div id="fng-class" class="fng-class">lade …</div>
+                <div class="fng-hint">&lt; 20 = extreme Angst · &gt; 80 = extreme Gier</div>
+            </div>
         </div>
+        <div class="fng-composite">
+            <div class="fng-comp-head">
+                <span>Composite (Binance) <span class="info" data-info="fng-composite">ⓘ</span></span>
+                <strong class="num" id="fng-binance">–</strong>
+            </div>
+            <div id="fng-parts" class="fng-parts"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Markt-Regime <span class="badge" id="regime-badge">?</span> <span class="info" data-info="regime">ⓘ</span></h2>
+        <div id="regime-panel"></div>
+    </div>
+
+    <div class="card">
+        <h2>Live-Chart <span class="info" data-info="tv-chart">ⓘ</span></h2>
+        <div class="btn-row" style="margin-bottom:8px;" id="tv-symbols"></div>
+        <div id="tv-wrap">
+            <iframe id="tv-iframe" src="" style="width:100%; height:100%; border:0;" allowfullscreen></iframe>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>24h Marktübersicht <span class="badge">Binance</span> <span class="info" data-info="ticker24">ⓘ</span></h2>
+        <div style="overflow-x:auto;"><table id="ticker24" class="perf-table"></table></div>
+    </div>
+
+    <div class="card">
+        <h2>Multi-Timeframe <span class="info" data-info="multi-tf">ⓘ</span></h2>
+        <div id="matrix" class="matrix"></div>
+    </div>
+
+    <div class="card">
+        <h2>Markt-Kontext <span class="badge">CoinGecko</span> <span class="info" data-info="market-ctx">ⓘ</span></h2>
+        <div id="market-ctx"></div>
+    </div>
+
+    <div class="card">
+        <h2>On-Chain <span class="badge">Bitcoin</span> <span class="info" data-info="onchain">ⓘ</span></h2>
+        <div id="onchain"></div>
+    </div>
+
+    <div class="card">
+        <h2>Whale-Transfers <span class="info" data-info="whales">ⓘ</span></h2>
         <div id="whale-list"></div>
-    </section>
+    </div>
 
-    <!-- alpha decay -->
-    <section class="card">
-        <h2>Alpha-Decay <span class="badge">Strategie-Lebensdauer</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Bucket-PnL pro Strategie über die Zeit. Steiler Abfall = Edge verbraucht.
-        </div>
-        <div id="alpha-decay"></div>
-    </section>
+    <div class="card">
+        <h2>Makro-Kalender <span class="info" data-info="econ-cal">ⓘ</span></h2>
+        <div id="econ-calendar"></div>
+    </div>
 
-    <!-- correlation heatmap -->
-    <section class="card">
-        <h2>Korrelations-Matrix <span class="badge">50 Bars</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Rote Zellen = hohe Korrelation. Zwei stark korrelierte Assets sind kein Diversifikationsschutz.
-        </div>
-        <div id="corr-matrix" style="overflow-x:auto;"></div>
-    </section>
+    <div class="card">
+        <h2>Futures-Sentiment <span class="info" data-info="futures">ⓘ</span></h2>
+        <div style="overflow-x:auto;"><table id="futures-table" class="perf-table"></table></div>
+    </div>
 
-    <!-- return distribution histogram -->
-    <section class="card">
-        <h2>Return-Verteilung <span class="badge">Trade-PnL</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Histogramm aller abgeschlossenen Trade-PnLs. Fette rechte Flanke = Trend-System, symmetrisch = Mean-Rev.
-        </div>
-        <div id="return-hist"></div>
-    </section>
+    <div class="card">
+        <h2>Live-News <span class="badge" id="news-count">–</span> <span class="info" data-info="news">ⓘ</span></h2>
+        <div id="news-list"></div>
+    </div>
 
-    <!-- adaptive weights -->
-    <section class="card">
-        <h2>Adaptive Strategie-Gewichte <span class="badge">Self-improving</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Bot lernt selbst welche Strategien aktuell funktionieren. Gewinnende Strategien bekommen mehr Stimmrecht.
-        </div>
-        <div id="adaptive-weights"></div>
-    </section>
+</section>
 
-    <!-- backtest -->
-    <section class="card">
-        <h2>Backtest-Modus <span class="badge">Was hätte ich verdient?</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Simuliert den Bot rückwirkend auf echten Binance-Kursen.
+<!-- =============================================================== -->
+<!-- TAB 4: ANALYSE — Metriken, Backtest, Strategien                 -->
+<!-- =============================================================== -->
+<section class="tab-pane" data-pane="analyse">
+
+    <div class="card">
+        <h2>Risiko-Metriken <span class="info" data-info="risk-metrics">ⓘ</span></h2>
+        <div class="mkt-grid">
+            <div class="mkt-tile"><div class="k">VaR 95% <span class="info info-mini" data-info="var">ⓘ</span></div><div class="v num" id="var-cell" style="color:var(--amber)">–</div></div>
+            <div class="mkt-tile"><div class="k">ES 95% <span class="info info-mini" data-info="es">ⓘ</span></div><div class="v num" id="es-cell" style="color:var(--red)">–</div></div>
+            <div class="mkt-tile"><div class="k">Kelly <span class="info info-mini" data-info="kelly">ⓘ</span></div><div class="v num" id="kelly-cell">–</div></div>
+            <div class="mkt-tile"><div class="k">Sharpe <span class="info info-mini" data-info="sharpe">ⓘ</span></div><div class="v num" id="sharpe-cell">–</div></div>
+            <div class="mkt-tile"><div class="k">Sortino <span class="info info-mini" data-info="sortino">ⓘ</span></div><div class="v num" id="sortino-cell">–</div></div>
+            <div class="mkt-tile"><div class="k">Calmar <span class="info info-mini" data-info="calmar">ⓘ</span></div><div class="v num" id="calmar-cell">–</div></div>
         </div>
+    </div>
+
+    <div class="card">
+        <h2>Portfolio-Aufteilung <span class="info" data-info="allocation">ⓘ</span></h2>
+        <div id="allocation"></div>
+    </div>
+
+    <div class="card">
+        <h2>Konfluenz-Panel <span class="badge">Live</span> <span class="info" data-info="confluence">ⓘ</span></h2>
+        <div class="perf-hint">Wie viele Indikatoren stimmen bei jedem Symbol überein? Hohe Werte = sichere Signale.</div>
+        <div id="confluence-panel"></div>
+    </div>
+
+    <div class="card">
+        <h2>Backtest <span class="badge">Was hätte ich verdient?</span> <span class="info" data-info="backtest">ⓘ</span></h2>
         <div class="watchlist-add">
             <select id="bt-symbol"></select>
             <select id="bt-days">
@@ -364,23 +347,47 @@
             <button id="bt-run" class="primary" style="grid-column: span 2;">Backtest starten</button>
         </div>
         <div id="bt-result"></div>
-    </section>
+    </div>
 
-    <!-- news -->
-    <section class="card">
-        <h2>Live-News <span class="badge" id="news-count">–</span></h2>
-        <div id="news-list"></div>
-    </section>
+    <div class="card">
+        <h2>Return-Verteilung <span class="info" data-info="return-hist">ⓘ</span></h2>
+        <div id="return-hist"></div>
+    </div>
 
-    <!-- per-strategy performance -->
-    <section class="card">
-        <h2>Strategie-Performance</h2>
+    <div class="card">
+        <h2>Korrelations-Matrix <span class="info" data-info="correlation">ⓘ</span></h2>
+        <div id="corr-matrix" style="overflow-x:auto;"></div>
+    </div>
+
+    <div class="card">
+        <h2>Alpha-Decay <span class="info" data-info="alpha-decay">ⓘ</span></h2>
+        <div id="alpha-decay"></div>
+    </div>
+
+    <div class="card">
+        <h2>Strategie-Performance <span class="info" data-info="strat-perf">ⓘ</span></h2>
         <div id="strat-perf"></div>
-    </section>
+    </div>
 
-    <!-- journal -->
-    <section class="card" id="journal-section">
-        <h2>Handels-Journal <span class="badge">Steuer-tauglich</span></h2>
+    <div class="card">
+        <h2>Adaptive Gewichte <span class="badge">Self-improving</span> <span class="info" data-info="adaptive">ⓘ</span></h2>
+        <div id="adaptive-weights"></div>
+    </div>
+
+    <div class="card">
+        <h2>Aktive Strategien <span class="badge" id="strat-count">–</span> <span class="info" data-info="strategies">ⓘ</span></h2>
+        <div id="strategies"></div>
+    </div>
+
+</section>
+
+<!-- =============================================================== -->
+<!-- TAB 5: JOURNAL — Trade-Historie, Steuer                         -->
+<!-- =============================================================== -->
+<section class="tab-pane" data-pane="journal">
+
+    <div class="card" id="journal-section">
+        <h2>Handels-Journal <span class="badge">Steuer-tauglich</span> <span class="info" data-info="journal">ⓘ</span></h2>
         <div class="journal-controls">
             <div class="journal-tabs">
                 <button data-view="day" class="jv-tab primary">Tag</button>
@@ -389,8 +396,8 @@
                 <button data-view="all" class="jv-tab">Gesamt</button>
             </div>
             <input type="date" id="journal-date" class="journal-date"/>
-            <select id="journal-method" title="Lot-Zuordnungs-Methode für Teil-Schliessungen">
-                <option value="fifo">FIFO (Steuer-Standard)</option>
+            <select id="journal-method" title="Lot-Zuordnungs-Methode">
+                <option value="fifo">FIFO</option>
                 <option value="lifo">LIFO</option>
             </select>
         </div>
@@ -402,47 +409,63 @@
             <button id="btn-export-csv">CSV exportieren</button>
             <button id="btn-print" class="primary">Drucken / PDF</button>
         </div>
-    </section>
+    </div>
 
-    <!-- strategies chips -->
-    <section class="card">
-        <h2>Aktive Strategien <span class="badge" id="strat-count">–</span></h2>
-        <div id="strategies"></div>
-    </section>
+</section>
 
-    <!-- Notifications, Backup, Health, QR -->
-    <section class="card">
-        <h2>Benachrichtigungen &amp; Tools</h2>
-        <div id="tools-panel"></div>
-    </section>
+<!-- =============================================================== -->
+<!-- TAB 6: EINSTELLUNGEN                                             -->
+<!-- =============================================================== -->
+<section class="tab-pane" data-pane="einstellungen">
 
-    <!-- External integrations: Telegram, Email, Whale-Alert -->
-    <section class="card">
-        <h2>Externe Integrationen <span class="badge">Bring your own token</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Alle Credentials bleiben lokal im Browser (localStorage). Werden niemals an einen Server gesendet.
+    <div class="card">
+        <h2>Erscheinungsbild <span class="info" data-info="appearance">ⓘ</span></h2>
+        <div class="settings-row">
+            <span>Design</span>
+            <button id="theme-toggle" class="ghost">🌙 Wechseln</button>
         </div>
+        <div class="settings-row">
+            <span>Sprache</span>
+            <button id="lang-toggle" class="ghost">DE / EN</button>
+        </div>
+        <div class="settings-row">
+            <span>Tour neu starten</span>
+            <button id="tour-restart" class="ghost">Onboarding</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Handelspaare <span class="badge"><span id="sym-count">–</span>/<span id="sym-total">–</span></span> <span class="info" data-info="symbols">ⓘ</span></h2>
+        <div id="symbol-picker"></div>
+    </div>
+
+    <div class="card">
+        <h2>Risiko-Einstellungen <span class="info" data-info="risk-config">ⓘ</span></h2>
+        <div id="risk-config"></div>
+    </div>
+
+    <div class="card">
+        <h2>Externe Integrationen <span class="info" data-info="integrations">ⓘ</span></h2>
         <div id="integrations-panel"></div>
-    </section>
+    </div>
 
-    <!-- Testnet UI -->
-    <section class="card">
-        <h2>Binance Testnet <span class="badge">Echte Orders · Testgeld</span></h2>
-        <div class="perf-hint" style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">
-            Wenn aktiviert, gehen Bot-Trades zusätzlich als echte Orders auf testnet.binance.vision. Kostenlos, keine echten Coins.
-            API-Keys hier holen: <a href="https://testnet.binance.vision/" target="_blank" rel="noopener" style="color:var(--accent);">testnet.binance.vision</a>
-        </div>
+    <div class="card">
+        <h2>Binance Testnet <span class="badge">Echte Orders · Testgeld</span> <span class="info" data-info="testnet">ⓘ</span></h2>
         <div id="testnet-panel"></div>
-    </section>
+    </div>
 
-    <!-- Health status -->
-    <section class="card">
-        <h2>System-Health <span class="badge">API-Endpoints</span></h2>
+    <div class="card">
+        <h2>Benachrichtigungen &amp; Tools <span class="info" data-info="tools">ⓘ</span></h2>
+        <div id="tools-panel"></div>
+    </div>
+
+    <div class="card">
+        <h2>System-Health <span class="info" data-info="health">ⓘ</span></h2>
         <div id="health-panel"></div>
-    </section>
+    </div>
 
-    <section class="card">
-        <h2>Rulebook</h2>
+    <div class="card">
+        <h2>Rulebook <span class="info" data-info="rulebook">ⓘ</span></h2>
         <ol id="rules">
             <li>Kapitalerhalt zuerst, Gewinn danach.</li>
             <li>Kein Trade ohne festgelegten Stop.</li>
@@ -452,10 +475,20 @@
             <li>Volumen bestätigt Preis. Preis ohne Volumen ist Rauschen.</li>
             <li>Nie hinterher rennen. Das nächste Setup kommt in Minuten.</li>
             <li>Nach 3 Verlusten in Folge: Pause und Review.</li>
-            <li>Jeden Trade journalisieren: Setup, Idee, Ausführung, Ergebnis, Lektion.</li>
+            <li>Jeden Trade journalisieren.</li>
             <li>Kill-Switch auf Tagesverlust und Drawdown ist nicht verhandelbar.</li>
         </ol>
-    </section>
+    </div>
+
+    <div class="card">
+        <h2>Gefahren-Zone <span class="info" data-info="danger-zone">ⓘ</span></h2>
+        <div class="btn-row">
+            <button id="btn-reset" class="danger">Reset auf 10k</button>
+            <button id="btn-nuke" class="danger">🧨 Alles zurücksetzen</button>
+        </div>
+    </div>
+
+</section>
 
 </main>
 

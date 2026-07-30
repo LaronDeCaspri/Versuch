@@ -1764,13 +1764,16 @@ function initTheme() {
     document.documentElement.setAttribute("data-theme", saved);
     const btn = document.getElementById("theme-toggle");
     if (btn) {
-        btn.querySelector("span").textContent = saved === "light" ? "☀" : "🌙";
+        const setLabel = (mode) => {
+            btn.textContent = mode === "light" ? "☀ Hell-Modus" : "🌙 Dunkel-Modus";
+        };
+        setLabel(saved);
         btn.onclick = () => {
             const cur = document.documentElement.getAttribute("data-theme") || "dark";
             const next = cur === "light" ? "dark" : "light";
             document.documentElement.setAttribute("data-theme", next);
             localStorage.setItem("tb_theme", next);
-            btn.querySelector("span").textContent = next === "light" ? "☀" : "🌙";
+            setLabel(next);
         };
     }
 }
@@ -2436,8 +2439,8 @@ function applyLang() {
     document.querySelectorAll("[data-i18n]").forEach((el) => {
         el.textContent = t(el.dataset.i18n);
     });
-    const b = $("#lang-toggle span");
-    if (b) b.textContent = lang.toUpperCase();
+    const btn = document.getElementById("lang-toggle");
+    if (btn) btn.textContent = lang === "de" ? "🇩🇪 Deutsch (Klick → EN)" : "🇬🇧 English (Klick → DE)";
 }
 function initLang() {
     applyLang();
@@ -3277,10 +3280,695 @@ renderAll = function() {
     renderTestnetPanel();
 };
 
+// =====================================================================
+// v8: Tab navigation, Info-popup system, Regime detection, Confluence,
+//      Risk-config panel, "safer trades" refinements
+// =====================================================================
+
+// ---- Tab switching ----
+function initTabs() {
+    const buttons = document.querySelectorAll(".tab-btn");
+    const panes = document.querySelectorAll(".tab-pane");
+    const savedTab = localStorage.getItem("tb_active_tab") || "dashboard";
+    function activate(name) {
+        buttons.forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+        panes.forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
+        localStorage.setItem("tb_active_tab", name);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    buttons.forEach((b) => b.onclick = () => activate(b.dataset.tab));
+    activate(savedTab);
+}
+
+// ---- INFO POPUP DATABASE — plain-language explanations ----
+const INFO_DB = {
+    "signal": {
+        title: "Handels-Signal",
+        body: `
+            <p>Das grosse Feld zeigt was der Bot <strong>gerade tun würde</strong>. Grün = kaufen, Rot = verkaufen, Grau = warten.</p>
+            <p>Darunter siehst du:</p>
+            <ul>
+                <li><strong>Einstiegspreis</strong> — wo du kaufst</li>
+                <li><strong>Stop-Loss</strong> — wo du automatisch aussteigst wenn's schief geht</li>
+                <li><strong>Take-Profits</strong> — Gewinnziele in 3 Stufen</li>
+                <li><strong>Risiko-Bewertung</strong> — wie unsicher der Trade ist (0-100)</li>
+                <li><strong>Prognose</strong> — was du gewinnst oder verlierst</li>
+            </ul>
+            <div class="example">💡 <strong>Manueller Modus</strong>: du bestätigst. <strong>Auto-Modus</strong>: der Bot macht's von allein — aber nur bei sehr sicheren Setups.</div>
+        `,
+    },
+    "portfolio": {
+        title: "Portfolio-Übersicht",
+        body: `
+            <p><strong>Equity</strong> — dein Gesamtvermögen (Cash + Wert aller Positionen)</p>
+            <p><strong>Cash</strong> — freies Geld für neue Trades</p>
+            <p><strong>Realisierter PnL</strong> — Gewinn/Verlust aus bereits geschlossenen Trades</p>
+            <p><strong>Peak-Equity</strong> — dein höchstes Vermögen bisher (wichtig für Drawdown-Berechnung)</p>
+            <p><strong>EUR</strong> — Umrechnung deines Equity in Euro (Live-Wechselkurs).</p>
+        `,
+    },
+    "killswitch": {
+        title: "Kill-Switch",
+        body: `
+            <p>Automatische Not-Bremse. Der Bot <strong>stoppt sofort</strong> wenn:</p>
+            <ul>
+                <li>Du an einem Tag <strong>mehr als 4%</strong> verlierst</li>
+                <li>Dein Vermögen <strong>mehr als 15%</strong> vom Peak entfernt ist</li>
+                <li>Zu viele Positionen offen sind (max. 12)</li>
+            </ul>
+            <div class="warn">⚠ Nach Auslösung handelt der Bot bis zum nächsten Tag NICHT mehr. Du kannst manuell entschärfen — dann wird der Peak auf das aktuelle Level zurückgesetzt.</div>
+            <p><strong>Warum wichtig?</strong> Der Kapitalerhalt hat immer Vorrang vor dem Gewinn. Ein Trader ohne Stopps ist ein toter Trader.</p>
+        `,
+    },
+    "jarvis": {
+        title: "Jarvis — Sprach-KI",
+        body: `
+            <p>Jarvis spricht dir auf Deutsch <strong>jedes Signal</strong>, jeden Stop-Loss und Take-Profit vor. Läuft komplett im Browser mit der Web-Speech-API — keine Cloud, keine Kosten.</p>
+            <p>Aktivieren, Stimme wählen, fertig. Perfekt wenn du nebenbei arbeitest — dein Handy sagt Bescheid wenn was passiert.</p>
+        `,
+    },
+    "positions": {
+        title: "Offene Positionen",
+        body: `
+            <p>Jede Karte zeigt einen aktiven Trade mit:</p>
+            <ul>
+                <li><strong>Investiert</strong> — wieviel Geld drin steckt</li>
+                <li><strong>Aktueller Wert</strong> — was du jetzt bekommen würdest</li>
+                <li><strong>PnL / R-Multiple</strong> — Gewinn in USDT und in "Risk-Einheiten"</li>
+                <li><strong>Stop-Loss</strong> — dein Ausstieg nach unten (wird bei Gewinn nachgezogen!)</li>
+                <li><strong>Erwarteter Gewinn</strong> — was du bei allen TPs kassieren würdest</li>
+            </ul>
+            <p>Du kannst jederzeit <strong>voll</strong> oder <strong>teilweise</strong> schliessen.</p>
+        `,
+    },
+    "manual-trade": {
+        title: "Manueller Trade",
+        body: `
+            <p>Selbst einen Trade eröffnen. Du wählst:</p>
+            <ul>
+                <li><strong>Symbol</strong> (z.B. BTC/USDT)</li>
+                <li><strong>Richtung</strong> — Long (steigt) oder Short (fällt)</li>
+                <li><strong>Grösse</strong> — als % deines Cash</li>
+            </ul>
+            <p>Stop-Loss und Take-Profit werden <strong>automatisch</strong> per ATR berechnet — kein Trade ohne Stop.</p>
+        `,
+    },
+    "limit-orders": {
+        title: "Limit-Orders",
+        body: `
+            <p>Warten bis der Preis dein gewünschtes Level erreicht, dann automatisch ausführen.</p>
+            <div class="example">Beispiel: BTC steht bei 65 000. Du willst nur kaufen wenn's auf 62 000 fällt. → LONG-Limit bei 62 000. Sobald der Preis dort ist, wird's ausgeführt.</div>
+            <p>Perfekt für Support/Widerstand-Levels oder wenn du auf einen Rücksetzer wartest.</p>
+        `,
+    },
+    "dca": {
+        title: "DCA-Sparplan",
+        body: `
+            <p><strong>Dollar Cost Averaging</strong> nach Warren Buffett: regelmässig kaufen, aber nur wenn Angst am Markt herrscht.</p>
+            <p>Der Bot kauft <strong>wöchentlich</strong> für den eingestellten Betrag in BTC/ETH/BNB — <strong>aber nur wenn der RSI unter 30 ist</strong> (überverkauft).</p>
+            <div class="example">💡 So kaufst du automatisch günstig ein und verzichtest wenn's teuer ist. Zeitgetriebene Buy-Strategie ohne Emotionen.</div>
+        `,
+    },
+    "grid": {
+        title: "Grid-Trading",
+        body: `
+            <p>Für <strong>Seitwärts-Märkte</strong>: der Bot setzt gleichzeitig viele Kauf- und Verkauf-Limits im Raster um den aktuellen Preis.</p>
+            <div class="example">Beispiel: BTC 65 000, Range ±4%, 5 Levels → 5 Kauf-Limits zwischen 62 400 und 64 480, 5 Verkauf-Limits zwischen 65 520 und 67 600.</div>
+            <p>Bei jeder Bewegung wird ein Level gefüllt. Verdient stetig kleine Gewinne solange der Preis pendelt.</p>
+            <div class="warn">⚠ Nicht ideal in klaren Trends — dann verlierst du auf der falschen Seite.</div>
+        `,
+    },
+    "rebalance": {
+        title: "Portfolio-Rebalancing",
+        body: `
+            <p>Du definierst eine <strong>Ziel-Verteilung</strong> (z.B. 30% BTC, 20% ETH, 10% SOL). Der Bot vergleicht regelmässig Ist vs Ziel und kauft/verkauft nach — automatisch.</p>
+            <p><strong>Toleranz-Cap</strong> verhindert, dass wegen 0,3% Abweichung ständig gehandelt wird.</p>
+            <div class="example">Klassisches Ray-Dalio-Prinzip: verkaufe was gestiegen ist, kaufe was gefallen ist. Diszipliniertes "buy low, sell high".</div>
+        `,
+    },
+    "pair": {
+        title: "Pair-Trading",
+        body: `
+            <p><strong>Marktneutrale Strategie</strong>: gleichzeitig ein Asset kaufen und ein anderes leerverkaufen.</p>
+            <p>Der Bot beobachtet das Verhältnis zwischen zwei Coins (z.B. ETH/BTC). Wenn es zu weit vom Mittelwert entfernt ist, wettet er dass es wieder zurückkehrt.</p>
+            <div class="example">ETH/BTC = 0.045, Mittel = 0.055 → ETH ist relativ günstig. Long ETH + Short BTC. Wenn Ratio zurück zu 0.055 geht → Gewinn, egal ob der Gesamtmarkt steigt oder fällt.</div>
+        `,
+    },
+    "watchlist": {
+        title: "Watchlist &amp; Preis-Alarme",
+        body: `
+            <p>Preis-Alarme ohne Trade-Ausführung. Der Bot sagt dir Bescheid wenn ein Level erreicht wird — via Jarvis-Stimme oder Push-Nachricht.</p>
+            <p>Ideal um Support/Widerstand zu überwachen.</p>
+        `,
+    },
+    "scans": {
+        title: "Letzte Scans",
+        body: `
+            <p>Zeigt was der Bot bei seinem letzten Scan (alle 30 Sek.) gefunden hat: welche Symbole waren Kauf/Verkauf/Halten und mit welchem Score.</p>
+            <p>Score &gt; 3.0 + Agreement &gt; 3 Strategien = Bot handelt (im Auto-Modus).</p>
+        `,
+    },
+    "fng": {
+        title: "Fear &amp; Greed Index",
+        body: `
+            <p>Zeigt die aktuelle <strong>Marktstimmung</strong> von 0 (extreme Angst) bis 100 (extreme Gier).</p>
+            <ul>
+                <li>&lt; 20 → alle in Panik → gute Kaufgelegenheit ("Buffett-Zone")</li>
+                <li>&gt; 80 → euphorische Gier → Vorsicht, meist bald Rücksetzer</li>
+                <li>40-60 → neutraler Markt</li>
+            </ul>
+            <p>Basiert auf Volatilität, Volumen, Social Media, BTC-Dominanz und Google-Trends.</p>
+        `,
+    },
+    "fng-composite": {
+        title: "Composite F&amp;G",
+        body: `
+            <p>Alternative Berechnung <strong>aus Binance-Daten in Echtzeit</strong>: RSI, Vola, Drawdown, Funding-Rate, Long/Short-Ratio.</p>
+            <p>Vergleich mit dem alternative.me Index gibt zweite Bestätigung.</p>
+        `,
+    },
+    "regime": {
+        title: "Markt-Regime",
+        body: `
+            <p>Erkennt automatisch in welchem Markt-Zustand wir sind:</p>
+            <ul>
+                <li><strong>Trending</strong> (ADX &gt; 25) → Trend-Strategien funktionieren (EMA-Cross, Donchian, MACD)</li>
+                <li><strong>Ranging</strong> (ADX &lt; 18) → Mean-Reversion funktioniert (RSI, Bollinger-Bounce)</li>
+                <li><strong>Volatilität</strong>: calm / normal / high / panic</li>
+            </ul>
+            <p>Der Bot passt automatisch die Strategie-Auswahl an.</p>
+        `,
+    },
+    "tv-chart": {
+        title: "Live-Chart",
+        body: `
+            <p>Eingebetteter <strong>TradingView-Chart</strong> — der Weltstandard für Chart-Analyse. Alle Tools und Indikatoren wie auf tradingview.com verfügbar.</p>
+        `,
+    },
+    "ticker24": {
+        title: "24h Marktübersicht",
+        body: `
+            <p>Preise, 24h-Änderung, High/Low und Volumen aller aktiven Handelspaare in einer Tabelle. Klick auf ein Symbol öffnet den <strong>Manuellen-Trade-Dialog</strong> dafür.</p>
+        `,
+    },
+    "multi-tf": {
+        title: "Multi-Timeframe",
+        body: `
+            <p>Zeigt für jedes Symbol die Richtung auf 4 Zeitrahmen (15m, 1h, 4h, 1d).</p>
+            <p>Grün = up, rot = down, grau = neutral.</p>
+            <div class="example">💡 Sichere Trades: alle Zeitrahmen zeigen in dieselbe Richtung. Nennt sich "MTF-Alignment" — die grössten Trader schauen immer den höheren Zeitrahmen zuerst.</div>
+        `,
+    },
+    "market-ctx": {
+        title: "Markt-Kontext",
+        body: `
+            <p>Globale Krypto-Marktdaten:</p>
+            <ul>
+                <li><strong>BTC-Dominance</strong> — steigt = Alt-Coins schwach; sinkt = "Alt-Season"</li>
+                <li><strong>Total Market Cap</strong> — Gesamtwert aller Kryptos</li>
+                <li><strong>24h Volumen</strong> — Handel im letzten Tag</li>
+                <li><strong>Trending</strong> — Coins die gerade meistgesucht werden (Social-Signal)</li>
+            </ul>
+        `,
+    },
+    "onchain": {
+        title: "On-Chain Bitcoin",
+        body: `
+            <p>Daten direkt aus dem Bitcoin-Netzwerk:</p>
+            <ul>
+                <li><strong>Hashrate</strong> — Sicherheit des Netzwerks (höher = besser)</li>
+                <li><strong>Difficulty</strong> — Schwierigkeit für Miner</li>
+                <li><strong>Mempool</strong> — wartende Transaktionen (hoch = viel Aktivität)</li>
+                <li><strong>Fees</strong> — Gebühren für nächsten Block</li>
+            </ul>
+            <p>Steigende Hashrate + hohe Fees = starke Nachfrage → oft bullisch.</p>
+        `,
+    },
+    "whales": {
+        title: "Whale-Transfers",
+        body: `
+            <p>Grosse Bitcoin-Bewegungen (&gt; 10 BTC) aus dem Mempool. Wale bewegen sich oft <strong>vor</strong> grossen Marktbewegungen — daher als Frühindikator interessant.</p>
+        `,
+    },
+    "econ-cal": {
+        title: "Makro-Kalender",
+        body: `
+            <p>Wichtige Wirtschaftstermine die Krypto stark beeinflussen:</p>
+            <ul>
+                <li><strong>FOMC</strong> — US-Zinsentscheid der Fed</li>
+                <li><strong>CPI</strong> — US-Inflationsdaten</li>
+                <li><strong>NFP</strong> — Arbeitsmarktzahlen</li>
+                <li><strong>EZB</strong> — Europa-Zinsentscheid</li>
+                <li><strong>BTC-Halving</strong> — historisch bullisch</li>
+            </ul>
+            <div class="warn">⚠ Rote Zone = binnen 24h. Positionsgrösse reduzieren, Vola-Spikes möglich.</div>
+        `,
+    },
+    "futures": {
+        title: "Futures-Sentiment",
+        body: `
+            <p>Zeigt was <strong>Futures-Trader machen</strong>:</p>
+            <ul>
+                <li><strong>Funding-Rate</strong> — bezahlen Longs an Shorts (positiv) oder umgekehrt. Extrem &gt; 0,05% = überkaufte Longs → Short-Warnung.</li>
+                <li><strong>Long/Short-Ratio</strong> — &gt; 3 = crowded long → Kontra-Signal</li>
+                <li><strong>Open Interest</strong> — offene Kontrakte, hoch = viel Skin-in-the-Game</li>
+            </ul>
+        `,
+    },
+    "news": {
+        title: "Live-News",
+        body: `
+            <p>Aktuelle Kryptowährungs-News aus mehreren Quellen (CoinDesk, Cointelegraph, Decrypt, Reddit). Wird alle 5 Min aktualisiert.</p>
+        `,
+    },
+    "risk-metrics": {
+        title: "Risiko-Metriken",
+        body: `
+            <p>Institutional-Grade Risikokennzahlen. Die grossen Fonds messen ihr Portfolio damit — jetzt du auch:</p>
+        `,
+    },
+    "var": {
+        title: "Value at Risk (VaR)",
+        body: `
+            <p>Der <strong>maximale Verlust</strong> den du bei normaler Marktbewegung an einem Tag mit 95% Wahrscheinlichkeit haben wirst.</p>
+            <div class="example">VaR = -450 USDT → in 95% aller Fälle verlierst du morgen höchstens 450 USDT.</div>
+            <p>An 1 von 20 Tagen kann's mehr sein.</p>
+        `,
+    },
+    "es": {
+        title: "Expected Shortfall (ES)",
+        body: `
+            <p>Wie viel verlierst du <strong>wenn</strong> es zum schlechten 5%-Fall kommt? Sagt was der Durchschnitts-Verlust in Katastrophen-Fällen ist.</p>
+            <p>ES ist immer &gt; VaR. Wenn ES sehr viel höher ist als VaR → dein Portfolio hat "fette Ränder" (Tail-Risk).</p>
+        `,
+    },
+    "kelly": {
+        title: "Kelly-Formel",
+        body: `
+            <p>Berechnet die <strong>optimale Positionsgrösse</strong> aus deiner Win-Rate und Reward/Risk-Ratio. Warren Buffett, Jim Simons und Ed Thorp nutzen sie.</p>
+            <p>Der Bot zeigt <strong>Half-Kelly</strong> — halbiert für Sicherheit (Full-Kelly kann bei Fehlern schnell 50% Drawdown verursachen).</p>
+            <div class="warn">Erst ab 20+ abgeschlossenen Trades sinnvoll.</div>
+        `,
+    },
+    "sharpe": {
+        title: "Sharpe-Ratio",
+        body: `
+            <p>Rendite pro Einheit Risiko. <strong>Höher = besser</strong>.</p>
+            <ul>
+                <li>&gt; 2 = exzellent (Hedge-Fund-Level)</li>
+                <li>1 - 2 = gut</li>
+                <li>0 - 1 = mittelmässig</li>
+                <li>&lt; 0 = verlierend</li>
+            </ul>
+        `,
+    },
+    "sortino": {
+        title: "Sortino-Ratio",
+        body: `
+            <p>Wie Sharpe, aber zählt nur <strong>negative Bewegungen</strong> als Risiko. Fairer, weil grosse Gewinne dich nicht "bestrafen".</p>
+            <p>Meist höher als Sharpe.</p>
+        `,
+    },
+    "calmar": {
+        title: "Calmar-Ratio",
+        body: `
+            <p>Jahresrendite dividiert durch maximalen Drawdown. Zeigt <strong>Effizienz relativ zum schlimmsten Rückschlag</strong>.</p>
+            <p>Calmar &gt; 3 = sehr gutes Verhältnis.</p>
+        `,
+    },
+    "allocation": {
+        title: "Portfolio-Aufteilung",
+        body: `
+            <p>Wie ist dein Vermögen verteilt? Cash + jede Position.</p>
+            <p>Der farbige Balken zeigt Anteile. Die Liste darunter zeigt Details pro Position.</p>
+            <div class="example">💡 Ray Dalio: "Der heilige Gral der Investition ist Diversifikation". Nicht mehr als 15-20% pro einzelnes Asset.</div>
+        `,
+    },
+    "confluence": {
+        title: "Konfluenz-Score",
+        body: `
+            <p><strong>Neu in v8</strong>: für jedes Symbol wird geprüft wie viele der 12 Indikatoren (EMA, MACD, RSI, Bollinger, Ichimoku, VWAP, Keltner, Divergenz, Stoch, Volumen, ADX, Donchian) in dieselbe Richtung zeigen.</p>
+            <ul>
+                <li>8+ Signale = <strong>sehr sicher</strong> (grün)</li>
+                <li>6-7 = hoch</li>
+                <li>4-5 = mittel</li>
+                <li>&lt; 4 = niedrig, nicht handeln</li>
+            </ul>
+            <div class="example">💡 <strong>Konfluenz schlägt Überzeugung.</strong> Ein Trader mit 3 unabhängigen Bestätigungen gewinnt gegen einen mit "Bauchgefühl".</div>
+        `,
+    },
+    "backtest": {
+        title: "Backtest",
+        body: `
+            <p>Simuliert den Bot rückwirkend auf echten Binance-Kursen. Zeigt <strong>was du verdient hättest</strong> wenn du in den letzten X Tagen mitgelaufen wärst.</p>
+            <p>Enthält realistische Slippage (5 bps) und 1-Bar-Latenz. Danach läuft Monte-Carlo mit 1000 Permutationen der Trade-Reihenfolge → schätzt den "wahren" Drawdown.</p>
+        `,
+    },
+    "return-hist": {
+        title: "Return-Verteilung",
+        body: `
+            <p>Histogramm aller abgeschlossenen Trade-PnLs.</p>
+            <ul>
+                <li>Fette rechte Flanke = viele grosse Gewinne (Trend-System)</li>
+                <li>Fette linke Flanke = Katastrophen-Risiko!</li>
+                <li>Symmetrisch = Mean-Reversion</li>
+            </ul>
+            <p>Die gelbe Kurve zeigt die theoretische Normalverteilung — reale PnLs weichen oft davon ab.</p>
+        `,
+    },
+    "correlation": {
+        title: "Korrelations-Matrix",
+        body: `
+            <p>Zeigt wie stark sich zwei Coins <strong>gemeinsam bewegen</strong>. 1.0 = identisch, 0 = unabhängig, -1 = gegensätzlich.</p>
+            <div class="warn">⚠ Rote Zellen = hohe Korrelation. Wenn du BTC + ETH + SOL hältst und alle rot korrelieren, hast du KEINE Diversifikation — dann fällt alles zusammen.</div>
+            <p>Grüne (negative) Korrelation = Diversifikations-Schutz.</p>
+        `,
+    },
+    "alpha-decay": {
+        title: "Alpha-Decay",
+        body: `
+            <p>Zeigt für jede Strategie <strong>ob sie noch funktioniert</strong> oder schon "verbraucht" ist.</p>
+            <p>Die Balken sind 15-Trade-Buckets in Zeitreihe. Wenn die letzten Buckets kleiner werden → die Strategie verliert ihre Edge.</p>
+            <div class="example">💡 Jedes Setup hat begrenzte Lebensdauer. Wenn du hier "↘ verliert Edge" siehst → pausieren und neu backtesten.</div>
+        `,
+    },
+    "strat-perf": {
+        title: "Strategie-Performance",
+        body: `
+            <p>PnL pro Strategie. Zeigt welche der 16 aktiven Strategien am meisten verdient und welche am meisten verliert.</p>
+        `,
+    },
+    "adaptive": {
+        title: "Adaptive Gewichte",
+        body: `
+            <p>Der Bot <strong>lernt selbst</strong> welche Strategien gerade funktionieren. Gewinnende Strategien bekommen mehr Stimmrecht im Ensemble, verlierende weniger.</p>
+            <p>Braucht 5+ Trades pro Strategie zum Kalibrieren.</p>
+        `,
+    },
+    "strategies": {
+        title: "Aktive Strategien",
+        body: `
+            <p>Alle 16 laufenden Strategien im Bot:</p>
+            <ul>
+                <li>Klassiker: EMA-Cross, MACD, RSI, Bollinger, Donchian</li>
+                <li>Persona-Strategien: Soros, Buffett, Paulson, PTJ, Livermore, Dalio, Templeton, Ackman, Weinstein, MMCrypto</li>
+            </ul>
+            <p>Jede prüft jeden Kerzenschluss die Symbole. Das Ensemble kombiniert deren Votes.</p>
+        `,
+    },
+    "journal": {
+        title: "Handels-Journal",
+        body: `
+            <p>Vollständige Historie aller abgeschlossenen Trades. <strong>Steuertauglich für das Finanzamt (§ 23 EStG)</strong>.</p>
+            <ul>
+                <li>Filter: Tag, Monat, Jahr, Gesamt</li>
+                <li>FIFO/LIFO für Teil-Schliessungen</li>
+                <li>Haltefrist-Badge: &gt; 1 Jahr = steuerfrei</li>
+                <li>CSV-Export + druckbarer HTML-Bericht + echtes PDF</li>
+            </ul>
+        `,
+    },
+    "appearance": {
+        title: "Erscheinungsbild",
+        body: `
+            <p>Anpassen von Design, Sprache und Onboarding-Tour.</p>
+        `,
+    },
+    "symbols": {
+        title: "Handelspaare",
+        body: `
+            <p>Wähle welche Paare der Bot analysieren und handeln soll.</p>
+            <p>Mehr Paare = mehr Trade-Möglichkeiten, aber auch mehr API-Requests. 8-12 ist ein guter Standard.</p>
+        `,
+    },
+    "risk-config": {
+        title: "Risiko-Einstellungen",
+        body: `
+            <p>Alle Risiko-Parameter des Bots — <strong>Verlust minimieren, Gewinn maximieren</strong>:</p>
+            <ul>
+                <li><strong>Basis-Risiko/Trade</strong> — Verlust bei Stop, in % des Equity</li>
+                <li><strong>Max-Risiko/Trade</strong> — bei sehr guten Setups darf das Risiko hochskaliert werden</li>
+                <li><strong>ATR-Stop-Multiplier</strong> — wie weit weg der Stop-Loss steht (höher = mehr Luft, aber grösserer Verlust)</li>
+                <li><strong>Take-Profit-Ratios</strong> — Reward-Multiplikatoren (2R, 3.5R, 5R = "Trend-your-winners")</li>
+                <li><strong>Max Positionen</strong> — wie viele Trades gleichzeitig</li>
+                <li><strong>Strict Filter</strong> — nur diese Score/Agreement-Werte lösen Auto-Trades aus</li>
+                <li><strong>Kill-Switch-Limits</strong> — Tages-Verlust und Drawdown-Deckel</li>
+            </ul>
+            <div class="warn">⚠ Höheres Risiko = grössere Gewinne aber auch grössere Verluste. Kelly-Formel-Prinzip.</div>
+        `,
+    },
+    "integrations": {
+        title: "Externe Integrationen",
+        body: `
+            <p>Verbinde den Bot mit:</p>
+            <ul>
+                <li><strong>Telegram</strong> — Alerts direkt in deinen Chat (Bot-Token nötig)</li>
+                <li><strong>EmailJS</strong> — Alerts als E-Mail (kostenlos, braucht Registrierung)</li>
+                <li><strong>ntfy.sh</strong> — kostenlose Push-Nachrichten (unter "Tools")</li>
+            </ul>
+            <div class="warn">🔒 Alle Credentials bleiben lokal im Browser. Werden nie an einen Server gesendet.</div>
+        `,
+    },
+    "testnet": {
+        title: "Binance Testnet",
+        body: `
+            <p>Der Bot spiegelt bei Aktivierung jeden Paper-Trade als <strong>echte Order auf testnet.binance.vision</strong>. Nutzt kostenloses Testgeld — kein Risiko.</p>
+            <p>Du testest so ob deine Strategie auch im echten Order-Flow funktioniert (Slippage, Latenz, Fills).</p>
+            <p>API-Keys hier holen: <a href="https://testnet.binance.vision/" target="_blank" rel="noopener" style="color:var(--accent);">testnet.binance.vision</a></p>
+            <div class="warn">🔒 Keys nur in Session-Speicher — nach Reload weg.</div>
+        `,
+    },
+    "tools": {
+        title: "Benachrichtigungen &amp; Tools",
+        body: `
+            <p>Diverse Zusatzfunktionen:</p>
+            <ul>
+                <li><strong>Backup / Restore</strong> — alles als JSON exportieren, verschlüsselt oder unverschlüsselt</li>
+                <li><strong>Push-Notifications</strong> — Browser-Alerts</li>
+                <li><strong>ntfy.sh</strong> — kostenlose Handy-Push</li>
+                <li><strong>QR-Code</strong> — für Freunde teilen</li>
+                <li><strong>Steuerreport</strong> — druckbar oder als echtes PDF</li>
+                <li><strong>Tour</strong> — Onboarding neu starten</li>
+            </ul>
+        `,
+    },
+    "health": {
+        title: "System-Health",
+        body: `
+            <p>Pingt alle wichtigen APIs (Binance, CoinGecko, F&amp;G, mempool.space, rss2json …) und zeigt Status + Antwortzeit.</p>
+            <p>Wenn eine API rot ist → betroffene Funktion fällt aus, Bot läuft aber weiter mit dem Rest.</p>
+        `,
+    },
+    "rulebook": {
+        title: "Rulebook",
+        body: `
+            <p>Die 10 goldenen Regeln des Bots. Diese sind in Code gegossen und werden immer eingehalten. Perfekte Trader-Disziplin.</p>
+        `,
+    },
+    "danger-zone": {
+        title: "Gefahren-Zone",
+        body: `
+            <p><strong>Reset auf 10k</strong>: setzt Broker zurück, behält Journal + Watchlist + Konfig.</p>
+            <p><strong>Alles zurücksetzen</strong>: löscht wirklich ALLES (Journal, Watchlist, Alarme, Konfig). Nur bei Fehlern nutzen.</p>
+        `,
+    },
+};
+
+function showInfo(key) {
+    const info = INFO_DB[key];
+    if (!info) { console.warn("no info for", key); return; }
+    $("#info-title").innerHTML = info.title;
+    $("#info-body").innerHTML = info.body;
+    $("#info-modal").classList.remove("hidden");
+}
+function initInfoIcons() {
+    document.addEventListener("click", (e) => {
+        const btn = e.target.closest(".info");
+        if (btn && btn.dataset.info) {
+            e.preventDefault(); e.stopPropagation();
+            showInfo(btn.dataset.info);
+        }
+    });
+    $("#info-close")?.addEventListener("click", () => $("#info-modal").classList.add("hidden"));
+    $("#info-modal")?.addEventListener("click", (e) => {
+        if (e.target.id === "info-modal") $("#info-modal").classList.add("hidden");
+    });
+}
+
+// ---- Regime detection panel ----
+function renderRegimePanel() {
+    const el = $("#regime-panel");
+    if (!el) return;
+    const btcCandles = state.candles["BTC/USDT"];
+    if (!btcCandles || btcCandles.length < 100) { el.textContent = "warte auf BTC-Daten …"; return; }
+    const reg = window.TB.detectRegime(
+        window.TB.highs(btcCandles), window.TB.lows(btcCandles), window.TB.closes(btcCandles)
+    );
+    const badge = $("#regime-badge");
+    if (badge) badge.textContent = reg.trend + " · " + reg.volatility;
+    el.innerHTML = `
+        <div class="regime-grid">
+            <div class="regime-item ${reg.trend === "trending" ? "trending" : reg.trend === "ranging" ? "ranging" : ""}">
+                <div class="k">Trend-Regime</div>
+                <div class="v">${reg.trend.toUpperCase()}</div>
+                <small style="color:var(--muted); font-size:0.72rem;">ADX ${reg.adx.toFixed(1)}</small>
+            </div>
+            <div class="regime-item ${reg.volatility === "panic" ? "volatile" : reg.volatility === "high" ? "ranging" : "trending"}">
+                <div class="k">Volatilitäts-Regime</div>
+                <div class="v">${reg.volatility.toUpperCase()}</div>
+                <small style="color:var(--muted); font-size:0.72rem;">ATR ${reg.atrPct.toFixed(2)}%</small>
+            </div>
+        </div>
+        <div style="margin-top:10px; padding:10px 12px; background:rgba(77, 148, 255, 0.06); border-radius:8px; font-size:0.82rem;">
+            <strong style="color:var(--accent);">Empfehlung:</strong> ${reg.recommend}
+        </div>`;
+}
+
+// ---- Confluence panel per symbol ----
+function renderConfluencePanel() {
+    const el = $("#confluence-panel");
+    if (!el) return;
+    const rows = CFG.symbols
+        .map((sym) => {
+            const c = state.candles[sym];
+            if (!c || c.length < 100) return null;
+            const conf = window.TB.confluenceScore(c);
+            if (!conf) return null;
+            return { sym, conf };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.conf.score - a.conf.score);
+    if (!rows.length) { el.textContent = "lade Konfluenz-Daten …"; return; }
+    el.innerHTML = rows.slice(0, 15).map((r) => {
+        const c = r.conf;
+        const cls = c.score >= 8 ? "high" : c.score >= 5 ? "mid" : "low";
+        const dots = [];
+        for (let i = 0; i < c.total; i++) {
+            dots.push(`<span class="conf-dot ${i < Math.max(c.bullCount, c.bearCount) ? "on" : ""}"></span>`);
+        }
+        const sideTxt = c.side === "long" ? "▲ LONG" : c.side === "short" ? "▼ SHORT" : "− FLAT";
+        const sideColor = c.side === "long" ? "var(--green)" : c.side === "short" ? "var(--red)" : "var(--muted)";
+        const list = (c.side === "long" ? c.bull : c.side === "short" ? c.bear : []).slice(0, 4).join(", ");
+        return `<div class="confluence-row ${cls}">
+            <span style="color:${sideColor}; font-weight:700; min-width:70px;">${sideTxt}</span>
+            <div>
+                <strong>${r.sym}</strong>
+                <div style="color:var(--muted); font-size:0.7rem;">${list || "keine klare Konfluenz"}</div>
+            </div>
+            <span class="conf-dots">${dots.join("")}</span>
+            <span class="conf-score ${cls}">${c.score}/${c.total}</span>
+        </div>`;
+    }).join("");
+}
+
+// ---- Risk config panel ----
+const RISK_CONFIG_ITEMS = [
+    { key: "baseRiskPct", label: "Basis-Risiko / Trade", unit: "%", min: 0.1, max: 5, step: 0.1, hint: "Verlust bei Stop-Loss als % des Equity" },
+    { key: "maxRiskPct", label: "Max-Risiko / Trade", unit: "%", min: 0.5, max: 10, step: 0.5, hint: "Obergrenze bei starken Setups" },
+    { key: "atrStopMult", label: "ATR-Stop-Multiplier", unit: "×", min: 0.5, max: 5, step: 0.1, hint: "Wie weit weg der Stop steht" },
+    { key: "maxOpenPositions", label: "Max Positionen", unit: "", min: 1, max: 20, step: 1, hint: "Wie viele Trades gleichzeitig" },
+    { key: "maxNotionalPctPerPosition", label: "Max Grösse / Position", unit: "%", min: 1, max: 50, step: 1, hint: "Anteil des Equity pro Position" },
+    { key: "strictMinScore", label: "Auto-Min-Score", unit: "", min: 1, max: 6, step: 0.1, hint: "Nur Signale ≥ diesem Score werden auto-gehandelt" },
+    { key: "strictAgreement", label: "Auto-Min-Agreement", unit: "", min: 1, max: 8, step: 1, hint: "Mindestanzahl Strategien die zustimmen müssen" },
+    { key: "strictMaxRisk", label: "Auto-Max-Risk-Score", unit: "", min: 10, max: 100, step: 5, hint: "Nur Signale mit Risk-Score ≤ X werden auto-gehandelt" },
+    { key: "maxDailyLossPct", label: "Kill-Switch: Tages-Verlust", unit: "%", min: 1, max: 20, step: 0.5, hint: "Ab diesem Verlust an einem Tag stoppt der Bot" },
+    { key: "maxDrawdownPct", label: "Kill-Switch: Max-Drawdown", unit: "%", min: 5, max: 50, step: 1, hint: "Ab dieser Distanz vom Peak stoppt der Bot" },
+    { key: "correlationWarnThreshold", label: "Korr.-Warnschwelle", unit: "", min: 0.3, max: 0.95, step: 0.05, hint: "Ab dieser Korrelation zwischen Symbolen warnt Bot" },
+];
+function renderRiskConfig() {
+    const el = $("#risk-config");
+    if (!el) return;
+    // Load overrides
+    const saved = JSON.parse(localStorage.getItem("tb_risk_config") || "{}");
+    Object.assign(CFG, saved);
+    el.innerHTML = `
+        <div class="perf-hint">Änderungen wirken sofort. Bei Unsicherheit: Reset-Button unten.</div>
+        ${RISK_CONFIG_ITEMS.map((it) => `
+            <div class="risk-config-row">
+                <div class="lbl">${it.label}<small>${it.hint}</small></div>
+                <div>
+                    <input type="number" data-key="${it.key}" min="${it.min}" max="${it.max}" step="${it.step}" value="${CFG[it.key]}"/>
+                    ${it.unit ? `<span style="color:var(--muted); font-size:0.72rem; margin-left:4px;">${it.unit}</span>` : ""}
+                </div>
+            </div>`).join("")}
+        <div class="btn-row" style="margin-top:12px;">
+            <button id="risk-reset" class="ghost">Standard-Werte</button>
+        </div>`;
+    el.querySelectorAll("input[data-key]").forEach((inp) => {
+        inp.onchange = () => {
+            const v = parseFloat(inp.value);
+            if (isFinite(v)) {
+                CFG[inp.dataset.key] = v;
+                const saved = JSON.parse(localStorage.getItem("tb_risk_config") || "{}");
+                saved[inp.dataset.key] = v;
+                localStorage.setItem("tb_risk_config", JSON.stringify(saved));
+                announce("Einstellung gespeichert.", "info");
+            }
+        };
+    });
+    $("#risk-reset").onclick = () => {
+        if (!confirm("Alle Risiko-Einstellungen auf Standard zurücksetzen?")) return;
+        localStorage.removeItem("tb_risk_config");
+        location.reload();
+    };
+}
+
+// ---- Boost the ensemble with confluence + regime ----
+// Wrap existing scanSymbol to add confluence penalty
+const _origMakePending = makePending;
+makePending = function(symbol, sig, candles, price) {
+    const pending = _origMakePending(symbol, sig, candles, price);
+    if (!pending) return null;
+    // Confluence check — reject if agreement < 4 (except in auto-mode this is already stricter)
+    const conf = window.TB.confluenceScore(candles);
+    if (conf) {
+        pending.confluenceScore = conf.score;
+        pending.confluenceSide = conf.side;
+        // if confluence disagrees with strategy signal → reject
+        if (conf.side !== "flat" && conf.side !== pending.side) {
+            return null;
+        }
+        // Regime-aware boost
+        const reg = window.TB.detectRegime(
+            window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles)
+        );
+        pending.regime = reg;
+        // Reject during panic volatility to reduce loss
+        if (reg.volatility === "panic") return null;
+    }
+    return pending;
+};
+
+// ---- Wire "Manueller Trade" buttons ----
 document.addEventListener("DOMContentLoaded", () => {
+    const btn1 = $("#btn-manual-trade");
+    const btn2 = $("#btn-manual-trade-2");
+    const trigger = () => {
+        // pick first available symbol
+        openManualOrderModal(CFG.symbols[0]);
+    };
+    if (btn1) btn1.onclick = trigger;
+    if (btn2) btn2.onclick = trigger;
+    // tour restart in Einstellungen
+    const tour = $("#tour-restart");
+    if (tour) tour.onclick = () => { localStorage.removeItem("tb_onboarded"); startOnboarding(); };
+});
+
+// ---- Extend renderAll with v8 panels ----
+const _origRenderAllV8 = renderAll;
+renderAll = function() {
+    _origRenderAllV8();
+    renderRegimePanel();
+    renderConfluencePanel();
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    initTabs();
+    initInfoIcons();
     initTheme();
     initLang();
     renderToolsPanel();
+    renderRiskConfig();
     checkFirstLaunch();
     setTimeout(() => {
         refreshMarketCtx();

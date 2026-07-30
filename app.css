@@ -1089,3 +1089,176 @@ footer {
     color: var(--text); border-radius: 6px; padding: 6px 8px; font-size: 0.78rem;
     margin-left: 8px;
 }
+
+/* =============================================================
+   v8: Tab Navigation + Info Icons + Info Modal + Settings
+   ============================================================= */
+
+/* -------- tab nav (top on desktop, bottom on mobile) -------- */
+.tab-nav {
+    display: flex; gap: 4px;
+    background: var(--bg-2);
+    border-top: 1px solid var(--border-strong);
+    border-bottom: 1px solid var(--border-strong);
+    padding: 6px 6px;
+    position: sticky; top: 0; z-index: 90;
+    overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    backdrop-filter: blur(10px);
+    background: rgba(10, 14, 23, 0.94);
+}
+.tab-nav::-webkit-scrollbar { display: none; }
+.tab-btn {
+    flex: 1 0 auto; min-width: 74px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 8px 10px; border-radius: 10px;
+    background: transparent; border: 1px solid transparent;
+    color: var(--muted); font-size: 0.66rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+    transition: all 0.15s;
+}
+.tab-btn .ic { font-size: 1.2rem; line-height: 1; }
+.tab-btn:hover { color: var(--text-2); }
+.tab-btn.active {
+    background: rgba(77, 148, 255, 0.12);
+    color: var(--accent);
+    border-color: rgba(77, 148, 255, 0.3);
+}
+
+@media (max-width: 640px) {
+    .tab-nav {
+        position: fixed; bottom: 0; top: auto;
+        left: 0; right: 0; z-index: 100;
+        border-bottom: none; border-top: 1px solid var(--border-strong);
+        padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    }
+    main { padding-bottom: 90px; }
+    .tab-btn { min-width: 60px; padding: 6px 4px; font-size: 0.58rem; }
+    .tab-btn .ic { font-size: 1.05rem; }
+}
+
+/* -------- tab panes -------- */
+.tab-pane { display: none; padding: 12px 0; }
+.tab-pane.active { display: block; animation: fadeIn 0.15s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* -------- Info icons -------- */
+.info {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: rgba(77, 148, 255, 0.14);
+    color: var(--accent);
+    font-size: 0.72rem; font-weight: 700;
+    cursor: pointer; margin-left: 6px; vertical-align: middle;
+    border: 1px solid rgba(77, 148, 255, 0.35);
+    transition: all 0.15s;
+    user-select: none;
+    font-family: sans-serif;
+}
+.info:hover, .info:active {
+    background: var(--accent); color: #fff;
+    transform: scale(1.1);
+}
+.info-mini {
+    width: 14px; height: 14px; font-size: 0.6rem; margin-left: 3px;
+    border-width: 1px;
+}
+h2 .info { vertical-align: baseline; position: relative; top: -1px; }
+
+/* -------- info modal -------- */
+.info-modal-card { max-width: 520px; }
+.info-modal-card h2 { margin-top: 0; color: var(--accent); }
+#info-body {
+    font-size: 0.9rem; line-height: 1.55;
+    color: var(--text);
+}
+#info-body p { margin: 0 0 10px; }
+#info-body ul { margin: 0 0 10px; padding-left: 18px; }
+#info-body li { margin-bottom: 4px; }
+#info-body strong { color: var(--accent); }
+#info-body .example {
+    background: rgba(77, 148, 255, 0.06);
+    border-left: 3px solid var(--accent);
+    padding: 8px 12px; margin: 10px 0;
+    border-radius: 4px; font-size: 0.85rem;
+}
+#info-body .warn {
+    background: rgba(245, 158, 11, 0.06);
+    border-left: 3px solid var(--amber);
+    padding: 8px 12px; margin: 10px 0;
+    border-radius: 4px; font-size: 0.85rem;
+}
+
+/* -------- Compact portfolio in dashboard -------- */
+.compact-portfolio .mkt-grid { margin-bottom: 12px; }
+.compact-portfolio .mkt-tile .v { font-size: 0.95rem; }
+
+/* -------- Settings rows -------- */
+.settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+    font-size: 0.88rem;
+}
+.settings-row:last-child { border-bottom: none; }
+
+/* -------- Risk config panel -------- */
+.risk-config-row {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 8px; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.risk-config-row:last-child { border-bottom: none; }
+.risk-config-row .lbl {
+    font-size: 0.88rem;
+}
+.risk-config-row .lbl small {
+    display: block; color: var(--muted); font-size: 0.72rem;
+    margin-top: 2px;
+}
+.risk-config-row input, .risk-config-row select {
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 6px 10px;
+    font-size: 0.88rem; width: 100px; text-align: right;
+    font-family: monospace;
+}
+
+/* -------- Regime panel -------- */
+.regime-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+}
+.regime-item {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+    padding: 10px 12px; border-radius: 8px;
+}
+.regime-item .k { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; }
+.regime-item .v { font-weight: 700; margin-top: 4px; font-size: 0.95rem; }
+.regime-item.trending .v { color: var(--green); }
+.regime-item.ranging .v { color: var(--amber); }
+.regime-item.volatile .v { color: var(--red); }
+
+/* -------- Confluence panel -------- */
+.confluence-row {
+    display: grid; grid-template-columns: auto 1fr auto auto;
+    gap: 10px; align-items: center;
+    padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; margin-bottom: 4px; font-size: 0.82rem;
+}
+.confluence-row.high { border-left: 3px solid var(--green); background: rgba(34, 197, 94, 0.04); }
+.confluence-row.mid { border-left: 3px solid var(--amber); }
+.confluence-row.low { border-left: 3px solid var(--muted); }
+.conf-score {
+    font-weight: 700; font-family: monospace;
+    padding: 2px 8px; border-radius: 4px; min-width: 40px; text-align: center;
+}
+.conf-score.high { background: rgba(34, 197, 94, 0.18); color: var(--green); }
+.conf-score.mid { background: rgba(245, 158, 11, 0.18); color: var(--amber); }
+.conf-score.low { background: rgba(107, 120, 145, 0.18); color: var(--muted); }
+.conf-dots {
+    display: inline-flex; gap: 2px;
+}
+.conf-dot {
+    width: 8px; height: 8px; border-radius: 2px;
+    background: var(--border);
+}
+.conf-dot.on { background: var(--green); }
+.conf-dot.off { background: var(--red); opacity: 0.4; }
