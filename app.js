@@ -741,7 +741,29 @@ function renderKillSwitch() {
           <div class="ks-bar-bg"><div class="ks-bar-fill risk-color-${ddCls === "crit" ? "red" : ddCls === "warn" ? "yellow" : "green"}" style="width:${barPct(Math.max(s.drawdown, 0), CFG.maxDrawdownPct)}%"></div></div></div>
         <div class="ks-row"><span class="ks-label">Offene Positionen</span><span class="ks-value ${posCls}">${nOpen} / ${CFG.maxOpenPositions}</span>
           <div class="ks-bar-bg"><div class="ks-bar-fill risk-color-${posCls === "crit" ? "red" : posCls === "warn" ? "yellow" : "green"}" style="width:${barPct(nOpen, CFG.maxOpenPositions)}%"></div></div></div>
-        ${state.halted ? '<div class="ks-halted-banner">⚠ Bot pausiert · Kill-Switch aktiv · Reset über Portfolio-Button</div>' : ""}`;
+        ${state.halted ? `<div class="ks-halted-banner">
+            ⚠ Bot pausiert · Kill-Switch ausgelöst
+            <div style="margin-top:8px; display:flex; gap:6px;">
+                <button id="ks-resume" class="ghost" style="flex:1; color:var(--amber); border-color:var(--amber); font-size:0.75rem; padding:6px;">Kill-Switch entschärfen (weiter handeln)</button>
+                <button id="ks-full-reset" class="ghost" style="flex:1; color:var(--red); border-color:var(--red); font-size:0.75rem; padding:6px;">Komplett-Reset auf 10k</button>
+            </div>
+        </div>` : ""}`;
+    // wire up recovery buttons after render
+    setTimeout(() => {
+        const resume = document.getElementById("ks-resume");
+        if (resume) resume.onclick = () => {
+            state.halted = false;
+            state.dayStartEquity = broker.equity(state.prices);
+            state.dayStartDate = new Date().toDateString();
+            localStorage.setItem("tb_halted", "0");
+            localStorage.setItem("tb_day_equity", String(state.dayStartEquity));
+            localStorage.setItem("tb_day_date", state.dayStartDate);
+            announce("Kill-Switch entschärft. Bot handelt wieder.", "info");
+            renderAll();
+        };
+        const full = document.getElementById("ks-full-reset");
+        if (full) full.onclick = () => $("#btn-reset").click();
+    }, 0);
 }
 
 // ============ NEW: symbol picker ============
@@ -817,20 +839,68 @@ function checkWatchlist() {
 }
 
 // ============ NEW: news integration ============
-async function fetchNews() {
-    if (Date.now() - state.lastNewsFetch < 5 * 60 * 1000) return;
-    try {
-        const raw = await fetch("https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest").then((r) => r.json());
-        if (raw?.Data) {
-            state.news = raw.Data.slice(0, 30).map((n) => ({
-                title: n.title, url: n.url, source: n.source_info?.name || n.source,
-                ts: new Date(n.published_on * 1000).toISOString(),
-                categories: (n.categories || "").split("|").filter(Boolean),
-                body: (n.body || "").slice(0, 240),
-            }));
-            state.lastNewsFetch = Date.now();
+async function _fetchCryptoCompare() {
+    const raw = await fetch("https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest").then((r) => r.json());
+    if (!raw?.Data) throw new Error("no data");
+    return raw.Data.slice(0, 30).map((n) => ({
+        title: n.title, url: n.url, source: n.source_info?.name || n.source,
+        ts: new Date(n.published_on * 1000).toISOString(),
+        categories: (n.categories || "").split("|").filter(Boolean),
+        body: (n.body || "").slice(0, 240),
+    }));
+}
+
+async function _fetchReddit() {
+    const raw = await fetch("https://www.reddit.com/r/CryptoCurrency/hot.json?limit=25").then((r) => r.json());
+    const kids = raw?.data?.children || [];
+    return kids.filter((k) => !k.data.stickied).map((k) => {
+        const d = k.data;
+        return {
+            title: d.title,
+            url: "https://reddit.com" + d.permalink,
+            source: "r/CryptoCurrency",
+            ts: new Date(d.created_utc * 1000).toISOString(),
+            categories: [d.link_flair_text].filter(Boolean),
+            body: (d.selftext || "").slice(0, 240),
+        };
+    });
+}
+
+async function _fetchCryptoPanic() {
+    const raw = await fetch("https://cryptopanic.com/api/free/v1/posts/?public=true").then((r) => r.json());
+    const results = raw?.results || [];
+    return results.map((p) => ({
+        title: p.title, url: p.url, source: p.source?.title || "CryptoPanic",
+        ts: p.published_at || new Date().toISOString(),
+        categories: (p.currencies || []).map((c) => c.code),
+        body: "",
+    }));
+}
+
+async function fetchNews(force = false) {
+    if (!force && Date.now() - state.lastNewsFetch < 5 * 60 * 1000 && state.news.length) return;
+    state.newsError = null;
+    // try sources in order, keep whichever gets first non-empty result
+    const attempts = [
+        { name: "CryptoCompare", fn: _fetchCryptoCompare },
+        { name: "Reddit", fn: _fetchReddit },
+        { name: "CryptoPanic", fn: _fetchCryptoPanic },
+    ];
+    const errors = [];
+    for (const src of attempts) {
+        try {
+            const items = await src.fn();
+            if (items && items.length) {
+                state.news = items;
+                state.lastNewsFetch = Date.now();
+                state.newsSource = src.name;
+                return;
+            }
+        } catch (e) {
+            errors.push(`${src.name}: ${e.message || "fehler"}`);
         }
-    } catch (e) { /* silent */ }
+    }
+    state.newsError = errors.join(" · ") || "keine Quelle erreichbar";
 }
 
 function filterNewsForSymbol(symbol) {
@@ -845,8 +915,23 @@ function filterNewsForSymbol(symbol) {
 
 function renderNewsList() {
     const el = $("#news-list");
-    $("#news-count").textContent = state.news.length + " Meldungen";
-    if (!state.news.length) { el.textContent = "News werden geladen ..."; return; }
+    const cnt = $("#news-count");
+    if (cnt) cnt.textContent = state.news.length ? `${state.news.length} · ${state.newsSource || ""}` : "0";
+    const refreshBtn = `<div style="margin-top:10px; text-align:center;">
+        <button id="news-refresh" class="ghost" style="font-size:0.75rem; padding:6px 12px;">↻ News aktualisieren</button>
+    </div>`;
+    if (!state.news.length) {
+        el.innerHTML = state.newsError
+            ? `<div style="color:var(--amber); font-size:0.82rem;">⚠ ${state.newsError}<br><small>Wahrscheinlich CORS-Blockade durch Browser oder Rate-Limit. Klicke auf Aktualisieren.</small></div>${refreshBtn}`
+            : `<div style="color:var(--muted); font-size:0.82rem;">News werden geladen …</div>${refreshBtn}`;
+        const btn = $("#news-refresh");
+        if (btn) btn.onclick = async () => {
+            btn.textContent = "…lade";
+            await fetchNews(true);
+            renderNewsList();
+        };
+        return;
+    }
     el.innerHTML = state.news.slice(0, 10).map((n) => {
         const t = new Date(n.ts).toLocaleString("de-DE", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
         const tags = (n.categories || []).slice(0, 4).map((c) => `<span class="tag">${c}</span>`).join("");
@@ -855,7 +940,13 @@ function renderNewsList() {
             <a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>
             <div class="tags">${tags}</div>
         </div>`;
-    }).join("");
+    }).join("") + refreshBtn;
+    const btn = $("#news-refresh");
+    if (btn) btn.onclick = async () => {
+        btn.textContent = "…lade";
+        await fetchNews(true);
+        renderNewsList();
+    };
 }
 
 // ============ NEW: adaptive learning ============
