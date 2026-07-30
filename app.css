@@ -1262,3 +1262,31 @@ h2 .info { vertical-align: baseline; position: relative; top: -1px; }
 }
 .conf-dot.on { background: var(--green); }
 .conf-dot.off { background: var(--red); opacity: 0.4; }
+
+/* -------- v9: Pattern rows -------- */
+.pattern-row {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 10px; align-items: center;
+    padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: 8px; margin-bottom: 6px;
+    background: rgba(255,255,255,0.02);
+    cursor: pointer; transition: all 0.12s;
+}
+.pattern-row:hover { transform: translateX(3px); border-color: var(--accent); }
+.pattern-row.high { border-left: 3px solid var(--green); }
+.pattern-row.low  { border-left: 3px solid var(--red); }
+.pattern-row.mid  { border-left: 3px solid var(--amber); }
+
+/* Why-button hover in signal tile */
+.signal-why:hover {
+    background: var(--accent) !important; color: #fff !important;
+    transform: translateY(-1px);
+}
+
+/* Modal body scrollable for long content */
+#why-body, #pattern-body, #info-body {
+    max-height: 65vh; overflow-y: auto;
+}
+#why-body h3 { margin: 14px 0 8px; }
+#why-body ul { padding-left: 20px; }
+#why-body li { margin-bottom: 6px; }

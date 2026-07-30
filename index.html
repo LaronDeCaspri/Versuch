@@ -59,6 +59,28 @@
     </div>
 </div>
 
+<!-- WHY (trade rationale) modal -->
+<div id="why-modal" class="modal hidden">
+    <div class="modal-card" style="max-width:640px;">
+        <h2 id="why-title">Warum diesen Trade?</h2>
+        <div id="why-body"></div>
+        <div class="btn-row" style="margin-top:14px;">
+            <button class="primary" id="why-close">Verstanden</button>
+        </div>
+    </div>
+</div>
+
+<!-- PATTERN detail modal -->
+<div id="pattern-modal" class="modal hidden">
+    <div class="modal-card" style="max-width:560px;">
+        <h2 id="pattern-title">Muster</h2>
+        <div id="pattern-body"></div>
+        <div class="btn-row" style="margin-top:14px;">
+            <button class="primary" id="pattern-close">Schliessen</button>
+        </div>
+    </div>
+</div>
+
 <!-- partial close modal -->
 <div id="close-modal" class="modal hidden">
     <div class="modal-card">
@@ -332,6 +354,22 @@
         <h2>Konfluenz-Panel <span class="badge">Live</span> <span class="info" data-info="confluence">ⓘ</span></h2>
         <div class="perf-hint">Wie viele Indikatoren stimmen bei jedem Symbol überein? Hohe Werte = sichere Signale.</div>
         <div id="confluence-panel"></div>
+    </div>
+
+    <div class="card">
+        <h2>Live-Muster <span class="badge">Chart-Patterns</span> <span class="info" data-info="live-patterns">ⓘ</span></h2>
+        <div class="perf-hint">Was der Bot GRADE in den Charts sieht. Klick auf ein Muster → detaillierte Erklärung.</div>
+        <div id="live-patterns"></div>
+    </div>
+
+    <div class="card">
+        <h2>Muster-Bibliothek <span class="info" data-info="pattern-library">ⓘ</span></h2>
+        <div class="perf-hint">Alle 23 unterstützten Muster mit historischer Erfolgsquote (aus BTC-Historie berechnet).</div>
+        <div class="btn-row" style="margin-bottom:8px;">
+            <button id="load-history-btn" class="primary">📚 Historie laden &amp; Statistik berechnen</button>
+        </div>
+        <div id="history-progress" style="display:none; margin-bottom:8px; color:var(--muted); font-size:0.82rem;"></div>
+        <div id="pattern-library"></div>
     </div>
 
     <div class="card">
