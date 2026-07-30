@@ -373,6 +373,28 @@
     </div>
 
     <div class="card">
+        <h2>Institutional-Schutz <span class="badge">v10</span> <span class="info" data-info="v10-status">ⓘ</span></h2>
+        <div class="perf-hint">
+            Der Bot verwendet 8 Institutional-Grade Regeln um Verluste zu minimieren:
+            Multi-TF-Gate, Loss-Streak-Sizing, Regime-Weights, Orthogonalität, Fat-Tail-VaR,
+            Konzentration bei Top-Signalen, Loss-Attribution.
+        </div>
+        <div id="v10-status"></div>
+    </div>
+
+    <div class="card">
+        <h2>Walk-Forward-Backtest <span class="badge">Overfitting-Test</span> <span class="info" data-info="walk-forward">ⓘ</span></h2>
+        <div class="perf-hint">
+            Testet die Strategie auf rollenden Zeitfenstern (Train → Test → nächstes Fenster).
+            Zeigt ob sie <strong>robust über die Zeit</strong> funktioniert oder nur zufällig auf einem Zeitraum.
+        </div>
+        <div class="btn-row" style="margin-bottom:8px;">
+            <button id="wf-run" class="primary">Walk-Forward starten (BTC 3J)</button>
+        </div>
+        <div id="wf-result"></div>
+    </div>
+
+    <div class="card">
         <h2>Backtest <span class="badge">Was hätte ich verdient?</span> <span class="info" data-info="backtest">ⓘ</span></h2>
         <div class="watchlist-add">
             <select id="bt-symbol"></select>

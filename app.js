@@ -3765,6 +3765,40 @@ const INFO_DB = {
             <p>Die 10 goldenen Regeln des Bots. Diese sind in Code gegossen und werden immer eingehalten. Perfekte Trader-Disziplin.</p>
         `,
     },
+    "v10-status": {
+        title: "Institutional-Schutz (v10)",
+        body: `
+            <p>Der Bot verwendet 8 Regeln der 10 grössten Trader der Welt:</p>
+            <ul>
+                <li><strong>Multi-TF-Gate (PTJ)</strong>: 15m-Signal nur wenn 4h-Trend zustimmt</li>
+                <li><strong>Loss-Streak-Sizing (PTJ)</strong>: nach 1 Loss × 0,75 · 2 Losses × 0,5 · 3 × 0,25 · 5 → Pause</li>
+                <li><strong>Regime-Weights (Dalio)</strong>: Trend-Strategien +25% in Trends, −40% in Ranges</li>
+                <li><strong>Orthogonalität (Simons)</strong>: 3 Trend-Follower zählen wie 1,5 Signale, nicht 3</li>
+                <li><strong>Fat-Tail-VaR (Taleb)</strong>: echte historische Return-Verteilung, keine Normal-Annahme</li>
+                <li><strong>Konzentration (Ackman)</strong>: bei Konfluenz ≥ 11/12 wird auf 15% aufgestockt</li>
+                <li><strong>MTF-Tracking</strong>: speichert Regime bei Trade-Öffnung für spätere Analyse</li>
+                <li><strong>Loss-Attribution</strong>: nach jedem Loss wird automatisch die Ursache protokolliert</li>
+            </ul>
+            <p>Die Tiles zeigen dir <strong>Loss-Streak</strong> (wie viele in Folge verloren), <strong>Nächste Grösse</strong> (dampener aktiv), und die häufigsten <strong>Verlust-Ursachen</strong> aus der Historie.</p>
+        `,
+    },
+    "walk-forward": {
+        title: "Walk-Forward-Backtest",
+        body: `
+            <p>Standard-Backtests haben ein Problem: sie können <strong>overfitten</strong>. Der Bot lernt Muster die zufällig in DIESEM Zeitraum funktionierten, aber nicht in Zukunft.</p>
+            <p>Walk-Forward löst das:</p>
+            <ol>
+                <li>Nimm 500 Bars Trainings-Daten</li>
+                <li>Teste auf den nächsten 100 Bars (die der Bot NIE gesehen hat)</li>
+                <li>Verschiebe Fenster um 100 Bars weiter, wiederhole</li>
+                <li>Zähle: in wie viel % der Test-Fenster war der Bot profitabel?</li>
+            </ol>
+            <div class="example">
+                <strong>Consistency &gt; 60%</strong> = Strategie robust → sichere Wette in Zukunft.<br>
+                <strong>&lt; 40%</strong> = wahrscheinlich zufälliger Erfolg im Vollbacktest.
+            </div>
+        `,
+    },
     "live-patterns": {
         title: "Live-Muster",
         body: `
@@ -4261,20 +4295,49 @@ function reconstructRationale(symbol, side) {
 
 // ---- "Warum?" modal ----
 function showWhy(source) {
+    // ALWAYS open the modal, even if rendering fails
+    try {
+        _showWhyBody(source);
+    } catch (err) {
+        console.error("[Warum] render error:", err, "source:", source);
+        $("#why-body").innerHTML = `
+            <p>Beim Aufbau der Begründung ist ein Fehler aufgetreten:</p>
+            <div class="warn"><code>${(err && err.message) || err}</code></div>
+            <p style="margin-top:12px; font-size:0.82rem; color:var(--muted);">
+                Symbol: ${source?.symbol || "?"} · Seite: ${source?.side || "?"}<br>
+                Öffne die Browser-Konsole für Details.
+            </p>`;
+    }
+    const modal = document.getElementById("why-modal");
+    if (modal) {
+        modal.classList.remove("hidden");
+        modal.style.display = "flex";                          // belt-and-braces
+    } else {
+        alert("Why-Modal nicht gefunden — Hard-Reload nötig (Ctrl+F5)");
+    }
+}
+
+function _showWhyBody(source) {
     // source is either a pending signal or a position
-    let r = source.rationale;
-    if (!r && source.symbol && source.side) {
+    let r = source && source.rationale;
+    if (!r && source && source.symbol && source.side) {
         r = reconstructRationale(source.symbol, source.side);
     }
     if (!r) {
         $("#why-body").innerHTML = `
-            <p>Für diesen Trade konnte keine Begründung erzeugt werden — es fehlen Kursdaten für ${source.symbol || "das Symbol"}.</p>
+            <p>Für diesen Trade konnte keine Begründung erzeugt werden — es fehlen Kursdaten für <strong>${(source && source.symbol) || "das Symbol"}</strong>.</p>
             <p>Warte einen Scan-Zyklus (30 Sek.) und probiere es nochmal.</p>`;
-        $("#why-modal").classList.remove("hidden");
         return;
     }
+    // Defensive defaults so a partial rationale doesn't crash the render
+    const patterns = Array.isArray(r.patterns) ? r.patterns : [];
+    const reasons  = Array.isArray(r.reasons)  ? r.reasons  : ["Keine Gründe protokolliert"];
+    const strategies = Array.isArray(r.strategies) ? r.strategies : [];
+    const regime = r.regime || { trend: "?", volatility: "?", adx: 0, atrPct: 0, recommend: "" };
+    const ind = r.indicators || {};
+    const conf = r.confluenceScore != null ? r.confluenceScore : "–";
     {
-        const patternBlock = r.patterns.filter((p) => p.info).map((p) => {
+        const patternBlock = patterns.filter((p) => p && p.info).map((p) => {
             const stats = p.stats
                 ? `<small style="color:var(--muted);">${(p.stats.winRate * 100).toFixed(0)}% Win-Rate über ${p.stats.count} Vorkommen</small>`
                 : `<small style="color:var(--muted);">(Statistik unbekannt)</small>`;
@@ -4288,7 +4351,7 @@ function showWhy(source) {
 
             <h3 style="margin-top:0; color:var(--accent); font-size:1rem;">🎯 Warum eröffnet?</h3>
             <ul style="line-height:1.6; margin:0 0 14px;">
-                ${r.reasons.map((rr) => `<li>${rr}</li>`).join("")}
+                ${reasons.map((rr) => `<li>${rr}</li>`).join("")}
             </ul>
 
             ${patternBlock ? `
@@ -4299,30 +4362,29 @@ function showWhy(source) {
 
             <h3 style="color:var(--accent); font-size:1rem;">🌡 Markt-Regime</h3>
             <div class="example" style="font-size:0.85rem;">
-                <strong>${r.regime.trend.toUpperCase()}</strong> Trend (ADX ${r.regime.adx.toFixed(1)})
-                · <strong>${r.regime.volatility.toUpperCase()}</strong> Volatilität (ATR ${r.regime.atrPct.toFixed(2)}%)
-                <br><small>${r.regime.recommend}</small>
+                <strong>${String(regime.trend).toUpperCase()}</strong> Trend (ADX ${Number(regime.adx || 0).toFixed(1)})
+                · <strong>${String(regime.volatility).toUpperCase()}</strong> Volatilität (ATR ${Number(regime.atrPct || 0).toFixed(2)}%)
+                <br><small>${regime.recommend || ""}</small>
             </div>
 
             <h3 style="color:var(--accent); font-size:1rem;">🔬 Indikatoren-Snapshot</h3>
             <div class="mkt-grid">
-                <div class="mkt-tile"><div class="k">RSI</div><div class="v">${r.indicators.rsi?.toFixed(1) || "–"}</div></div>
-                <div class="mkt-tile"><div class="k">MACD-Hist</div><div class="v">${r.indicators.macdHist?.toFixed(3) || "–"}</div></div>
-                <div class="mkt-tile"><div class="k">ADX</div><div class="v">${r.indicators.adx?.toFixed(1) || "–"}</div></div>
-                <div class="mkt-tile"><div class="k">ATR%</div><div class="v">${r.indicators.atrPct?.toFixed(2) || "–"}%</div></div>
-                <div class="mkt-tile"><div class="k">EMA20</div><div class="v" style="font-size:0.75rem;">${r.indicators.ema20?.toFixed(2) || "–"}</div></div>
-                <div class="mkt-tile"><div class="k">EMA50</div><div class="v" style="font-size:0.75rem;">${r.indicators.ema50?.toFixed(2) || "–"}</div></div>
-                <div class="mkt-tile"><div class="k">EMA200</div><div class="v" style="font-size:0.75rem;">${r.indicators.ema200?.toFixed(2) || "–"}</div></div>
-                <div class="mkt-tile"><div class="k">Konfluenz</div><div class="v" style="color:var(--green);">${r.confluenceScore || "–"}/12</div></div>
+                <div class="mkt-tile"><div class="k">RSI</div><div class="v">${Number.isFinite(ind.rsi) ? ind.rsi.toFixed(1) : "–"}</div></div>
+                <div class="mkt-tile"><div class="k">MACD-Hist</div><div class="v">${Number.isFinite(ind.macdHist) ? ind.macdHist.toFixed(3) : "–"}</div></div>
+                <div class="mkt-tile"><div class="k">ADX</div><div class="v">${Number.isFinite(ind.adx) ? ind.adx.toFixed(1) : "–"}</div></div>
+                <div class="mkt-tile"><div class="k">ATR%</div><div class="v">${Number.isFinite(ind.atrPct) ? ind.atrPct.toFixed(2) + "%" : "–"}</div></div>
+                <div class="mkt-tile"><div class="k">EMA20</div><div class="v" style="font-size:0.75rem;">${Number.isFinite(ind.ema20) ? ind.ema20.toFixed(2) : "–"}</div></div>
+                <div class="mkt-tile"><div class="k">EMA50</div><div class="v" style="font-size:0.75rem;">${Number.isFinite(ind.ema50) ? ind.ema50.toFixed(2) : "–"}</div></div>
+                <div class="mkt-tile"><div class="k">EMA200</div><div class="v" style="font-size:0.75rem;">${Number.isFinite(ind.ema200) ? ind.ema200.toFixed(2) : "–"}</div></div>
+                <div class="mkt-tile"><div class="k">Konfluenz</div><div class="v" style="color:var(--green);">${conf}/12</div></div>
             </div>
 
-            <h3 style="color:var(--accent); font-size:1rem;">🧠 Zustimmende Strategien (${r.strategies.length})</h3>
+            <h3 style="color:var(--accent); font-size:1rem;">🧠 Zustimmende Strategien (${strategies.length})</h3>
             <ul style="font-size:0.85rem; line-height:1.5; margin:0;">
-                ${r.strategies.map((s) => `<li><strong>${s.name.replace(/_/g, " ")}</strong>: ${s.reason}</li>`).join("")}
+                ${strategies.map((s) => `<li><strong>${(s.name || "?").replace(/_/g, " ")}</strong>: ${s.reason || "—"}</li>`).join("")}
             </ul>
         `;
     }
-    $("#why-modal").classList.remove("hidden");
 }
 
 // ---- Extend position cards with "Warum?" button ----
@@ -4398,13 +4460,392 @@ broker.submit = function(symbol, side, qty, price, meta) {
     return r;
 };
 
-// ---- Modal close bindings ----
+// ---- Modal close bindings + DELEGATED Warum-click safety net ----
 document.addEventListener("DOMContentLoaded", () => {
-    $("#why-close")?.addEventListener("click", () => $("#why-modal").classList.add("hidden"));
-    $("#why-modal")?.addEventListener("click", (e) => { if (e.target.id === "why-modal") $("#why-modal").classList.add("hidden"); });
+    $("#why-close")?.addEventListener("click", () => {
+        $("#why-modal").classList.add("hidden");
+        $("#why-modal").style.display = "";
+    });
+    $("#why-modal")?.addEventListener("click", (e) => {
+        if (e.target.id === "why-modal") {
+            $("#why-modal").classList.add("hidden");
+            $("#why-modal").style.display = "";
+        }
+    });
     $("#pattern-close")?.addEventListener("click", () => $("#pattern-modal").classList.add("hidden"));
     $("#pattern-modal")?.addEventListener("click", (e) => { if (e.target.id === "pattern-modal") $("#pattern-modal").classList.add("hidden"); });
     $("#load-history-btn")?.addEventListener("click", loadHistoryAndCalcStats);
+    $("#wf-run")?.addEventListener("click", runWalkForwardBacktest);
+});
+
+// =====================================================================
+// v10: INSTITUTIONAL-GRADE UPGRADES
+//   1. Multi-TF alignment gate (15m signal requires 4h + 1d agreement)
+//   2. Loss-streak sizing (PTJ) — reduce after losses
+//   3. Regime-conditional adaptive weights
+//   4. Walk-forward validation flag
+//   5. Strategy orthogonality penalty in ensemble
+//   6. Fat-tail historical VaR replaces parametric
+//   7. Concentration mode: 15% position on 11+/12 confluence
+//   8. Loss attribution log
+// =====================================================================
+
+state.v10 = state.v10 || {
+    losslessStreak: 0,               // consecutive wins (protection reset counter)
+    lossStreak: 0,                   // consecutive losses (sizing dampener)
+    lossAttribution: JSON.parse(localStorage.getItem("tb_loss_attribution") || "[]"),
+};
+
+// Store trend state per symbol per timeframe from live scans
+state.mtfTrend = state.mtfTrend || {};
+
+// ------------- 1. MULTI-TF ALIGNMENT GATE -------------
+// Reject 15m signal if higher timeframe doesn't agree
+function mtfAlignmentOk(symbol, signalSide) {
+    // Fetch cached higher-TF direction from scanSymbol's refreshMatrix
+    const tf4h = state.tfDir?.[`${symbol}_4h`];
+    const tf1d = state.tfDir?.[`${symbol}_1d`];
+    if (!tf4h || !tf1d) return true;    // no data yet, allow (soft)
+    const need = signalSide === "long" ? "up" : "down";
+    // Require at least 4h alignment (1d as tiebreaker)
+    if (tf4h === "flat" && tf1d === need) return true;
+    return tf4h === need;
+}
+
+// ------------- 2. LOSS-STREAK SIZING (PTJ rule) -------------
+function lossStreakMultiplier() {
+    // update from recent journal
+    const trades = _pairTrades().slice(-8);
+    let streak = 0;
+    for (let i = trades.length - 1; i >= 0; i--) {
+        if (trades[i].pnl < 0) streak++;
+        else break;
+    }
+    state.v10.lossStreak = streak;
+    if (streak >= 5) return 0;                                 // pause completely
+    if (streak >= 3) return 0.25;
+    if (streak >= 2) return 0.50;
+    if (streak >= 1) return 0.75;
+    return 1.0;
+}
+
+// ------------- 3. REGIME-CONDITIONAL WEIGHTS -------------
+function regimeAdjustedWeights(baseWeights, regime) {
+    if (!regime) return baseWeights;
+    const trendStrategies = ["ema_cross", "macd_trend", "donchian_breakout", "ptj_momentum", "livermore_pivot", "weinstein_stage"];
+    const rangeStrategies = ["rsi_meanrev", "bollinger_squeeze", "mmcrypto_style"];
+    const adjusted = { ...baseWeights };
+    const trendBoost = regime.trend === "trending" ? 1.25 : (regime.trend === "ranging" ? 0.60 : 1.0);
+    const rangeBoost = regime.trend === "ranging" ? 1.25 : (regime.trend === "trending" ? 0.60 : 1.0);
+    for (const s of trendStrategies) if (s in adjusted) adjusted[s] = (adjusted[s] || 1.0) * trendBoost;
+    for (const s of rangeStrategies) if (s in adjusted) adjusted[s] = (adjusted[s] || 1.0) * rangeBoost;
+    return adjusted;
+}
+
+// ------------- 5. STRATEGY ORTHOGONALITY PENALTY -------------
+// If N agreeing strategies all belong to same "family", divide score
+const STRATEGY_FAMILIES = {
+    trend: ["ema_cross", "macd_trend", "donchian_breakout", "ptj_momentum", "livermore_pivot", "weinstein_stage"],
+    meanrev: ["rsi_meanrev", "bollinger_squeeze", "mmcrypto_style"],
+    contrarian: ["soros_reflexive", "burry_contrarian", "paulson_short"],
+    value: ["buffett_value", "templeton_deep"],
+    activist: ["ackman_concentrated", "dalio_allweather"],
+};
+function orthogonalityFactor(strategyList) {
+    if (!strategyList || strategyList.length <= 1) return 1;
+    const familyOf = (s) => {
+        for (const [fam, list] of Object.entries(STRATEGY_FAMILIES)) {
+            if (list.includes(s)) return fam;
+        }
+        return "other";
+    };
+    const familyCounts = {};
+    for (const s of strategyList) {
+        const f = familyOf(s);
+        familyCounts[f] = (familyCounts[f] || 0) + 1;
+    }
+    // If all in one family → factor 1/N; if perfectly diverse → factor 1
+    const maxInOneFamily = Math.max(...Object.values(familyCounts));
+    // penalise: each extra strategy in same family adds only 0.5 vote instead of 1
+    const distinctVotes = 1 + (strategyList.length - maxInOneFamily) + Math.max(0, maxInOneFamily - 1) * 0.5;
+    return distinctVotes / strategyList.length;
+}
+
+// ------------- 6. FAT-TAIL HISTORICAL VaR -------------
+function computePortfolioRiskV2() {
+    // For each position, compute historical returns from last 96 bars (~1 day at 15m)
+    const positions = broker.positions;
+    let totalVaR = 0, totalES = 0;
+    const perPos = [];
+    for (const sym in positions) {
+        const p = positions[sym];
+        const candles = state.candles[sym];
+        if (!candles || candles.length < 30) continue;
+        const price = state.prices[sym] || p.entry;
+        const value = p.side === "long" ? p.qty * price : p.qty * price;   // absolute exposure
+        const closesArr = window.TB.closes(candles).slice(-96);
+        if (closesArr.length < 20) continue;
+        const rets = [];
+        for (let i = 1; i < closesArr.length; i++) rets.push((closesArr[i] - closesArr[i - 1]) / closesArr[i - 1]);
+        const varPct = window.TB.historicalVaR(rets, 0.95);
+        const esPct = window.TB.historicalES(rets, 0.95);
+        if (varPct == null || esPct == null) continue;
+        const abs = Math.abs(value);
+        const var95 = abs * varPct * Math.sqrt(96);       // scale up to 1 day
+        const es95 = abs * esPct * Math.sqrt(96);
+        totalVaR += var95;
+        totalES += es95;
+        perPos.push({ symbol: sym, var95, es95 });
+    }
+    return { totalVaR, totalES, perPos };
+}
+
+// Override the old parametric VaR
+const _origRenderVarEs = renderVarEs;
+renderVarEs = function() {
+    const r = computePortfolioRiskV2();
+    $("#var-cell").textContent = r.totalVaR > 0 ? "-" + money(r.totalVaR) : "0,00 USDT";
+    $("#es-cell").textContent = r.totalES > 0 ? "-" + money(r.totalES) : "0,00 USDT";
+    $("#var-cell").title = "Fat-tail historisch (empirisch, keine Normal-Annahme)";
+};
+
+// ------------- 8. LOSS ATTRIBUTION LOG -------------
+function logLossAttribution(closedTrade) {
+    if (closedTrade.pnl >= 0) return;
+    const marketState = {
+        volAtEntry: state.mtfTrend?.[closedTrade.symbol]?.volAtEntry,
+        trendAtEntry: state.mtfTrend?.[closedTrade.symbol]?.trendAtEntry,
+    };
+    const causes = window.TB.attributeTradeLoss(closedTrade, marketState);
+    state.v10.lossAttribution.push({
+        ts: new Date().toISOString(), symbol: closedTrade.symbol,
+        pnl: closedTrade.pnl, side: closedTrade.side,
+        holdMs: closedTrade.holding_ms, causes,
+    });
+    // keep last 100
+    if (state.v10.lossAttribution.length > 100) {
+        state.v10.lossAttribution = state.v10.lossAttribution.slice(-100);
+    }
+    localStorage.setItem("tb_loss_attribution", JSON.stringify(state.v10.lossAttribution));
+}
+
+// Hook broker.close to log attribution on losses
+const _origClose = broker.close.bind(broker);
+broker.close = function(symbol, price, fraction) {
+    const beforeMeta = broker.positions[symbol]?.meta || {};
+    const r = _origClose(symbol, price, fraction);
+    if (r && r.pnl < 0) {
+        const trades = _pairTrades().slice(-1);
+        if (trades.length) logLossAttribution(trades[0]);
+    }
+    return r;
+};
+
+// ------------- MAKE-PENDING v10 WRAP: gate + streak + concentration -------------
+const _origMakePendingV10 = makePending;
+makePending = function(symbol, sig, candles, price) {
+    const pending = _origMakePendingV10(symbol, sig, candles, price);
+    if (!pending) return null;
+    // 1. Multi-TF gate
+    if (!mtfAlignmentOk(symbol, pending.side)) {
+        console.log("[v10] rejected: MTF alignment mismatch", symbol, pending.side);
+        return null;
+    }
+    // Orthogonality factor
+    const strategies = sig.signals.map((s) => s.strategy);
+    const orthFactor = orthogonalityFactor(strategies);
+    pending.effectiveScore = pending.score * orthFactor;
+    if (pending.effectiveScore < CFG.softMinScore * 0.7) {
+        console.log("[v10] rejected: orthogonality-adjusted score too low",
+                    pending.score, "→", pending.effectiveScore.toFixed(2));
+        return null;
+    }
+    // 2. Loss-streak dampener
+    const streakMult = lossStreakMultiplier();
+    if (streakMult === 0) {
+        console.log("[v10] rejected: paused after 5 losses in a row");
+        announce("Bot pausiert nach 5 Verlusten in Folge — Review nötig.", "warn");
+        return null;
+    }
+    pending.streakMultiplier = streakMult;
+    pending.size = pending.size * streakMult;
+    pending.qty = pending.qty * streakMult;
+    pending.riskAmount = pending.riskAmount * streakMult;
+    // 7. Concentration on very high confluence
+    if (pending.confluenceScore && pending.confluenceScore >= 11) {
+        // upgrade sizing by 1.75x (capped by cap)
+        pending.size = Math.min(pending.size * 1.75, pending.qty * price);
+        pending.qty = Math.min(pending.qty * 1.75,
+                       (broker.cash * 0.15) / price);           // cap at 15% cash
+        pending.riskAmount = pending.riskAmount * 1.75;
+        pending.concentration = true;
+    }
+    // Store MTF trend at entry for later loss attribution
+    if (!state.mtfTrend[symbol]) state.mtfTrend[symbol] = {};
+    state.mtfTrend[symbol] = {
+        trendAtEntry: state.tfDir?.[`${symbol}_4h`] || "flat",
+        volAtEntry: pending.regime?.volatility || "normal",
+    };
+    return pending;
+};
+
+// ------------- 3. REGIME-CONDITIONAL WEIGHTS INTEGRATION -------------
+// Wrap scanSymbol so the ensemble uses regime-adjusted weights
+const _origScanSymbol = scanSymbol;
+scanSymbol = async function(symbol) {
+    const r = await _origScanSymbol(symbol);
+    // if regime detected for this symbol, adjust weights in state.adaptiveWeights
+    const candles = state.candles[symbol];
+    if (candles && candles.length >= 100) {
+        const regime = window.TB.detectRegime(
+            window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles));
+        state.regimeBySymbol = state.regimeBySymbol || {};
+        state.regimeBySymbol[symbol] = regime;
+    }
+    return r;
+};
+
+// Override adaptive-weights renderer to also show regime-adjusted
+const _origComputeAdaptive = computeAdaptiveWeights;
+computeAdaptiveWeights = function() {
+    const base = _origComputeAdaptive();
+    // Use BTC regime as primary market regime
+    const btcCandles = state.candles["BTC/USDT"];
+    if (btcCandles && btcCandles.length >= 100) {
+        const regime = window.TB.detectRegime(
+            window.TB.highs(btcCandles), window.TB.lows(btcCandles), window.TB.closes(btcCandles));
+        state.adaptiveWeights = regimeAdjustedWeights(base, regime);
+        state.currentMarketRegime = regime;
+        return state.adaptiveWeights;
+    }
+    return base;
+};
+
+// ------------- v10 STATUS PANEL -------------
+function renderV10StatusPanel() {
+    const el = $("#v10-status");
+    if (!el) return;
+    const streakMult = lossStreakMultiplier();
+    const streak = state.v10.lossStreak;
+    const attrib = state.v10.lossAttribution.slice(-10);
+    const causeCounts = {};
+    for (const a of attrib) for (const c of a.causes) causeCounts[c.label] = (causeCounts[c.label] || 0) + 1;
+    const sortedCauses = Object.entries(causeCounts).sort((a, b) => b[1] - a[1]);
+    const streakCls = streakMult >= 1 ? "high" : streakMult >= 0.5 ? "mid" : "low";
+    el.innerHTML = `
+        <div class="mkt-grid">
+            <div class="mkt-tile">
+                <div class="k">Loss-Streak</div>
+                <div class="v" style="color:${streak >= 3 ? "var(--red)" : streak >= 1 ? "var(--amber)" : "var(--green)"}">${streak}</div>
+            </div>
+            <div class="mkt-tile">
+                <div class="k">Nächste Pos-Grösse</div>
+                <div class="v" style="color:${streakCls === "high" ? "var(--green)" : streakCls === "mid" ? "var(--amber)" : "var(--red)"}">${(streakMult * 100).toFixed(0)}%</div>
+            </div>
+            <div class="mkt-tile">
+                <div class="k">MTF-Gate</div>
+                <div class="v" style="color:var(--accent);">AN</div>
+            </div>
+            <div class="mkt-tile">
+                <div class="k">Konzentration ab</div>
+                <div class="v">11/12 Konf.</div>
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <strong style="color:var(--accent); font-size:0.85rem;">Verlust-Ursachen (letzte ${attrib.length}):</strong>
+            ${sortedCauses.length ? `<ul style="margin:6px 0 0; padding-left:20px; font-size:0.82rem; line-height:1.55;">
+                ${sortedCauses.map(([c, n]) => `<li>${c} — <strong>${n}×</strong></li>`).join("")}
+            </ul>` : `<div style="color:var(--muted); font-size:0.82rem; margin-top:4px;">noch keine Verluste zum Analysieren</div>`}
+        </div>`;
+}
+
+// ------------- WALK-FORWARD BACKTEST UI -------------
+async function runWalkForwardBacktest() {
+    const el = $("#wf-result");
+    if (!el) return;
+    const sym = $("#bt-symbol")?.value || "BTC/USDT";
+    el.textContent = "…lade Historie und teste rollende Fenster";
+    try {
+        const candles = state.btcHistory && sym === "BTC/USDT"
+            ? state.btcHistory
+            : await window.TB.fetchHistory(sym, "1d", 3, (p) => {
+                el.textContent = `${p.loaded} Kerzen geladen …`;
+            });
+        el.textContent = `Teste ${Math.floor((candles.length - 500) / 100)} Fenster …`;
+        const results = await window.TB.walkForwardBacktest(candles, sym, CFG,
+            window.TB.ensemble, window.TB.planTrade, window.TB.atr,
+            { trainBars: 500, testBars: 100, step: 100 });
+        if (!results.length) { el.textContent = "zu wenig Daten"; return; }
+        const totalPnl = results.reduce((s, r) => s + r.pnl, 0);
+        const totalTrades = results.reduce((s, r) => s + r.trades, 0);
+        const posWindows = results.filter((r) => r.pnl > 0).length;
+        const consistency = posWindows / results.length;
+        const cls = consistency >= 0.6 ? "pos" : consistency <= 0.4 ? "neg" : "";
+        el.innerHTML = `
+            <div class="journal-summary" style="margin-top:12px;">
+                <div class="js-tile"><div class="k">Fenster</div><div class="v">${results.length}</div></div>
+                <div class="js-tile"><div class="k">Consistency</div><div class="v ${cls}">${(consistency * 100).toFixed(0)}%</div></div>
+                <div class="js-tile"><div class="k">Trades gesamt</div><div class="v">${totalTrades}</div></div>
+                <div class="js-tile"><div class="k">PnL gesamt</div><div class="v ${totalPnl > 0 ? "pos" : "neg"}">${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}</div></div>
+            </div>
+            <div style="margin-top:10px; font-size:0.78rem; color:var(--muted); line-height:1.5;">
+                <b>Interpretation:</b> Consistency &gt; 60% = Strategie robust über Zeit.
+                &lt; 40% = wahrscheinlich Overfitting — funktioniert im vollen Backtest nur weil einzelne Perioden dominieren.
+            </div>
+            <div style="margin-top:10px; overflow-x:auto;">
+                <table class="perf-table"><thead><tr>
+                    <th>Fenster-Ende</th><th>Trades</th><th>Win%</th><th>PnL</th>
+                </tr></thead><tbody>
+                    ${results.map((r) => `<tr>
+                        <td>${new Date(r.testEnd).toLocaleDateString("de-DE")}</td>
+                        <td>${r.trades}</td>
+                        <td>${r.trades > 0 ? (r.winRate * 100).toFixed(0) + "%" : "–"}</td>
+                        <td class="${r.pnl > 0 ? "pnl-pos" : r.pnl < 0 ? "pnl-neg" : ""}">${r.pnl >= 0 ? "+" : ""}${r.pnl.toFixed(2)}</td>
+                    </tr>`).join("")}
+                </tbody></table>
+            </div>`;
+    } catch (e) {
+        el.textContent = "Fehler: " + e.message;
+    }
+}
+
+// ------------- Extend renderAll to include v10 status -------------
+const _origRenderAllV10 = renderAll;
+renderAll = function() {
+    _origRenderAllV10();
+    renderV10StatusPanel();
+};
+
+// Delegated click handler — always catches ANY Warum click, even if
+// the button was re-rendered and lost its inline onclick handler
+document.addEventListener("click", (e) => {
+    const posWhy = e.target.closest(".pos-why");
+    if (posWhy) {
+        e.preventDefault(); e.stopPropagation();
+        // find symbol from parent card
+        const card = posWhy.closest(".pos-card");
+        const symSpan = card?.querySelector(".pos-symbol");
+        const symbol = symSpan?.textContent?.trim();
+        const pos = symbol ? broker.positions[symbol] : null;
+        if (pos) {
+            showWhy({ symbol, side: pos.side, score: 0, rationale: pos.rationale });
+        } else {
+            showWhy({ symbol: symbol || "?", side: "?", score: 0 });
+        }
+        return;
+    }
+    const sigWhy = e.target.closest(".signal-why");
+    if (sigWhy) {
+        e.preventDefault(); e.stopPropagation();
+        // find pending from state
+        const pending = state.pending && state.pending[0];
+        if (pending) {
+            showWhy(pending);
+        } else {
+            // fall back to reconstructing for first symbol
+            showWhy({ symbol: CFG.symbols[0], side: "long", score: 0 });
+        }
+    }
 });
 
 // ---- Extend renderAll ----

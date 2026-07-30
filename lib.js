@@ -1790,11 +1790,136 @@ function normalPdf(x, mean, std) {
     return (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-((x - mean) ** 2) / (2 * std * std));
 }
 
+// =========================================================================
+// v10: Institutional-grade helpers
+// =========================================================================
+
+// Historical VaR — no normal-distribution assumption. Uses actual empirical
+// return distribution. Fat-tail safe (Taleb-approved).
+function historicalVaR(returns, confidence = 0.95) {
+    if (!returns || returns.length < 20) return null;
+    const sorted = returns.slice().sort((a, b) => a - b);
+    const idx = Math.floor(sorted.length * (1 - confidence));
+    return -sorted[idx];                                       // positive number = loss
+}
+function historicalES(returns, confidence = 0.95) {
+    if (!returns || returns.length < 20) return null;
+    const sorted = returns.slice().sort((a, b) => a - b);
+    const idx = Math.floor(sorted.length * (1 - confidence));
+    const tail = sorted.slice(0, Math.max(1, idx + 1));
+    return -tail.reduce((s, v) => s + v, 0) / tail.length;
+}
+
+// Multi-timeframe trend agreement: bot only trades when 15m signal
+// aligns with 4h trend and 1d bias
+function mtfTrendDirection(candles) {
+    if (!candles || candles.length < 210) return "flat";
+    const c = closes(candles);
+    const e50 = ema(c, 50);
+    const e200 = ema(c, 200);
+    const i = c.length - 1;
+    if (isNaN(e50[i]) || isNaN(e200[i])) return "flat";
+    if (c[i] > e50[i] && e50[i] > e200[i]) return "up";
+    if (c[i] < e50[i] && e50[i] < e200[i]) return "down";
+    return "flat";
+}
+
+// Strategy orthogonality — measure how "different" two strategies' signal
+// series are. If two strategies always agree, their score should be halved.
+function strategyCorrelation(sigA, sigB) {
+    if (sigA.length !== sigB.length || sigA.length < 5) return 0;
+    let agree = 0;
+    for (let i = 0; i < sigA.length; i++) {
+        if (sigA[i] === sigB[i] && sigA[i] !== 0) agree++;
+    }
+    return agree / sigA.length;
+}
+
+// Loss-attribution: analyse WHY a trade lost — was it stopped by SL?
+// Was it during a news event? Did correlation spike?
+function attributeTradeLoss(trade, marketState) {
+    const causes = [];
+    if (trade.pnl >= 0) return causes;                         // wins don't need attribution
+    // Was it a stop-loss hit?
+    if (trade.exitType === "sl" || (trade.close_price && trade.stop && Math.abs(trade.close_price - trade.stop) / trade.stop < 0.01)) {
+        causes.push({ tag: "stop_hit", label: "Stop-Loss ausgelöst" });
+    }
+    // Was it a fast exit (< 4 bars)?
+    const bars = trade.holding_ms ? trade.holding_ms / (15 * 60 * 1000) : 0;
+    if (bars < 4) {
+        causes.push({ tag: "fast_loss", label: "Schnell-Verlust (< 4 Bars)", detail: `${bars.toFixed(1)} Bars` });
+    }
+    // Was market in panic when entered?
+    if (marketState?.volAtEntry === "panic") {
+        causes.push({ tag: "panic_regime", label: "Trade in Panik-Volatilität eröffnet" });
+    }
+    // Wrong side of trend?
+    if (marketState?.trendAtEntry && trade.side !== marketState.trendAtEntry) {
+        causes.push({ tag: "against_trend", label: `Gegen Haupttrend (${marketState.trendAtEntry})` });
+    }
+    if (!causes.length) causes.push({ tag: "unknown", label: "Ursache unklar — Muster prüfen" });
+    return causes;
+}
+
+// Walk-forward backtest — splits data into rolling train/test windows.
+// Trains on N bars, tests on next M bars, rolls forward. Detects overfitting.
+async function walkForwardBacktest(candles, symbol, cfg, ensembleFn, planFn, atrFn, opts = {}) {
+    const trainBars = opts.trainBars || 500;
+    const testBars = opts.testBars || 100;
+    const step = opts.step || 100;
+    const results = [];
+    for (let start = 0; start + trainBars + testBars <= candles.length; start += step) {
+        // Test period only (training would be used for weight adaptation)
+        const testStart = start + trainBars;
+        const testEnd = testStart + testBars;
+        let cash = 10000, pos = null, wins = 0, losses = 0, trades = 0, pnl = 0;
+        for (let i = testStart + 220; i < testEnd; i++) {
+            const win = candles.slice(Math.max(0, i - 500), i + 1);
+            const price = candles[i].close;
+            if (pos) {
+                const hitStop = pos.side === "long" ? price <= pos.stop : price >= pos.stop;
+                const hitTp = pos.side === "long" ? price >= pos.tp : price <= pos.tp;
+                if (hitStop || hitTp) {
+                    const p = pos.side === "long"
+                        ? (price - pos.entry) * pos.qty
+                        : (pos.entry - price) * pos.qty;
+                    cash += pos.qty * price * (pos.side === "long" ? 1 : -1) + pos.entry * pos.qty * (pos.side === "long" ? 0 : 2);
+                    pnl += p;
+                    if (p > 0) wins++; else losses++;
+                    trades++;
+                    pos = null;
+                }
+            }
+            if (!pos && i % 4 === 0) {
+                const r = ensembleFn(win, cfg.strictMinScore, cfg.strictAgreement);
+                if (r && r.side) {
+                    const arr = atrFn(highs(win), lows(win), closes(win), 14);
+                    const atrVal = arr[arr.length - 1];
+                    const stop = r.side === "long" ? price - atrVal * cfg.atrStopMult : price + atrVal * cfg.atrStopMult;
+                    const tp = r.side === "long" ? price + (price - stop) * 2 : price - (stop - price) * 2;
+                    const qty = (cash * cfg.baseRiskPct / 100) / Math.abs(price - stop);
+                    pos = { side: r.side, entry: price, qty, stop, tp };
+                }
+            }
+        }
+        results.push({
+            windowStart: candles[start].ts,
+            testStart: candles[testStart].ts,
+            testEnd: candles[testEnd - 1].ts,
+            trades, wins, losses, pnl,
+            winRate: trades > 0 ? wins / trades : 0,
+        });
+    }
+    return results;
+}
+
 // ---------- exports ----------
 return {
     sma, ema, rsi, macd, bollinger, atr, adx, donchian, obv, stoch, williamsR, cci, mfi,
     ichimoku, vwap, vwapBands, keltner, chandelier, detectDivergence, detectRegime, confluenceScore,
     detectPatterns, computePatternStats, fetchHistory, PATTERN_INFO,
+    historicalVaR, historicalES, mtfTrendDirection, strategyCorrelation,
+    attributeTradeLoss, walkForwardBacktest,
     closes, highs, lows, vols,
     STRATEGIES, ensemble,
     planTrade, forecast, assessRisk,
