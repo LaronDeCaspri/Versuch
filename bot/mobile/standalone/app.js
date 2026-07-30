@@ -4,18 +4,32 @@
  * ============================================================ */
 (function () {
 
+const ALL_SYMBOLS = [
+    "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT",
+    "AVAX/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT", "TRX/USDT", "TON/USDT",
+    "DOGE/USDT", "SHIB/USDT", "LTC/USDT", "BCH/USDT", "UNI/USDT", "ATOM/USDT",
+    "NEAR/USDT", "APT/USDT", "ARB/USDT", "OP/USDT", "SUI/USDT", "SEI/USDT",
+    "ICP/USDT", "AAVE/USDT", "FIL/USDT", "INJ/USDT", "RNDR/USDT", "FET/USDT",
+];
+
+function loadSymbols() {
+    const stored = JSON.parse(localStorage.getItem("tb_symbols") || "null");
+    return stored && Array.isArray(stored) && stored.length ? stored :
+        ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT",
+         "AVAX/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT"];
+}
+
 const CFG = {
-    symbols: [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT",
-        "XRP/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT",
-    ],
+    symbols: loadSymbols(),
     primaryTf: "15m",
     scanIntervalSec: 30,
     priceIntervalSec: 10,
-    riskPctPerTrade: 0.5,                    // very conservative
+    // dynamic sizing: base 0.5%, scales up to 3% for top-quality setups
+    baseRiskPct: 0.5,
+    maxRiskPct: 3.0,
     atrStopMult: 1.8,
     tpMultiples: [2.0, 3.5, 5.0],
-    maxOpenPositions: 3,
+    maxOpenPositions: 5,
     // strict filters — auto-trade ONLY on best setups
     strictMinScore: 3.0,
     strictAgreement: 3,
@@ -24,6 +38,11 @@ const CFG = {
     softMinScore: 1.8,
     softAgreement: 2,
     softMaxRisk: 55,
+    // kill switch
+    maxDailyLossPct: 4.0,
+    maxDrawdownPct: 15.0,
+    // correlation warning
+    correlationWarnThreshold: 0.75,
 };
 
 const state = {
@@ -34,6 +53,14 @@ const state = {
     fng: null,
     scanCount: 0,
     tradeCount: 0,
+    equityHistory: JSON.parse(localStorage.getItem("tb_equity_hist") || "[]"),
+    peakEquity: parseFloat(localStorage.getItem("tb_peak_equity") || "10000"),
+    dayStartEquity: parseFloat(localStorage.getItem("tb_day_equity") || "10000"),
+    dayStartDate: localStorage.getItem("tb_day_date") || new Date().toDateString(),
+    halted: localStorage.getItem("tb_halted") === "1",
+    watchlist: JSON.parse(localStorage.getItem("tb_watchlist") || "[]"),
+    news: [],
+    lastNewsFetch: 0,
 };
 
 const broker = new window.TB.PaperBroker(10000);
@@ -96,11 +123,19 @@ function renderSignalTile(pending, fallback) {
                 <div class="row"><span>Bei Stop-Loss</span><strong class="num" style="color:var(--red)">-${money(f.lossAtStop)}</strong></div>
                 <div class="row"><span>Erwartungswert (50/50)</span><strong class="num">${money(f.ev)}</strong></div>
             </div>
+            <div class="rationale-block">
+                <div class="head">Warum dieser Trade? · ${pending.signals.length} Strategie${pending.signals.length !== 1 ? "n" : ""}</div>
+                ${pending.signals.map((s) => `<div class="rat-item"><span class="rat-strat">${s.strategy.replace(/_/g, " ")}</span>${s.reason}</div>`).join("")}
+                ${pending.highCorr.length ? `<div class="corr-warning">⚠ Hohe Korrelation mit offener Position: ${pending.highCorr.map((c) => `${c.sym} (ρ ${c.corr.toFixed(2)})`).join(", ")}. Diversifikations-Warnung.</div>` : ""}
+                ${pending.newsForSymbol.length ? `<div class="rat-news"><div class="head">Aktuelle News zu ${pending.symbol.replace("/USDT","")}</div>${pending.newsForSymbol.map((n) => `<a href="${n.url}" target="_blank" rel="noopener">• ${n.title} <small style="color:var(--muted)">(${n.source})</small></a>`).join("")}</div>` : ""}
+            </div>
             <div class="btn-row" style="margin-top:16px;">
                 <button class="confirm" id="confirm-btn">✓ BESTÄTIGEN</button>
                 <button class="danger" id="cancel-btn">✕ VERWERFEN</button>
             </div>
-            <div style="margin-top:10px; font-size:0.72rem; color:var(--muted); text-align:left;">${pending.reasons.slice(0, 3).join(" · ")}</div>
+            <div style="margin-top:10px; font-size:0.72rem; color:var(--muted); text-align:left;">
+                Dynamisches Risiko: ${(pending.dynRiskPct || CFG.baseRiskPct).toFixed(2)}% des Depots
+            </div>
         `;
         $("#confirm-btn").onclick = () => confirmPending(pending);
         $("#cancel-btn").onclick = () => cancelPending(pending);
@@ -380,6 +415,33 @@ function cancelPending(p) {
     renderAll();
 }
 
+function dynamicRiskPct(score, riskScore) {
+    // Score 3 → base risk, higher score linearly up to max risk
+    const scoreBoost = Math.min(Math.max((score - 2.0) / 3.0, 0), 1);
+    const riskDampen = 1 - Math.min(riskScore / 100, 0.7);
+    const pct = CFG.baseRiskPct + (CFG.maxRiskPct - CFG.baseRiskPct) * scoreBoost * riskDampen;
+    return Math.max(CFG.baseRiskPct * 0.5, Math.min(CFG.maxRiskPct, pct));
+}
+
+function correlationOf(symbolA, symbolB) {
+    const a = state.candles[symbolA], b = state.candles[symbolB];
+    if (!a || !b || a.length < 50 || b.length < 50) return 0;
+    const ra = [], rb = [];
+    const n = Math.min(50, a.length - 1, b.length - 1);
+    for (let i = a.length - n; i < a.length; i++) ra.push((a[i].close / a[i - 1].close) - 1);
+    for (let i = b.length - n; i < b.length; i++) rb.push((b[i].close / b[i - 1].close) - 1);
+    const mean = (arr) => arr.reduce((s, v) => s + v, 0) / arr.length;
+    const ma = mean(ra), mb = mean(rb);
+    let num = 0, sa2 = 0, sb2 = 0;
+    for (let i = 0; i < ra.length; i++) {
+        num += (ra[i] - ma) * (rb[i] - mb);
+        sa2 += (ra[i] - ma) ** 2;
+        sb2 += (rb[i] - mb) ** 2;
+    }
+    const denom = Math.sqrt(sa2 * sb2);
+    return denom ? num / denom : 0;
+}
+
 function makePending(symbol, sig, candles, price) {
     if (broker.positions[symbol]) return null;
     if (Object.keys(broker.positions).length >= CFG.maxOpenPositions) return null;
@@ -387,10 +449,21 @@ function makePending(symbol, sig, candles, price) {
     const atrVal = atrValues[atrValues.length - 1];
     if (!atrVal || isNaN(atrVal)) return null;
     const equity = broker.equity(state.prices);
-    const plan = window.TB.planTrade(sig.side, price, atrVal, equity, CFG);
+    // pre-compute risk to size dynamically
+    const provisionalPlan = window.TB.planTrade(sig.side, price, atrVal, equity, CFG);
+    if (!provisionalPlan) return null;
+    const risk = window.TB.assessRisk(provisionalPlan, candles, broker.positions, equity);
+    const dynRiskPct = dynamicRiskPct(sig.score, risk.score);
+    const plan = window.TB.planTrade(sig.side, price, atrVal, equity,
+        { ...CFG, riskPctPerTrade: dynRiskPct });
     if (!plan || plan.size <= 0) return null;
     const forecast = window.TB.forecast(plan);
-    const risk = window.TB.assessRisk(plan, candles, broker.positions, equity);
+    // correlation warnings
+    const highCorr = [];
+    for (const openSym of Object.keys(broker.positions)) {
+        const c = correlationOf(symbol, openSym);
+        if (Math.abs(c) >= CFG.correlationWarnThreshold) highCorr.push({ sym: openSym, corr: c });
+    }
     return {
         id: symbol + "_" + Date.now(),
         symbol, ...plan,
@@ -398,7 +471,8 @@ function makePending(symbol, sig, candles, price) {
         signals: sig.signals,
         reasons: sig.signals.map((s) => `${s.strategy}: ${s.reason}`),
         strategy: sig.signals.map((s) => s.strategy).join(","),
-        forecast, risk,
+        forecast, risk, dynRiskPct, highCorr,
+        newsForSymbol: filterNewsForSymbol(symbol),
     };
 }
 
@@ -463,6 +537,14 @@ async function scanSymbol(symbol) {
 
 async function scanAll() {
     state.scanCount++;
+    pushEquityPoint();
+    if (state.halted) {
+        // still refresh prices to keep charts alive
+        const results = await Promise.all(CFG.symbols.map(scanSymbol));
+        state.lastScan = results;
+        renderAll();
+        return;
+    }
     const results = await Promise.all(CFG.symbols.map(scanSymbol));
     state.lastScan = results;
 
@@ -521,6 +603,232 @@ async function refreshFng() {
     if (d) { state.fng = d; renderFng(); }
 }
 
+// ============ NEW: equity curve tracking ============
+function pushEquityPoint() {
+    const eq = broker.equity(state.prices);
+    state.equityHistory.push({ ts: Date.now(), eq });
+    if (state.equityHistory.length > 500) state.equityHistory = state.equityHistory.slice(-500);
+    if (eq > state.peakEquity) {
+        state.peakEquity = eq;
+        localStorage.setItem("tb_peak_equity", String(eq));
+    }
+    localStorage.setItem("tb_equity_hist", JSON.stringify(state.equityHistory));
+}
+
+function renderEquityChart() {
+    const svg = $("#equity-chart");
+    if (!svg) return;
+    const hist = state.equityHistory;
+    const start = broker.startingBalance || 10000;
+    const points = hist.length ? hist.slice(-120) : [{ ts: Date.now(), eq: start }];
+    const vals = points.map((p) => p.eq);
+    const min = Math.min(start, ...vals) * 0.995;
+    const max = Math.max(start, ...vals) * 1.005;
+    const w = 400, h = 100;
+    const xStep = w / Math.max(points.length - 1, 1);
+    const y = (v) => h - ((v - min) / (max - min)) * h;
+    const line = points.map((p, i) => `${i * xStep},${y(p.eq).toFixed(1)}`).join(" ");
+    const area = `M0,${h} L${line.split(" ").join(" L")} L${w},${h} Z`;
+    const startY = y(start).toFixed(1);
+    svg.innerHTML = `
+        <defs><linearGradient id="eq-gradient" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#4d94ff" stop-opacity="0.35"/>
+            <stop offset="100%" stop-color="#4d94ff" stop-opacity="0"/>
+        </linearGradient></defs>
+        <line class="start-line" x1="0" y1="${startY}" x2="${w}" y2="${startY}"/>
+        <path class="area" d="${area}"/>
+        <polyline class="line" points="${line}"/>`;
+}
+
+// ============ NEW: kill switch ============
+function checkKillSwitch() {
+    const today = new Date().toDateString();
+    if (state.dayStartDate !== today) {
+        state.dayStartDate = today;
+        state.dayStartEquity = broker.equity(state.prices);
+        state.halted = false;
+        localStorage.setItem("tb_day_date", today);
+        localStorage.setItem("tb_day_equity", String(state.dayStartEquity));
+        localStorage.setItem("tb_halted", "0");
+    }
+    const eq = broker.equity(state.prices);
+    const dailyLoss = (state.dayStartEquity - eq) / state.dayStartEquity * 100;
+    const drawdown = (state.peakEquity - eq) / state.peakEquity * 100;
+    if (dailyLoss >= CFG.maxDailyLossPct || drawdown >= CFG.maxDrawdownPct) {
+        if (!state.halted) {
+            state.halted = true;
+            localStorage.setItem("tb_halted", "1");
+            const reason = dailyLoss >= CFG.maxDailyLossPct ? "Tages-Verlust-Limit" : "Max-Drawdown";
+            announce(`Kill-Switch ausgelöst wegen ${reason}. Bot pausiert bis morgen.`, "alert");
+        }
+    }
+    return { eq, dailyLoss, drawdown };
+}
+
+function renderKillSwitch() {
+    const el = $("#killswitch");
+    const s = checkKillSwitch();
+    const nOpen = Object.keys(broker.positions).length;
+    const barCls = (val, limit) => val >= limit ? "crit" : val >= limit * 0.6 ? "warn" : "ok";
+    const barPct = (val, limit) => Math.min(100, val / limit * 100);
+    const dlCls = barCls(Math.max(s.dailyLoss, 0), CFG.maxDailyLossPct);
+    const ddCls = barCls(Math.max(s.drawdown, 0), CFG.maxDrawdownPct);
+    const posCls = barCls(nOpen, CFG.maxOpenPositions);
+    el.innerHTML = `
+        <div class="ks-row"><span class="ks-label">Tages-Verlust</span><span class="ks-value ${dlCls}">${s.dailyLoss > 0 ? "-" : "+"}${Math.abs(s.dailyLoss).toFixed(2)}% / max ${CFG.maxDailyLossPct}%</span>
+          <div class="ks-bar-bg"><div class="ks-bar-fill risk-color-${dlCls === "crit" ? "red" : dlCls === "warn" ? "yellow" : "green"}" style="width:${barPct(Math.max(s.dailyLoss, 0), CFG.maxDailyLossPct)}%"></div></div></div>
+        <div class="ks-row"><span class="ks-label">Drawdown von Peak</span><span class="ks-value ${ddCls}">-${Math.max(s.drawdown, 0).toFixed(2)}% / max ${CFG.maxDrawdownPct}%</span>
+          <div class="ks-bar-bg"><div class="ks-bar-fill risk-color-${ddCls === "crit" ? "red" : ddCls === "warn" ? "yellow" : "green"}" style="width:${barPct(Math.max(s.drawdown, 0), CFG.maxDrawdownPct)}%"></div></div></div>
+        <div class="ks-row"><span class="ks-label">Offene Positionen</span><span class="ks-value ${posCls}">${nOpen} / ${CFG.maxOpenPositions}</span>
+          <div class="ks-bar-bg"><div class="ks-bar-fill risk-color-${posCls === "crit" ? "red" : posCls === "warn" ? "yellow" : "green"}" style="width:${barPct(nOpen, CFG.maxOpenPositions)}%"></div></div></div>
+        ${state.halted ? '<div class="ks-halted-banner">⚠ Bot pausiert · Kill-Switch aktiv · Reset über Portfolio-Button</div>' : ""}`;
+}
+
+// ============ NEW: symbol picker ============
+function renderSymbolPicker() {
+    $("#sym-count").textContent = CFG.symbols.length;
+    $("#sym-total").textContent = ALL_SYMBOLS.length;
+    $("#symbol-picker").innerHTML = ALL_SYMBOLS.map((s) => {
+        const active = CFG.symbols.includes(s);
+        return `<button class="sym-chip ${active ? "on" : ""}" data-sym="${s}">${s.replace("/USDT", "")}</button>`;
+    }).join("");
+    $("#symbol-picker").querySelectorAll(".sym-chip").forEach((b) => {
+        b.onclick = () => {
+            const s = b.dataset.sym;
+            if (CFG.symbols.includes(s)) {
+                CFG.symbols = CFG.symbols.filter((x) => x !== s);
+            } else {
+                CFG.symbols.push(s);
+            }
+            localStorage.setItem("tb_symbols", JSON.stringify(CFG.symbols));
+            renderSymbolPicker();
+            renderWatchlistOptions();
+            renderMatrix();
+        };
+    });
+}
+
+// ============ NEW: watchlist / price alerts ============
+function renderWatchlistOptions() {
+    const sel = $("#watch-symbol");
+    if (!sel) return;
+    sel.innerHTML = ALL_SYMBOLS.map((s) => `<option value="${s}">${s}</option>`).join("");
+}
+
+function renderWatchlist() {
+    const el = $("#watchlist");
+    if (!state.watchlist.length) { el.textContent = "keine Alarme gesetzt"; return; }
+    el.innerHTML = state.watchlist.map((w, i) => {
+        const live = state.prices[w.symbol];
+        const dist = live ? ((w.price - live) / live * 100) : null;
+        return `<div class="watch-row">
+            <span><strong>${w.symbol}</strong> ${w.direction === "above" ? "▲ über" : "▼ unter"} <span class="num">${w.price}</span>
+              <br><span class="live-price">${live ? `live ${live.toFixed(4)} (${dist > 0 ? "+" : ""}${dist.toFixed(2)}%)` : "–"}</span></span>
+            <span class="status ${w.hit ? "hit" : "armed"}">${w.hit ? "✓ ausgelöst" : "scharf"}</span>
+            <button class="watch-remove" data-i="${i}">✕</button>
+        </div>`;
+    }).join("");
+    el.querySelectorAll(".watch-remove").forEach((b) => {
+        b.onclick = () => {
+            state.watchlist.splice(parseInt(b.dataset.i), 1);
+            saveWatchlist();
+            renderWatchlist();
+        };
+    });
+}
+
+function saveWatchlist() {
+    localStorage.setItem("tb_watchlist", JSON.stringify(state.watchlist));
+}
+
+function checkWatchlist() {
+    for (const w of state.watchlist) {
+        if (w.hit) continue;
+        const p = state.prices[w.symbol];
+        if (!p) continue;
+        const hit = (w.direction === "above" && p >= w.price) || (w.direction === "below" && p <= w.price);
+        if (hit) {
+            w.hit = true;
+            w.hit_ts = new Date().toISOString();
+            announce(`Preis-Alarm: ${w.symbol} ${w.direction === "above" ? "über" : "unter"} ${w.price}. Aktueller Kurs ${p.toFixed(4)}.`, "alert");
+        }
+    }
+    saveWatchlist();
+}
+
+// ============ NEW: news integration ============
+async function fetchNews() {
+    if (Date.now() - state.lastNewsFetch < 5 * 60 * 1000) return;
+    try {
+        const raw = await fetch("https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest").then((r) => r.json());
+        if (raw?.Data) {
+            state.news = raw.Data.slice(0, 30).map((n) => ({
+                title: n.title, url: n.url, source: n.source_info?.name || n.source,
+                ts: new Date(n.published_on * 1000).toISOString(),
+                categories: (n.categories || "").split("|").filter(Boolean),
+                body: (n.body || "").slice(0, 240),
+            }));
+            state.lastNewsFetch = Date.now();
+        }
+    } catch (e) { /* silent */ }
+}
+
+function filterNewsForSymbol(symbol) {
+    const base = symbol.replace("/USDT", "").toUpperCase();
+    const aliases = { BTC: ["BITCOIN", "BTC"], ETH: ["ETHEREUM", "ETH"], SOL: ["SOLANA", "SOL"] };
+    const keys = aliases[base] || [base];
+    return state.news.filter((n) => {
+        const hay = (n.title + " " + (n.categories || []).join(" ")).toUpperCase();
+        return keys.some((k) => hay.includes(k));
+    }).slice(0, 3);
+}
+
+function renderNewsList() {
+    const el = $("#news-list");
+    $("#news-count").textContent = state.news.length + " Meldungen";
+    if (!state.news.length) { el.textContent = "News werden geladen ..."; return; }
+    el.innerHTML = state.news.slice(0, 10).map((n) => {
+        const t = new Date(n.ts).toLocaleString("de-DE", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
+        const tags = (n.categories || []).slice(0, 4).map((c) => `<span class="tag">${c}</span>`).join("");
+        return `<div class="news-item">
+            <div class="meta">${n.source} · ${t}</div>
+            <a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>
+            <div class="tags">${tags}</div>
+        </div>`;
+    }).join("");
+}
+
+// ============ NEW: per-strategy performance ============
+function renderStrategyPerformance() {
+    const trades = _pairTrades();
+    const buckets = {};
+    for (const t of trades) {
+        const strats = (t.strategy || "unknown").split(",").filter(Boolean);
+        for (const s of strats) {
+            if (!buckets[s]) buckets[s] = { trades: 0, wins: 0, losses: 0, pnl: 0 };
+            buckets[s].trades++;
+            buckets[s].pnl += t.pnl;
+            if (t.pnl > 0) buckets[s].wins++;
+            else if (t.pnl < 0) buckets[s].losses++;
+        }
+    }
+    const rows = Object.entries(buckets)
+        .sort((a, b) => b[1].pnl - a[1].pnl)
+        .map(([k, v]) => {
+            const wr = v.trades ? (v.wins / v.trades * 100) : 0;
+            const cls = v.pnl > 0 ? "pnl-pos" : v.pnl < 0 ? "pnl-neg" : "";
+            return `<tr>
+                <td>${k.replace(/_/g, " ")}</td>
+                <td>${v.trades}</td>
+                <td>${wr.toFixed(0)}%</td>
+                <td class="${cls}">${v.pnl >= 0 ? "+" : ""}${v.pnl.toFixed(2)}</td>
+            </tr>`;
+        }).join("");
+    $("#strat-perf").innerHTML = rows.length
+        ? `<table class="perf-table"><thead><tr><th>Strategie</th><th>Trades</th><th>Win %</th><th>PnL</th></tr></thead><tbody>${rows}</tbody></table>`
+        : "noch keine abgeschlossenen Trades";
+}
+
 function renderAll() {
     const active = state.pending[0];
     let fallback = null;
@@ -538,6 +846,12 @@ function renderAll() {
     renderMatrix();
     renderSignalsLog();
     renderJournal();
+    renderEquityChart();
+    renderKillSwitch();
+    renderWatchlist();
+    renderStrategyPerformance();
+    $("#peak-eq").textContent = money(state.peakEquity);
+    checkWatchlist();
 }
 
 // =========== event bindings ============================================
@@ -548,9 +862,19 @@ $("#btn-scan").onclick = async () => {
 };
 
 $("#btn-reset").onclick = () => {
-    if (!confirm("Portfolio wirklich zurücksetzen? Alle Trades und das Guthaben werden gelöscht.")) return;
+    if (!confirm("Portfolio wirklich zurücksetzen? Alle Trades und das Guthaben werden gelöscht. Start bei 10 000 USDT.")) return;
     broker.reset();
     state.pending = [];
+    state.equityHistory = [];
+    state.peakEquity = 10000;
+    state.dayStartEquity = 10000;
+    state.dayStartDate = new Date().toDateString();
+    state.halted = false;
+    localStorage.setItem("tb_peak_equity", "10000");
+    localStorage.setItem("tb_day_equity", "10000");
+    localStorage.setItem("tb_day_date", state.dayStartDate);
+    localStorage.setItem("tb_halted", "0");
+    localStorage.setItem("tb_equity_hist", "[]");
     announce("Portfolio zurückgesetzt. 10 000 Dollar Spielgeld wieder verfügbar.");
     renderAll();
 };
@@ -595,10 +919,29 @@ $("#btn-print")?.addEventListener("click", () => {
 document.querySelectorAll(".jv-tab").forEach((b) => b.classList.toggle("primary", b.dataset.view === journalState.view));
 
 // =========== boot ============================================
+// -------- watchlist add UI --------
+document.addEventListener("DOMContentLoaded", () => {
+    const addBtn = $("#watch-add");
+    if (addBtn) {
+        addBtn.onclick = () => {
+            const sym = $("#watch-symbol").value;
+            const dir = $("#watch-direction").value;
+            const price = parseFloat($("#watch-price").value);
+            if (!sym || !price || isNaN(price)) return;
+            state.watchlist.push({ symbol: sym, direction: dir, price, hit: false, added_ts: new Date().toISOString() });
+            saveWatchlist();
+            $("#watch-price").value = "";
+            renderWatchlist();
+        };
+    }
+});
+
 async function boot() {
     renderStrategies();
     renderTvSelect();
     updateModePill();
+    renderSymbolPicker();
+    renderWatchlistOptions();
     renderAll();
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
     keepAwake();
@@ -606,14 +949,16 @@ async function boot() {
         if (document.visibilityState === "visible") keepAwake();
     });
 
-    // initial scan
+    // initial scan + news
     await scanAll();
     refreshFng();
+    fetchNews().then(renderNewsList);
 
     // loops
     setInterval(scanAll, CFG.scanIntervalSec * 1000);
     setInterval(refreshPrices, CFG.priceIntervalSec * 1000);
     setInterval(refreshFng, 5 * 60 * 1000);
+    setInterval(() => { fetchNews().then(renderNewsList); }, 5 * 60 * 1000);
 }
 
 document.addEventListener("DOMContentLoaded", boot);

@@ -439,6 +439,169 @@ footer {
     color: var(--muted); font-size: 0.75rem;
 }
 
+/* -------------------- equity chart -------------------- */
+#equity-chart-wrap {
+    margin: 10px -4px; padding: 6px 4px 4px;
+    background: rgba(5,7,12,0.4);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+#equity-chart {
+    display: block; width: 100%; height: 84px;
+}
+#equity-chart .area { fill: url(#eq-gradient); opacity: 0.6; }
+#equity-chart .line { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+#equity-chart .grid { stroke: var(--border); stroke-width: 0.5; }
+#equity-chart .start-line { stroke: var(--muted); stroke-dasharray: 3 3; stroke-width: 0.5; }
+
+/* -------------------- kill switch panel -------------------- */
+.ks-row {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 8px; padding: 8px 0; align-items: center;
+    border-bottom: 1px solid var(--border); font-size: 0.85rem;
+}
+.ks-row:last-child { border-bottom: none; }
+.ks-label { color: var(--text-2); }
+.ks-value { font-family: "SF Mono", monospace; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ks-value.ok   { color: var(--green); }
+.ks-value.warn { color: var(--amber); }
+.ks-value.crit { color: var(--red); }
+.ks-bar-bg { grid-column: 1 / -1; height: 6px; background: var(--bg-2); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+.ks-bar-fill { height: 100%; transition: width 0.4s; border-radius: 3px; }
+.ks-halted-banner {
+    background: rgba(239,68,68,0.15); border: 1px solid var(--red);
+    padding: 10px; border-radius: 8px; text-align: center;
+    color: var(--red); font-weight: 700; margin-top: 10px;
+}
+
+/* -------------------- symbol picker -------------------- */
+#symbol-picker {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 6px;
+}
+.sym-chip {
+    padding: 8px 6px; border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 0.78rem; font-weight: 600;
+    text-align: center; cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+.sym-chip:hover { border-color: var(--accent); }
+.sym-chip.on {
+    background: rgba(77,148,255,0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* -------------------- watchlist -------------------- */
+.watchlist-add {
+    display: grid;
+    grid-template-columns: 2fr 1.4fr 1.4fr auto;
+    gap: 6px; margin-bottom: 10px;
+}
+.watchlist-add select, .watchlist-add input {
+    padding: 8px 8px; border-radius: 6px;
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border-strong);
+    font-family: inherit; font-size: 0.85rem;
+    color-scheme: dark;
+}
+.watchlist-add button { padding: 8px 12px; }
+.watch-row {
+    display: grid; grid-template-columns: 1fr auto auto auto;
+    gap: 8px; padding: 8px 0; align-items: center;
+    border-bottom: 1px solid var(--border); font-size: 0.85rem;
+}
+.watch-row:last-child { border-bottom: none; }
+.watch-row .live-price { color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.watch-row .status.armed { color: var(--amber); }
+.watch-row .status.hit { color: var(--green); font-weight: 700; }
+.watch-remove {
+    padding: 4px 8px; font-size: 0.7rem;
+    color: var(--red); border-color: rgba(239,68,68,0.4); flex: 0 0 auto;
+    background: rgba(239,68,68,0.08);
+}
+
+/* -------------------- news -------------------- */
+.news-item {
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+.news-item:last-child { border-bottom: none; }
+.news-item a { color: var(--text); text-decoration: none; }
+.news-item a:hover { color: var(--accent); }
+.news-item .meta {
+    color: var(--muted); font-size: 0.68rem;
+    text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 3px;
+}
+.news-item .tags { margin-top: 4px; }
+.news-item .tag {
+    display: inline-block; padding: 1px 6px; margin-right: 4px;
+    font-size: 0.65rem; background: var(--bg-2);
+    border: 1px solid var(--border); border-radius: 4px;
+    color: var(--muted);
+}
+
+/* -------------------- per-strategy performance -------------------- */
+.perf-table {
+    width: 100%; font-size: 0.82rem; border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+.perf-table th, .perf-table td {
+    padding: 7px 8px; text-align: right; border-bottom: 1px solid var(--border);
+}
+.perf-table th {
+    color: var(--muted); font-size: 0.65rem;
+    text-transform: uppercase; letter-spacing: 0.7px;
+    border-bottom: 1px solid var(--border-strong);
+}
+.perf-table th:first-child, .perf-table td:first-child {
+    text-align: left; color: var(--text);
+}
+.perf-table td.pnl-pos { color: var(--green); font-weight: 600; }
+.perf-table td.pnl-neg { color: var(--red);   font-weight: 600; }
+
+/* -------------------- pending-signal news + rationale block -------------------- */
+.rationale-block {
+    margin-top: 12px; padding: 12px;
+    background: rgba(5,7,12,0.5);
+    border: 1px solid var(--border);
+    border-radius: 10px; text-align: left;
+}
+.rationale-block .head {
+    font-size: 0.65rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1px;
+    font-weight: 600; margin-bottom: 8px;
+}
+.rat-item {
+    padding: 6px 0; border-bottom: 1px dashed var(--border);
+    font-size: 0.82rem; line-height: 1.4;
+}
+.rat-item:last-child { border-bottom: none; }
+.rat-item .rat-strat {
+    color: var(--accent); font-weight: 600; font-size: 0.72rem;
+    display: block; margin-bottom: 2px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.rat-news {
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+}
+.rat-news a { color: var(--text-2); text-decoration: none; display: block; padding: 4px 0; }
+.rat-news a:hover { color: var(--accent); }
+.corr-warning {
+    margin-top: 8px; padding: 8px 10px;
+    background: rgba(245,158,11,0.15);
+    border: 1px solid var(--amber);
+    border-left: 3px solid var(--amber);
+    border-radius: 6px;
+    font-size: 0.78rem; color: var(--amber);
+}
+
 /* -------------------- trade journal -------------------- */
 .journal-controls {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;

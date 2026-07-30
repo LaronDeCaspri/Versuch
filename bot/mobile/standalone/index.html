@@ -66,19 +66,48 @@
 
     <!-- portfolio -->
     <section class="card">
-        <h2>Portfolio <span class="badge">Paper</span></h2>
+        <h2>Portfolio <span class="badge">Paper · 10 000 USDT Start</span></h2>
         <div class="row"><span>Equity</span><strong class="num" id="equity">10 000,00 USDT</strong></div>
         <div class="row"><span>Cash</span><strong class="num" id="cash">10 000,00 USDT</strong></div>
         <div class="row"><span>Offene Positionen</span><strong class="num" id="pos-count">0</strong></div>
         <div class="row"><span>Realisierter PnL</span><strong class="num" id="pnl">0,00 USDT</strong></div>
+        <div class="row"><span>Peak-Equity</span><strong class="num" id="peak-eq">–</strong></div>
+        <div id="equity-chart-wrap"><svg id="equity-chart" viewBox="0 0 400 100" preserveAspectRatio="none"></svg></div>
         <div class="btn-row">
             <button id="btn-scan" class="primary">Jetzt scannen</button>
-            <button id="btn-reset" class="danger">Reset</button>
+            <button id="btn-reset" class="danger">Reset auf 10k</button>
         </div>
         <div class="toggle-row">
             <div class="lbl"><strong id="mode-label">Manuell (Demo)</strong> – Signale bestätigen · Vollautomatik wenn an</div>
             <div id="mode-toggle" class="toggle"></div>
         </div>
+    </section>
+
+    <!-- kill switch panel -->
+    <section class="card">
+        <h2>Kill-Switch &amp; Risiko-Limits</h2>
+        <div id="killswitch"></div>
+    </section>
+
+    <!-- symbol picker -->
+    <section class="card">
+        <h2>Handelspaare <span class="badge"><span id="sym-count">–</span> von <span id="sym-total">–</span> aktiv</span></h2>
+        <div id="symbol-picker"></div>
+    </section>
+
+    <!-- watchlist / price alerts -->
+    <section class="card">
+        <h2>Watchlist &amp; Preis-Alarme</h2>
+        <div class="watchlist-add">
+            <select id="watch-symbol"></select>
+            <select id="watch-direction">
+                <option value="above">steigt über</option>
+                <option value="below">fällt unter</option>
+            </select>
+            <input type="number" id="watch-price" placeholder="Preis" step="0.0001"/>
+            <button id="watch-add" class="primary">+</button>
+        </div>
+        <div id="watchlist"></div>
     </section>
 
     <!-- multi-tf matrix -->
@@ -119,6 +148,18 @@
     <section class="card">
         <h2>Letzte Scans</h2>
         <div id="signals"></div>
+    </section>
+
+    <!-- news -->
+    <section class="card">
+        <h2>Live-News <span class="badge" id="news-count">–</span></h2>
+        <div id="news-list"></div>
+    </section>
+
+    <!-- per-strategy performance -->
+    <section class="card">
+        <h2>Strategie-Performance</h2>
+        <div id="strat-perf"></div>
     </section>
 
     <!-- journal -->
