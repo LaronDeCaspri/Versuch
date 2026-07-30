@@ -2408,8 +2408,878 @@ renderAll = function() {
     renderJournalTaxHint();
 };
 
+// =====================================================================
+// v7: 18 features from remaining wishlist
+// =====================================================================
+
+// ============ v7: i18n minimal EN/DE ============
+const I18N = {
+    "mode-manual":   { de: "Manuell",  en: "Manual" },
+    "mode-auto":     { de: "Auto",     en: "Auto" },
+    "buy":           { de: "KAUFEN",   en: "BUY" },
+    "sell":          { de: "VERKAUFEN",en: "SELL" },
+    "hold":          { de: "HALTEN",   en: "HOLD" },
+    "portfolio":     { de: "Portfolio",en: "Portfolio" },
+    "equity":        { de: "Equity",   en: "Equity" },
+    "cash":          { de: "Cash",     en: "Cash" },
+    "positions":     { de: "Positionen", en: "Positions" },
+};
+function currentLang() { return localStorage.getItem("tb_lang") || "de"; }
+function t(key) {
+    const e = I18N[key];
+    if (!e) return key;
+    return e[currentLang()] || e.de;
+}
+function applyLang() {
+    const lang = currentLang();
+    document.documentElement.setAttribute("lang", lang);
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+        el.textContent = t(el.dataset.i18n);
+    });
+    const b = $("#lang-toggle span");
+    if (b) b.textContent = lang.toUpperCase();
+}
+function initLang() {
+    applyLang();
+    $("#lang-toggle")?.addEventListener("click", () => {
+        const next = currentLang() === "de" ? "en" : "de";
+        localStorage.setItem("tb_lang", next);
+        applyLang();
+    });
+}
+
+// ============ v7: LIMIT ORDERS ============
+state.limitOrders = JSON.parse(localStorage.getItem("tb_limits") || "[]");
+function saveLimits() { localStorage.setItem("tb_limits", JSON.stringify(state.limitOrders)); }
+function addLimitOrder(sym, side, price, notional) {
+    state.limitOrders.push({
+        id: sym + "_" + Date.now(), symbol: sym, side, price, notional,
+        created: new Date().toISOString(), filled: false,
+    });
+    saveLimits();
+    announce(`Limit-Order gesetzt: ${sym} ${side === "long" ? "≤" : "≥"} ${price}`, "info");
+}
+function cancelLimit(id) {
+    state.limitOrders = state.limitOrders.filter((l) => l.id !== id);
+    saveLimits();
+    renderLimitOrders();
+}
+function checkLimitOrders() {
+    for (const l of state.limitOrders) {
+        if (l.filled) continue;
+        const p = state.prices[l.symbol];
+        if (!p) continue;
+        const hit = (l.side === "long" && p <= l.price) || (l.side === "short" && p >= l.price);
+        if (hit) {
+            const qty = l.notional / p;
+            const candles = state.candles[l.symbol];
+            let atrVal = p * 0.02;
+            if (candles && candles.length >= 20) {
+                const arr = window.TB.atr(window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles), 14);
+                atrVal = arr[arr.length - 1];
+            }
+            const stop = l.side === "long" ? p - atrVal * CFG.atrStopMult : p + atrVal * CFG.atrStopMult;
+            const tps = CFG.tpMultiples.map((m) => ({
+                price: l.side === "long" ? p + (p - stop) * m : p - (stop - p) * m,
+                fraction: 1 / CFG.tpMultiples.length,
+            }));
+            broker.submit(l.symbol, l.side, qty, p, { stop, take_profits: tps, strategy: "limit_order" });
+            l.filled = true;
+            l.filled_at = new Date().toISOString();
+            l.exec_price = p;
+            saveLimits();
+            announce(`Limit-Order gefüllt: ${l.symbol} ${l.side === "long" ? "gekauft" : "verkauft"} bei ${p.toFixed(2)}`, "success");
+        }
+    }
+}
+function renderLimitOrders() {
+    const el = $("#limit-list");
+    if (!el) return;
+    $("#limit-count").textContent = state.limitOrders.filter((l) => !l.filled).length + " offen";
+    if (!state.limitOrders.length) { el.textContent = "keine Limit-Orders"; return; }
+    el.innerHTML = state.limitOrders.slice().reverse().map((l) => {
+        const live = state.prices[l.symbol];
+        const dist = live ? ((l.price - live) / live * 100) : null;
+        return `<div class="lim-row ${l.filled ? "filled" : "armed"}">
+            <div>
+                <strong>${l.symbol}</strong> ${l.side === "long" ? "▲ LONG" : "▼ SHORT"} @ <span class="num">${l.price}</span>
+                <div style="color:var(--muted); font-size:0.72rem;">
+                    ${l.filled ? `✓ gefüllt bei ${l.exec_price?.toFixed(4)}` : `Distanz ${dist != null ? (dist > 0 ? "+" : "") + dist.toFixed(2) + "%" : "?"} · Notional ${l.notional} USDT`}
+                </div>
+            </div>
+            <div class="num" style="color:var(--muted); font-size:0.72rem;">${live ? live.toFixed(4) : "–"}</div>
+            ${l.filled ? "" : `<button class="lim-cancel" data-id="${l.id}">✕</button>`}
+        </div>`;
+    }).join("");
+    el.querySelectorAll(".lim-cancel").forEach((b) => b.onclick = () => cancelLimit(b.dataset.id));
+}
+
+// ============ v7: DCA SCHEDULER ============
+state.dca = JSON.parse(localStorage.getItem("tb_dca") || '{"enabled":false,"amount":100,"coins":["BTC/USDT","ETH/USDT","BNB/USDT"],"rsiCap":30,"lastRun":0}');
+function saveDca() { localStorage.setItem("tb_dca", JSON.stringify(state.dca)); }
+function renderDcaPanel() {
+    const el = $("#dca-panel");
+    if (!el) return;
+    const nextRun = state.dca.lastRun ? new Date(state.dca.lastRun + 7 * 86400 * 1000).toLocaleString("de-DE") : "beim nächsten Scan";
+    el.innerHTML = `
+        <div class="toggle-row" style="margin-bottom:8px;">
+            <div class="lbl"><strong>DCA-Sparplan ${state.dca.enabled ? "aktiv" : "inaktiv"}</strong></div>
+            <div id="dca-toggle" class="toggle ${state.dca.enabled ? "on" : ""}"></div>
+        </div>
+        <div class="dca-config">
+            <div>
+                <label>Betrag pro Woche (USDT)</label>
+                <input type="number" id="dca-amount" value="${state.dca.amount}" min="10" step="10"/>
+            </div>
+            <div>
+                <label>RSI-Cap (nur kaufen wenn RSI &lt; X)</label>
+                <input type="number" id="dca-rsi" value="${state.dca.rsiCap}" min="10" max="100" step="5"/>
+            </div>
+        </div>
+        <div style="margin-top:8px; font-size:0.72rem; color:var(--muted);">
+            Coins: ${state.dca.coins.join(", ")}<br>
+            ${state.dca.enabled ? `Nächster mögl. Kauf: ${nextRun}` : "Umschalter aktivieren um zu starten"}
+        </div>`;
+    $("#dca-toggle")?.addEventListener("click", () => {
+        state.dca.enabled = !state.dca.enabled;
+        saveDca(); renderDcaPanel();
+        announce(state.dca.enabled ? "DCA-Sparplan aktiv." : "DCA-Sparplan aus.");
+    });
+    $("#dca-amount")?.addEventListener("change", (e) => { state.dca.amount = parseInt(e.target.value) || 100; saveDca(); });
+    $("#dca-rsi")?.addEventListener("change", (e) => { state.dca.rsiCap = parseInt(e.target.value) || 30; saveDca(); });
+}
+function runDcaCheck() {
+    if (!state.dca.enabled) return;
+    if (Date.now() - state.dca.lastRun < 7 * 86400 * 1000) return;
+    for (const sym of state.dca.coins) {
+        const candles = state.candles[sym];
+        if (!candles || candles.length < 30) continue;
+        const rsi = window.TB.rsi(window.TB.closes(candles), 14);
+        const rsiNow = rsi[rsi.length - 1];
+        if (!isFinite(rsiNow) || rsiNow >= state.dca.rsiCap) continue;
+        const price = state.prices[sym] || candles[candles.length - 1].close;
+        const qty = state.dca.amount / price;
+        broker.submit(sym, "long", qty, price, {
+            stop: price * 0.5,          // DCA-hold: very wide stop = essentially none
+            take_profits: [],
+            strategy: "dca_buffett",
+        });
+        announce(`DCA-Kauf: ${state.dca.amount} USDT ${sym} bei RSI ${rsiNow.toFixed(0)}.`, "success");
+    }
+    state.dca.lastRun = Date.now();
+    saveDca();
+}
+
+// ============ v7: GRID TRADING ============
+state.grids = JSON.parse(localStorage.getItem("tb_grids") || "[]");
+function saveGrids() { localStorage.setItem("tb_grids", JSON.stringify(state.grids)); }
+function renderGridPanel() {
+    const el = $("#grid-panel");
+    if (!el) return;
+    el.innerHTML = `
+        <div class="dca-config">
+            <div>
+                <label>Symbol</label>
+                <select id="grid-sym">${ALL_SYMBOLS.map((s) => `<option value="${s}">${s}</option>`).join("")}</select>
+            </div>
+            <div>
+                <label>Range ± % um Live-Preis</label>
+                <input type="number" id="grid-range" value="4" min="1" max="20" step="0.5"/>
+            </div>
+            <div>
+                <label>Anzahl Levels je Seite</label>
+                <input type="number" id="grid-levels" value="5" min="2" max="20"/>
+            </div>
+            <div>
+                <label>Notional pro Level (USDT)</label>
+                <input type="number" id="grid-notional" value="50" min="10" step="10"/>
+            </div>
+        </div>
+        <div class="btn-row" style="margin-top:8px;">
+            <button id="grid-create" class="primary">Grid erzeugen</button>
+        </div>
+        <div id="grid-list" style="margin-top:10px;"></div>`;
+    $("#grid-create").onclick = () => {
+        const sym = $("#grid-sym").value;
+        const range = parseFloat($("#grid-range").value) / 100;
+        const levels = parseInt($("#grid-levels").value);
+        const notional = parseFloat($("#grid-notional").value);
+        const p = state.prices[sym];
+        if (!p) { alert("Kein Live-Preis für " + sym); return; }
+        // create limit orders at N buy levels below and N sell above
+        for (let i = 1; i <= levels; i++) {
+            const buyPrice = p * (1 - range * i / levels);
+            const sellPrice = p * (1 + range * i / levels);
+            addLimitOrder(sym, "long", parseFloat(buyPrice.toFixed(4)), notional);
+            addLimitOrder(sym, "short", parseFloat(sellPrice.toFixed(4)), notional);
+        }
+        state.grids.push({ id: "g_" + Date.now(), symbol: sym, center: p, range, levels, notional, created: new Date().toISOString() });
+        saveGrids();
+        renderGridList();
+        renderLimitOrders();
+        announce(`Grid für ${sym} erzeugt: ${levels * 2} Limit-Orders um ${p.toFixed(2)}.`, "success");
+    };
+    renderGridList();
+}
+function renderGridList() {
+    const el = $("#grid-list");
+    if (!el) return;
+    if (!state.grids.length) { el.textContent = "keine aktiven Grids"; return; }
+    el.innerHTML = state.grids.map((g) => `
+        <div class="grid-row">
+            <div>
+                <strong>${g.symbol}</strong> · Center ${g.center.toFixed(4)} · ±${(g.range * 100).toFixed(1)}%
+                <div style="color:var(--muted); font-size:0.72rem;">${g.levels} Levels · ${g.notional} USDT/Level</div>
+            </div>
+            <div class="num" style="color:var(--muted); font-size:0.72rem;">${new Date(g.created).toLocaleDateString("de-DE")}</div>
+            <button class="lim-cancel" data-id="${g.id}">✕</button>
+        </div>`).join("");
+    el.querySelectorAll(".lim-cancel").forEach((b) => b.onclick = () => {
+        state.grids = state.grids.filter((g) => g.id !== b.dataset.id);
+        saveGrids(); renderGridList();
+    });
+}
+
+// ============ v7: PORTFOLIO REBALANCING ============
+state.rebalance = JSON.parse(localStorage.getItem("tb_rebalance") || '{"enabled":false,"targets":{"BTC/USDT":30,"ETH/USDT":20,"SOL/USDT":10},"tolerancePct":5}');
+function saveRebalance() { localStorage.setItem("tb_rebalance", JSON.stringify(state.rebalance)); }
+function renderRebalancePanel() {
+    const el = $("#rebalance-panel");
+    if (!el) return;
+    const eq = broker.equity(state.prices);
+    const positions = broker.positions;
+    const currentPct = {};
+    for (const sym in positions) {
+        const p = positions[sym];
+        const price = state.prices[sym] || p.entry;
+        const value = p.side === "long" ? p.qty * price : 0;
+        currentPct[sym] = value / eq * 100;
+    }
+    const rows = Object.entries(state.rebalance.targets).map(([sym, target]) => {
+        const actual = currentPct[sym] || 0;
+        const diff = actual - target;
+        const off = Math.abs(diff) > state.rebalance.tolerancePct;
+        return `<div class="reb-row">
+            <div>
+                <strong>${sym}</strong>
+                <div style="color:var(--muted); font-size:0.72rem;">Ziel ${target}% · Ist ${actual.toFixed(1)}%</div>
+            </div>
+            <div class="num" style="color:${off ? "var(--amber)" : "var(--green)"};">${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%</div>
+            <button class="lim-cancel" data-sym="${sym}">✕</button>
+        </div>`;
+    }).join("");
+    el.innerHTML = `
+        <div class="toggle-row" style="margin-bottom:8px;">
+            <div class="lbl"><strong>Auto-Rebalancing ${state.rebalance.enabled ? "aktiv" : "inaktiv"}</strong> · Toleranz ±${state.rebalance.tolerancePct}%</div>
+            <div id="reb-toggle" class="toggle ${state.rebalance.enabled ? "on" : ""}"></div>
+        </div>
+        ${rows}
+        <div class="dca-config" style="margin-top:8px;">
+            <div>
+                <label>Symbol</label>
+                <select id="reb-add-sym">${ALL_SYMBOLS.map((s) => `<option value="${s}">${s}</option>`).join("")}</select>
+            </div>
+            <div>
+                <label>Ziel-Anteil %</label>
+                <input type="number" id="reb-add-pct" value="10" min="1" max="80" step="1"/>
+            </div>
+        </div>
+        <div class="btn-row" style="margin-top:6px;">
+            <button id="reb-add" class="primary">+ Ziel hinzufügen</button>
+            <button id="reb-run" class="ghost">Jetzt rebalancieren</button>
+        </div>`;
+    $("#reb-toggle")?.addEventListener("click", () => {
+        state.rebalance.enabled = !state.rebalance.enabled;
+        saveRebalance(); renderRebalancePanel();
+    });
+    $("#reb-add")?.addEventListener("click", () => {
+        state.rebalance.targets[$("#reb-add-sym").value] = parseFloat($("#reb-add-pct").value);
+        saveRebalance(); renderRebalancePanel();
+    });
+    $("#reb-run")?.addEventListener("click", () => runRebalance(true));
+    el.querySelectorAll(".lim-cancel").forEach((b) => b.onclick = () => {
+        delete state.rebalance.targets[b.dataset.sym];
+        saveRebalance(); renderRebalancePanel();
+    });
+}
+function runRebalance(force = false) {
+    if (!force && !state.rebalance.enabled) return;
+    const eq = broker.equity(state.prices);
+    for (const [sym, targetPct] of Object.entries(state.rebalance.targets)) {
+        const price = state.prices[sym];
+        if (!price) continue;
+        const targetValue = eq * targetPct / 100;
+        const pos = broker.positions[sym];
+        const currentValue = pos && pos.side === "long" ? pos.qty * price : 0;
+        const diff = targetValue - currentValue;
+        if (Math.abs(diff) < eq * state.rebalance.tolerancePct / 100) continue;
+        if (diff > 0 && diff > 20) {
+            // need to buy more
+            const qty = Math.min(diff, broker.cash * 0.9) / price;
+            if (qty > 0) {
+                broker.submit(sym, "long", qty, price, { stop: price * 0.5, take_profits: [], strategy: "rebalance" });
+                announce(`Rebalance: ${sym} +${qty.toFixed(4)} bei ${price.toFixed(2)}.`, "info");
+            }
+        } else if (diff < -20 && pos && pos.side === "long") {
+            const closePct = Math.min(1, Math.abs(diff) / currentValue);
+            broker.close(sym, price, closePct);
+            announce(`Rebalance: ${sym} -${(closePct * 100).toFixed(0)}% bei ${price.toFixed(2)}.`, "info");
+        }
+    }
+    renderAll();
+}
+
+// ============ v7: PAIR TRADING (BTC/ETH ratio) ============
+state.pairTrading = JSON.parse(localStorage.getItem("tb_pair") || '{"enabled":false,"longSym":"ETH/USDT","shortSym":"BTC/USDT","zEntry":2.0,"zExit":0.5,"notional":500}');
+function savePair() { localStorage.setItem("tb_pair", JSON.stringify(state.pairTrading)); }
+function computePairZScore() {
+    const a = state.candles[state.pairTrading.longSym];
+    const b = state.candles[state.pairTrading.shortSym];
+    if (!a || !b || a.length < 100 || b.length < 100) return null;
+    const ratios = [];
+    const n = Math.min(100, a.length, b.length);
+    for (let i = 1; i <= n; i++) {
+        const ac = a[a.length - i].close, bc = b[b.length - i].close;
+        if (bc > 0) ratios.unshift(ac / bc);
+    }
+    if (ratios.length < 30) return null;
+    const mean = ratios.reduce((s, v) => s + v, 0) / ratios.length;
+    const std = Math.sqrt(ratios.reduce((s, v) => s + (v - mean) ** 2, 0) / ratios.length);
+    const current = ratios[ratios.length - 1];
+    const z = std > 0 ? (current - mean) / std : 0;
+    return { current, mean, std, z };
+}
+function renderPairPanel() {
+    const el = $("#pair-panel");
+    if (!el) return;
+    const z = computePairZScore();
+    el.innerHTML = `
+        <div class="toggle-row" style="margin-bottom:8px;">
+            <div class="lbl"><strong>Auto-Pair-Trading ${state.pairTrading.enabled ? "aktiv" : "inaktiv"}</strong></div>
+            <div id="pair-toggle" class="toggle ${state.pairTrading.enabled ? "on" : ""}"></div>
+        </div>
+        <div class="dca-config">
+            <div><label>Long-Symbol</label>
+                <select id="pair-long">${CFG.symbols.map((s) => `<option value="${s}" ${s === state.pairTrading.longSym ? "selected" : ""}>${s}</option>`).join("")}</select>
+            </div>
+            <div><label>Short-Symbol</label>
+                <select id="pair-short">${CFG.symbols.map((s) => `<option value="${s}" ${s === state.pairTrading.shortSym ? "selected" : ""}>${s}</option>`).join("")}</select>
+            </div>
+            <div><label>Z-Score-Entry (|z| ≥)</label>
+                <input type="number" id="pair-zentry" value="${state.pairTrading.zEntry}" step="0.5" min="1" max="4"/>
+            </div>
+            <div><label>Z-Score-Exit (|z| ≤)</label>
+                <input type="number" id="pair-zexit" value="${state.pairTrading.zExit}" step="0.1" min="0" max="1"/>
+            </div>
+        </div>
+        ${z ? `<div class="pct-preview" style="margin-top:8px;">
+            <div class="row"><span>Ratio ${state.pairTrading.longSym.replace("/USDT","")} / ${state.pairTrading.shortSym.replace("/USDT","")}</span><strong class="num">${z.current.toFixed(4)}</strong></div>
+            <div class="row"><span>Mean</span><strong class="num">${z.mean.toFixed(4)}</strong></div>
+            <div class="row"><span>Std-Abw.</span><strong class="num">${z.std.toFixed(4)}</strong></div>
+            <div class="row" style="border-bottom:none;"><span>Z-Score</span><strong class="num" style="color:${Math.abs(z.z) >= state.pairTrading.zEntry ? "var(--amber)" : "var(--muted)"};">${z.z >= 0 ? "+" : ""}${z.z.toFixed(2)}σ ${Math.abs(z.z) >= state.pairTrading.zEntry ? "→ Signal" : "→ warten"}</strong></div>
+        </div>` : `<div style="color:var(--muted); font-size:0.78rem; margin-top:8px;">Ratio-Daten werden geladen …</div>`}
+    `;
+    $("#pair-toggle")?.addEventListener("click", () => { state.pairTrading.enabled = !state.pairTrading.enabled; savePair(); renderPairPanel(); });
+    $("#pair-long")?.addEventListener("change", (e) => { state.pairTrading.longSym = e.target.value; savePair(); renderPairPanel(); });
+    $("#pair-short")?.addEventListener("change", (e) => { state.pairTrading.shortSym = e.target.value; savePair(); renderPairPanel(); });
+    $("#pair-zentry")?.addEventListener("change", (e) => { state.pairTrading.zEntry = parseFloat(e.target.value); savePair(); });
+    $("#pair-zexit")?.addEventListener("change", (e) => { state.pairTrading.zExit = parseFloat(e.target.value); savePair(); });
+}
+function runPairCheck() {
+    if (!state.pairTrading.enabled) return;
+    const z = computePairZScore();
+    if (!z) return;
+    const { longSym, shortSym, zEntry, zExit, notional } = state.pairTrading;
+    const pairKey = `pair_${longSym}_${shortSym}`;
+    const openLong = broker.positions[longSym]?.meta?.pairKey === pairKey;
+    const openShort = broker.positions[shortSym]?.meta?.pairKey === pairKey;
+    const inPair = openLong || openShort;
+    if (inPair && Math.abs(z.z) <= zExit) {
+        // exit: close both
+        if (openLong) broker.close(longSym, state.prices[longSym], 1);
+        if (openShort) broker.close(shortSym, state.prices[shortSym], 1);
+        announce(`Pair-Trade geschlossen: Ratio zurück zu z ${z.z.toFixed(2)}σ.`, "success");
+        return;
+    }
+    if (!inPair && Math.abs(z.z) >= zEntry) {
+        // enter: if ratio HIGH (z > 0), long is expensive → short LONG, long SHORT_sym... wait naming is confusing
+        // z > 0 means longSym is expensive relative to shortSym. So we SHORT longSym, LONG shortSym.
+        // z < 0 means longSym is cheap → LONG longSym, SHORT shortSym.
+        const dirLong = z.z >= 0 ? "short" : "long";
+        const dirShort = z.z >= 0 ? "long" : "short";
+        const priceL = state.prices[longSym], priceS = state.prices[shortSym];
+        if (!priceL || !priceS) return;
+        broker.submit(longSym, dirLong, notional / priceL, priceL, {
+            stop: dirLong === "long" ? priceL * 0.9 : priceL * 1.1, take_profits: [],
+            strategy: "pair_trade", pairKey,
+        });
+        broker.submit(shortSym, dirShort, notional / priceS, priceS, {
+            stop: dirShort === "long" ? priceS * 0.9 : priceS * 1.1, take_profits: [],
+            strategy: "pair_trade", pairKey,
+        });
+        announce(`Pair-Trade eröffnet: ${longSym.replace("/USDT","")} ${dirLong}, ${shortSym.replace("/USDT","")} ${dirShort} bei z=${z.z.toFixed(2)}.`, "success");
+    }
+}
+
+// ============ v7: MACRO CALENDAR ============
+function renderEconCalendar() {
+    const el = $("#econ-calendar");
+    if (!el) return;
+    const events = window.TB.economicCalendar().slice(0, 12);
+    if (!events.length) { el.textContent = "keine Termine"; return; }
+    el.innerHTML = events.map((e) => {
+        const now = Date.now();
+        const diff = e.ts - now;
+        const imminent = diff < 24 * 3600 * 1000 && diff > -6 * 3600 * 1000;
+        let cd;
+        if (diff < 0) cd = "läuft/vorbei";
+        else if (diff < 3600 * 1000) cd = `in ${Math.round(diff / 60000)} min`;
+        else if (diff < 24 * 3600 * 1000) cd = `in ${Math.round(diff / 3600000)} h`;
+        else cd = `in ${Math.round(diff / 86400000)} T`;
+        return `<div class="econ-row ${imminent ? "imminent" : ""}">
+            <span class="econ-badge ${e.type}">${e.type}</span>
+            <div>${e.desc}<div style="color:var(--muted); font-size:0.7rem;">${new Date(e.ts).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div></div>
+            <div class="econ-countdown">${cd}</div>
+        </div>`;
+    }).join("");
+}
+
+// ============ v7: WHALE TRANSFERS ============
+async function refreshWhales() {
+    const w = await window.TB.fetchWhaleTransfers();
+    state.whales = w;
+    renderWhaleList();
+}
+function renderWhaleList() {
+    const el = $("#whale-list");
+    if (!el) return;
+    const w = state.whales || [];
+    if (!w.length) { el.textContent = "aktuell keine grossen Bewegungen im Mempool"; return; }
+    el.innerHTML = w.map((t) => `
+        <div class="whale-row">
+            <div><strong>${t.btc.toFixed(2)} BTC</strong><div style="color:var(--muted); font-size:0.7rem;">Fee ${t.fee} sat</div></div>
+            <a href="${t.url}" target="_blank" rel="noopener">${t.txid.slice(0, 12)}…</a>
+        </div>`).join("");
+}
+
+// ============ v7: ALPHA DECAY ============
+function renderAlphaDecay() {
+    const el = $("#alpha-decay");
+    if (!el) return;
+    const trades = _pairTrades();
+    if (trades.length < 10) { el.textContent = "warten auf ≥ 10 abgeschlossene Trades"; return; }
+    const byStrat = {};
+    for (const t of trades) {
+        for (const s of (t.strategy || "").split(",").filter(Boolean)) {
+            (byStrat[s] = byStrat[s] || []).push(t);
+        }
+    }
+    const rows = Object.entries(byStrat)
+        .filter(([, ts]) => ts.length >= 5)
+        .map(([strat, ts]) => {
+            const buckets = window.TB.alphaDecayBuckets(ts, 10);
+            if (!buckets.length) return "";
+            const maxAbs = Math.max(...buckets.map((b) => Math.abs(b.meanPnl)), 0.01);
+            const bars = buckets.map((b) => {
+                const h = Math.max(6, Math.abs(b.meanPnl) / maxAbs * 100);
+                const cls = b.meanPnl >= 0 ? "pos" : "neg";
+                return `<div class="decay-bar ${cls}" style="height:${h}%;" title="${b.count} Trades · Mean ${b.meanPnl.toFixed(2)} USDT · WR ${(b.winRate*100).toFixed(0)}%"></div>`;
+            }).join("");
+            // trend: first bucket vs last
+            const first = buckets[0].meanPnl;
+            const last = buckets[buckets.length - 1].meanPnl;
+            const trend = last - first;
+            const trendCls = trend > 0.5 ? "up" : trend < -0.5 ? "down" : "flat";
+            const trendTxt = trend > 0.5 ? "↗ verbessert sich" : trend < -0.5 ? "↘ verliert Edge" : "→ stabil";
+            return `<div class="decay-strategy">
+                <div class="head">
+                    <span>${strat.replace(/_/g, " ")} <small style="color:var(--muted);">(${ts.length} Trades)</small></span>
+                    <span class="decay-trend ${trendCls}">${trendTxt}</span>
+                </div>
+                <div class="decay-bars">${bars}</div>
+            </div>`;
+        }).join("");
+    el.innerHTML = rows || "noch nicht genug Trades pro Strategie (min. 5)";
+}
+
+// ============ v7: FIFO/LIFO — override _pairTrades ============
+const _origPairTrades = _pairTrades;
+_pairTrades = function() {
+    const method = localStorage.getItem("tb_journal_method") || "fifo";
+    return window.TB.matchTradesFifo(broker.journal, method);
+};
+
+// ============ v7: NORMAL OVERLAY ON HISTOGRAM ============
+const _origRenderHist = renderReturnHistogram;
+renderReturnHistogram = function() {
+    _origRenderHist();
+    const el = $("#return-hist");
+    if (!el) return;
+    const trades = _pairTrades();
+    if (trades.length < 10) return;
+    const pnls = trades.map((t) => t.pnl);
+    const mean = pnls.reduce((s, v) => s + v, 0) / pnls.length;
+    const std = Math.sqrt(pnls.reduce((s, v) => s + (v - mean) ** 2, 0) / pnls.length);
+    const min = Math.min(...pnls), max = Math.max(...pnls);
+    const bars = el.querySelectorAll(".hist-bar");
+    if (!bars.length) return;
+    const barsContainer = el.querySelector(".hist-bars");
+    if (!barsContainer) return;
+    // build overlay SVG
+    const w = 400, h = 120;
+    const range = max - min || 1;
+    const points = [];
+    // find max pdf value across our range for normalisation
+    let maxPdf = 0;
+    for (let i = 0; i < 100; i++) {
+        const x = min + (i / 99) * range;
+        const y = window.TB.normalPdf(x, mean, std);
+        if (y > maxPdf) maxPdf = y;
+    }
+    for (let i = 0; i < 100; i++) {
+        const x = min + (i / 99) * range;
+        const y = window.TB.normalPdf(x, mean, std);
+        const px = (i / 99) * w;
+        const py = h - (maxPdf > 0 ? (y / maxPdf) * h * 0.9 : 0);
+        points.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+    }
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:relative; margin-top:-128px; margin-bottom:8px; pointer-events:none;";
+    overlay.innerHTML = `<svg class="hist-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+        <polyline class="hist-normal-line" points="${points.join(" ")}"/>
+    </svg>`;
+    barsContainer.after(overlay);
+};
+
+// ============ v7: TELEGRAM + EMAIL + INTEGRATIONS ============
+function getIntegrations() {
+    return {
+        tgToken: localStorage.getItem("tb_tg_token") || "",
+        tgChat: localStorage.getItem("tb_tg_chat") || "",
+        emailService: localStorage.getItem("tb_email_service") || "",
+        emailTemplate: localStorage.getItem("tb_email_template") || "",
+        emailKey: localStorage.getItem("tb_email_key") || "",
+        emailTo: localStorage.getItem("tb_email_to") || "",
+    };
+}
+async function sendTelegram(text) {
+    const { tgToken, tgChat } = getIntegrations();
+    if (!tgToken || !tgChat) return;
+    try {
+        await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: tgChat, text, parse_mode: "HTML" }),
+        });
+    } catch (e) { /* silent */ }
+}
+async function sendEmail(subject, body) {
+    const { emailService, emailTemplate, emailKey, emailTo } = getIntegrations();
+    if (!emailService || !emailTemplate || !emailKey || !emailTo) return;
+    try {
+        await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                service_id: emailService, template_id: emailTemplate, user_id: emailKey,
+                template_params: { subject, message: body, to_email: emailTo },
+            }),
+        });
+    } catch (e) { /* silent */ }
+}
+window.addEventListener("jarvis", (ev) => {
+    const d = ev.detail;
+    if (d && (d.level === "alert" || d.level === "success")) {
+        sendTelegram(`🤖 <b>Trading Bot</b>\n${d.text}`);
+        sendEmail("Trading Bot Alert", d.text);
+    }
+});
+
+function renderIntegrationsPanel() {
+    const el = $("#integrations-panel");
+    if (!el) return;
+    const cfg = getIntegrations();
+    const tgOn = cfg.tgToken && cfg.tgChat;
+    const emOn = cfg.emailService && cfg.emailKey && cfg.emailTo;
+    el.innerHTML = `
+        <div class="integ-row">
+            <div class="head">Telegram-Bot <span class="integ-status ${tgOn ? "on" : "off"}">${tgOn ? "aktiv" : "aus"}</span></div>
+            <div style="color:var(--muted); font-size:0.72rem;">
+                1. Chat mit @BotFather auf Telegram · /newbot · Token kopieren.<br>
+                2. Bot anschreiben, dann <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> aufrufen → Chat-ID auslesen.
+            </div>
+            <input type="text" id="tg-token" placeholder="Bot-Token (123456:ABC-DEF...)" value="${cfg.tgToken}"/>
+            <input type="text" id="tg-chat" placeholder="Chat-ID (z.B. 123456789)" value="${cfg.tgChat}"/>
+            <div class="btn-row">
+                <button class="primary" id="tg-save">Speichern</button>
+                <button class="ghost" id="tg-test">Test-Message</button>
+            </div>
+        </div>
+        <div class="integ-row">
+            <div class="head">EmailJS <span class="integ-status ${emOn ? "on" : "off"}">${emOn ? "aktiv" : "aus"}</span></div>
+            <div style="color:var(--muted); font-size:0.72rem;">
+                Bei <a href="https://emailjs.com" target="_blank" rel="noopener" style="color:var(--accent);">emailjs.com</a> gratis Account, dann Service + Template + Public-Key holen.
+            </div>
+            <input type="text" id="em-service" placeholder="Service-ID" value="${cfg.emailService}"/>
+            <input type="text" id="em-template" placeholder="Template-ID" value="${cfg.emailTemplate}"/>
+            <input type="text" id="em-key" placeholder="Public Key" value="${cfg.emailKey}"/>
+            <input type="email" id="em-to" placeholder="Empfänger E-Mail" value="${cfg.emailTo}"/>
+            <div class="btn-row">
+                <button class="primary" id="em-save">Speichern</button>
+                <button class="ghost" id="em-test">Test-Mail</button>
+            </div>
+        </div>`;
+    $("#tg-save").onclick = () => {
+        localStorage.setItem("tb_tg_token", $("#tg-token").value.trim());
+        localStorage.setItem("tb_tg_chat", $("#tg-chat").value.trim());
+        renderIntegrationsPanel();
+        announce("Telegram-Konfig gespeichert.", "success");
+    };
+    $("#tg-test").onclick = () => sendTelegram("✅ Test von Trading Bot").then(() => alert("Test gesendet. Check Telegram."));
+    $("#em-save").onclick = () => {
+        localStorage.setItem("tb_email_service", $("#em-service").value.trim());
+        localStorage.setItem("tb_email_template", $("#em-template").value.trim());
+        localStorage.setItem("tb_email_key", $("#em-key").value.trim());
+        localStorage.setItem("tb_email_to", $("#em-to").value.trim());
+        renderIntegrationsPanel();
+        announce("EmailJS-Konfig gespeichert.", "success");
+    };
+    $("#em-test").onclick = () => sendEmail("Test von Trading Bot", "Wenn du das siehst, funktioniert es.").then(() => alert("Test gesendet."));
+}
+
+// ============ v7: BINANCE TESTNET ============
+state.testnet = {
+    enabled: localStorage.getItem("tb_testnet_on") === "1",
+    apiKey: sessionStorage.getItem("tb_testnet_key") || "",       // in-memory only for security
+    apiSecret: sessionStorage.getItem("tb_testnet_secret") || "",
+};
+async function testnetSignedRequest(path, params = {}, method = "GET") {
+    const { apiKey, apiSecret } = state.testnet;
+    if (!apiKey || !apiSecret) throw new Error("Keine API-Credentials");
+    const timestamp = Date.now();
+    const qs = Object.entries({ ...params, timestamp, recvWindow: 5000 })
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
+    const sig = await window.TB.hmacSha256(apiSecret, qs);
+    const url = `https://testnet.binance.vision${path}?${qs}&signature=${sig}`;
+    const res = await fetch(url, { method, headers: { "X-MBX-APIKEY": apiKey } });
+    return res.json();
+}
+async function testnetSubmitOrder(symbol, side, qty, price) {
+    return testnetSignedRequest("/api/v3/order", {
+        symbol: symbol.replace("/", ""),
+        side: side === "long" ? "BUY" : "SELL",
+        type: "MARKET",
+        quantity: qty.toFixed(6),
+    }, "POST");
+}
+async function testnetCheckConnection() {
+    try {
+        const r = await testnetSignedRequest("/api/v3/account");
+        return r.balances ? r : null;
+    } catch (e) { return null; }
+}
+function renderTestnetPanel() {
+    const el = $("#testnet-panel");
+    if (!el) return;
+    const on = state.testnet.enabled && state.testnet.apiKey && state.testnet.apiSecret;
+    el.innerHTML = `
+        <div class="integ-row">
+            <div class="head">Testnet <span class="integ-status ${on ? "on" : "off"}">${on ? "verbunden" : "aus"}</span></div>
+            <div style="color:var(--muted); font-size:0.72rem;">
+                Keys nur in Session-Speicher (Reload = verwerfen). Werden nie weitergegeben.
+            </div>
+            <input type="text" id="tn-key" placeholder="API-Key" value="${state.testnet.apiKey}"/>
+            <input type="password" id="tn-secret" placeholder="API-Secret" value="${state.testnet.apiSecret}"/>
+            <div class="toggle-row" style="margin-top:8px;">
+                <div class="lbl"><strong>Live-Orders an Testnet spiegeln</strong></div>
+                <div id="tn-toggle" class="toggle ${state.testnet.enabled ? "on" : ""}"></div>
+            </div>
+            <div class="btn-row" style="margin-top:6px;">
+                <button class="primary" id="tn-save">Speichern &amp; Testen</button>
+            </div>
+            <div id="tn-status" style="margin-top:6px; font-size:0.75rem; color:var(--muted);"></div>
+        </div>`;
+    $("#tn-save").onclick = async () => {
+        state.testnet.apiKey = $("#tn-key").value.trim();
+        state.testnet.apiSecret = $("#tn-secret").value.trim();
+        sessionStorage.setItem("tb_testnet_key", state.testnet.apiKey);
+        sessionStorage.setItem("tb_testnet_secret", state.testnet.apiSecret);
+        $("#tn-status").textContent = "…verbinde";
+        const acct = await testnetCheckConnection();
+        if (acct) {
+            const usdt = acct.balances.find((b) => b.asset === "USDT");
+            $("#tn-status").innerHTML = `<span style="color:var(--green)">✓ verbunden</span> · Testnet-USDT: <strong>${usdt ? parseFloat(usdt.free).toFixed(2) : "?"}</strong>`;
+            announce("Testnet verbunden.", "success");
+        } else {
+            $("#tn-status").innerHTML = `<span style="color:var(--red)">✗ Verbindung fehlgeschlagen</span> — Keys prüfen`;
+        }
+    };
+    $("#tn-toggle").onclick = () => {
+        state.testnet.enabled = !state.testnet.enabled;
+        localStorage.setItem("tb_testnet_on", state.testnet.enabled ? "1" : "0");
+        renderTestnetPanel();
+    };
+}
+// Hook: mirror broker.submit to testnet if enabled
+const _origSubmit = broker.submit.bind(broker);
+broker.submit = function(symbol, side, qty, price, meta) {
+    const r = _origSubmit(symbol, side, qty, price, meta);
+    if (r && state.testnet.enabled && state.testnet.apiKey) {
+        testnetSubmitOrder(symbol, side, r.qty, price).then((res) => {
+            if (res.orderId) announce(`Testnet-Order gespiegelt: ${symbol} ${side}. Order-ID ${res.orderId}.`, "info");
+            else if (res.msg) console.warn("Testnet-Order abgelehnt:", res.msg);
+        }).catch(() => {});
+    }
+    return r;
+};
+
+// ============ v7: real PDF via html2pdf CDN ============
+async function generatePdfTaxReport() {
+    // load html2pdf on demand
+    if (!window.html2pdf) {
+        await new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+            s.onload = resolve; s.onerror = reject;
+            document.head.appendChild(s);
+        });
+    }
+    const trades = _pairTrades();
+    trades.sort((a, b) => new Date(a.close_ts) - new Date(b.close_ts));
+    const total = trades.reduce((s, t) => s + t.pnl, 0);
+    const rows = trades.map((t) => {
+        const days = (new Date(t.close_ts) - new Date(t.open_ts)) / (86400 * 1000);
+        return `<tr><td>${new Date(t.open_ts).toLocaleDateString("de-DE")}</td><td>${new Date(t.close_ts).toLocaleDateString("de-DE")}</td><td>${t.symbol}</td><td>${t.side}</td><td style="text-align:right">${t.qty.toFixed(6)}</td><td style="text-align:right">${t.pnl.toFixed(2)}</td><td>${days >= 365 ? "§23 frei" : Math.round(days) + " T"}</td></tr>`;
+    }).join("");
+    const container = document.createElement("div");
+    container.style.cssText = "padding:24px; font-family:Arial; color:#111;";
+    container.innerHTML = `
+        <h1 style="color:#1e40af;">Steuerreport § 23 EStG</h1>
+        <div style="color:#555; margin-bottom:16px;">Erstellt ${new Date().toLocaleDateString("de-DE")} · ${trades.length} Trades · Netto ${total.toFixed(2)} USDT</div>
+        <table style="border-collapse:collapse; width:100%; font-size:11px;">
+            <thead><tr style="background:#e2e8f0;"><th style="padding:4px;border:1px solid #cbd5e1;">Kauf</th><th style="padding:4px;border:1px solid #cbd5e1;">Verkauf</th><th style="padding:4px;border:1px solid #cbd5e1;">Symbol</th><th style="padding:4px;border:1px solid #cbd5e1;">Seite</th><th style="padding:4px;border:1px solid #cbd5e1;">Menge</th><th style="padding:4px;border:1px solid #cbd5e1;">PnL</th><th style="padding:4px;border:1px solid #cbd5e1;">Status</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+    document.body.appendChild(container);
+    await window.html2pdf().from(container).set({
+        margin: 10,
+        filename: `steuerreport_${new Date().toISOString().slice(0, 10)}.pdf`,
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+    }).save();
+    container.remove();
+    announce("PDF-Steuerreport erzeugt.", "success");
+}
+
+// ============ v7: ENCRYPTED BACKUP ============
+async function exportEncryptedBackup() {
+    const pw = prompt("Passwort für Backup (min. 8 Zeichen):");
+    if (!pw || pw.length < 8) { alert("Passwort zu kurz."); return; }
+    const dump = {};
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("tb_")) dump[k] = localStorage.getItem(k);
+    }
+    dump._exported_at = new Date().toISOString();
+    dump._schema = "trading-bot-v7-enc";
+    const encrypted = await window.TB.encryptWithPassword(JSON.stringify(dump), pw);
+    const blob = new Blob([encrypted], { type: "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `tradingbot_backup_${new Date().toISOString().slice(0, 10)}.enc`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    announce("Verschlüsseltes Backup exportiert.", "success");
+}
+async function importEncryptedBackup(file) {
+    const pw = prompt("Passwort für dieses Backup:");
+    if (!pw) return;
+    const text = await file.text();
+    try {
+        const decrypted = await window.TB.decryptWithPassword(text, pw);
+        const dump = JSON.parse(decrypted);
+        if (!confirm(`Backup vom ${dump._exported_at} importieren? Aktuelle Daten werden ersetzt.`)) return;
+        for (const k in dump) if (k.startsWith("tb_")) localStorage.setItem(k, dump[k]);
+        announce("Backup entschlüsselt und wiederhergestellt.", "success");
+        setTimeout(() => location.reload(), 800);
+    } catch (e) {
+        alert("Entschlüsselung fehlgeschlagen — falsches Passwort oder korrupte Datei.");
+    }
+}
+
+// Extend tools panel with new buttons
+const _origRenderTools = renderToolsPanel;
+renderToolsPanel = function() {
+    _origRenderTools();
+    // append encrypted backup + real PDF buttons
+    const el = $("#tools-panel");
+    if (!el) return;
+    const actions = el.querySelector(".tools-actions");
+    if (actions && !actions.querySelector("[data-v7]")) {
+        actions.insertAdjacentHTML("beforeend", `
+            <button class="ghost" id="tp-enc-export" data-v7>🔒 Verschlüsseltes Backup</button>
+            <button class="ghost" id="tp-enc-import" data-v7>🔓 Verschlüsseltes importieren</button>
+            <button class="ghost" id="tp-pdf" data-v7>📕 PDF-Steuerreport</button>`);
+        actions.insertAdjacentHTML("afterend", `<input type="file" id="tp-enc-file" accept=".enc" style="display:none;"/>`);
+        $("#tp-enc-export").onclick = exportEncryptedBackup;
+        $("#tp-enc-import").onclick = () => $("#tp-enc-file").click();
+        $("#tp-enc-file").onchange = (e) => { if (e.target.files[0]) importEncryptedBackup(e.target.files[0]); };
+        $("#tp-pdf").onclick = generatePdfTaxReport;
+    }
+};
+
+// ============ v7: JOURNAL METHOD SELECTOR ============
+document.addEventListener("DOMContentLoaded", () => {
+    const sel = $("#journal-method");
+    if (sel) {
+        sel.value = localStorage.getItem("tb_journal_method") || "fifo";
+        sel.onchange = () => {
+            localStorage.setItem("tb_journal_method", sel.value);
+            renderJournal();
+        };
+    }
+    // limit order add
+    const addLim = $("#limit-add");
+    if (addLim) addLim.onclick = () => {
+        const sym = $("#limit-symbol").value;
+        const side = $("#limit-side").value;
+        const price = parseFloat($("#limit-price").value);
+        const notional = parseFloat($("#limit-notional").value);
+        if (!sym || !price || !notional) { alert("Preis + Notional angeben."); return; }
+        addLimitOrder(sym, side, price, notional);
+        $("#limit-price").value = "";
+        renderLimitOrders();
+    };
+    const limSel = $("#limit-symbol");
+    if (limSel) limSel.innerHTML = ALL_SYMBOLS.map((s) => `<option value="${s}">${s}</option>`).join("");
+});
+
+// ============ v7: hook into scan cycle for new automations ============
+const _origScanAll = scanAll;
+scanAll = async function() {
+    await _origScanAll();
+    checkLimitOrders();
+    runDcaCheck();
+    runRebalance(false);
+    runPairCheck();
+};
+
+// ============ v7: augment renderAll for v7 panels ============
+const _origRenderAllV7 = renderAll;
+renderAll = function() {
+    _origRenderAllV7();
+    renderLimitOrders();
+    renderDcaPanel();
+    renderGridPanel();
+    renderRebalancePanel();
+    renderPairPanel();
+    renderEconCalendar();
+    renderWhaleList();
+    renderAlphaDecay();
+    renderIntegrationsPanel();
+    renderTestnetPanel();
+};
+
 document.addEventListener("DOMContentLoaded", () => {
     initTheme();
+    initLang();
     renderToolsPanel();
     checkFirstLaunch();
     setTimeout(() => {
@@ -2417,11 +3287,15 @@ document.addEventListener("DOMContentLoaded", () => {
         refreshOnChain();
         refreshEurRate();
         checkHealth();
+        refreshWhales();
+        renderEconCalendar();
     }, 2000);
     setInterval(refreshMarketCtx, 5 * 60 * 1000);
     setInterval(refreshOnChain, 5 * 60 * 1000);
     setInterval(refreshEurRate, 15 * 60 * 1000);
     setInterval(checkHealth, 10 * 60 * 1000);
+    setInterval(refreshWhales, 3 * 60 * 1000);
+    setInterval(renderEconCalendar, 60 * 1000);
 });
 
 document.addEventListener("DOMContentLoaded", boot);
