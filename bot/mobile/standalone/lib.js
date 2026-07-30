@@ -566,14 +566,20 @@ function planTrade(side, entry, atrValue, equity, cfg) {
     const riskAmount = equity * (cfg.riskPctPerTrade || 1.0) / 100;
     const stopDist = (cfg.atrStopMult || 2.0) * atrValue;
     const stop = side === "long" ? entry - stopDist : entry + stopDist;
-    const size = riskAmount / stopDist;
+    // hard cap: position notional at most (equity / max_positions) so several trades fit
+    const maxNotional = equity * (cfg.maxNotionalPctPerPosition || 20) / 100;
+    let size = riskAmount / stopDist;
+    if (size * entry > maxNotional) size = maxNotional / entry;
+    if (size <= 0) return null;
     const tpMults = cfg.tpMultiples || [1.5, 2.5, 4.0];
     const tps = tpMults.map((mult, i) => {
         const frac = i === tpMults.length - 1 ? 1 - (tpMults.length - 1) * (1 / tpMults.length) : 1 / tpMults.length;
         const price = side === "long" ? entry + mult * stopDist : entry - mult * stopDist;
         return { price, fraction: frac };
     });
-    return { side, entry, stop, size, riskAmount, take_profits: tps };
+    // actual risk after size cap
+    const actualRisk = size * stopDist;
+    return { side, entry, stop, size, riskAmount: actualRisk, take_profits: tps };
 }
 
 function forecast(plan) {
@@ -687,6 +693,13 @@ class PaperBroker {
         return this.journal.filter((j) => j.kind === "close").reduce((s, j) => s + (j.pnl || 0), 0);
     }
     submit(symbol, side, qty, price, meta = {}) {
+        // enforce cash-only (no leverage) for spot paper trading
+        const desiredNotional = qty * price;
+        if (side === "long") {
+            const affordable = Math.min(this.cash * 0.99, desiredNotional);
+            if (affordable <= 0) return null;
+            qty = affordable / price;
+        }
         const notional = qty * price;
         if (side === "long") this.cash -= notional;
         else this.cash += notional;

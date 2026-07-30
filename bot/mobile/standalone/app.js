@@ -30,6 +30,7 @@ const CFG = {
     atrStopMult: 1.8,
     tpMultiples: [2.0, 3.5, 5.0],
     maxOpenPositions: 5,
+    maxNotionalPctPerPosition: 18,   // max 18% of equity per position (5 positions × 18% = 90%, keeps some cash)
     // strict filters — auto-trade ONLY on best setups
     strictMinScore: 3.0,
     strictAgreement: 3,
@@ -683,7 +684,7 @@ function renderKillSwitch() {
     const ddCls = barCls(Math.max(s.drawdown, 0), CFG.maxDrawdownPct);
     const posCls = barCls(nOpen, CFG.maxOpenPositions);
     el.innerHTML = `
-        <div class="ks-row"><span class="ks-label">Tages-Verlust</span><span class="ks-value ${dlCls}">${s.dailyLoss > 0 ? "-" : "+"}${Math.abs(s.dailyLoss).toFixed(2)}% / max ${CFG.maxDailyLossPct}%</span>
+        <div class="ks-row"><span class="ks-label">Tages-PnL</span><span class="ks-value ${dlCls}">${s.dailyLoss <= 0 ? "+" : "-"}${Math.abs(s.dailyLoss).toFixed(2)}% ${s.dailyLoss > 0 ? "/ max Verlust " + CFG.maxDailyLossPct + "%" : ""}</span>
           <div class="ks-bar-bg"><div class="ks-bar-fill risk-color-${dlCls === "crit" ? "red" : dlCls === "warn" ? "yellow" : "green"}" style="width:${barPct(Math.max(s.dailyLoss, 0), CFG.maxDailyLossPct)}%"></div></div></div>
         <div class="ks-row"><span class="ks-label">Drawdown von Peak</span><span class="ks-value ${ddCls}">-${Math.max(s.drawdown, 0).toFixed(2)}% / max ${CFG.maxDrawdownPct}%</span>
           <div class="ks-bar-bg"><div class="ks-bar-fill risk-color-${ddCls === "crit" ? "red" : ddCls === "warn" ? "yellow" : "green"}" style="width:${barPct(Math.max(s.drawdown, 0), CFG.maxDrawdownPct)}%"></div></div></div>
