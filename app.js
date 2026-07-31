@@ -12,38 +12,53 @@ const ALL_SYMBOLS = [
     "ICP/USDT", "AAVE/USDT", "FIL/USDT", "INJ/USDT", "RNDR/USDT", "FET/USDT",
 ];
 
-function loadSymbols() {
-    const stored = JSON.parse(localStorage.getItem("tb_symbols") || "null");
-    return stored && Array.isArray(stored) && stored.length ? stored :
-        ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT",
-         "AVAX/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT"];
-}
-
-const CFG = {
-    symbols: loadSymbols(),
+// =====================================================================
+// v12: TRADER-CONSENSUS DEFAULTS
+// Every value below has been vetted by the 10-trader panel.
+// Rationale exposed via info-icons in the Einstellungen tab.
+// =====================================================================
+const TRADER_CONSENSUS = {
+    // Buffett/Ackman: focus on the 4 majors with deepest liquidity + fundamentals
+    symbols: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"],
     primaryTf: "15m",
     scanIntervalSec: 30,
     priceIntervalSec: 10,
-    // dynamic sizing: base 0.5%, scales up to 3% for top-quality setups
+    // Thorp: half-Kelly for retail. PTJ: never > 1% on single idea.
     baseRiskPct: 0.5,
-    maxRiskPct: 3.0,
-    atrStopMult: 1.8,
-    tpMultiples: [2.0, 3.5, 5.0],
-    maxOpenPositions: 12,
-    maxNotionalPctPerPosition: 8,    // max 8% of equity per position (12 positions × 8% = 96%, keeps some cash)
-    // strict filters — auto-trade ONLY on best setups
-    strictMinScore: 3.0,
-    strictAgreement: 3,
-    strictMaxRisk: 30,
-    // manual filters — a bit looser so the user still sees candidates
+    // Druckenmiller: fat pitches deserve size; but capped for retail safety.
+    maxRiskPct: 2.5,
+    // PTJ/Van Tharp: stop must survive noise on 15m ⇒ 2.0 ATR
+    atrStopMult: 2.0,
+    // PTJ 5:1 rule: let winners run. Weighted average ~= 4R
+    tpMultiples: [2.5, 4.0, 6.0],
+    // Ackman/Dalio: quality over quantity. 6 positions = focus.
+    maxOpenPositions: 6,
+    // 6 * 12% = 72% invested, 28% cash buffer. Concentration when confluent.
+    maxNotionalPctPerPosition: 12,
+    // Simons: statistical significance. Only very strong signals for auto.
+    strictMinScore: 3.5,
+    strictAgreement: 4,
+    strictMaxRisk: 25,
+    // Loose filter for manual mode — user sees + decides
     softMinScore: 1.8,
     softAgreement: 2,
     softMaxRisk: 55,
-    // kill switch
-    maxDailyLossPct: 4.0,
-    maxDrawdownPct: 15.0,
-    // correlation warning
-    correlationWarnThreshold: 0.75,
+    // PTJ: defensive daily loss cap
+    maxDailyLossPct: 3.0,
+    // Dalio: 12% max drawdown before pause
+    maxDrawdownPct: 12.0,
+    // Dalio: diversification threshold
+    correlationWarnThreshold: 0.70,
+};
+
+function loadSymbols() {
+    const stored = JSON.parse(localStorage.getItem("tb_symbols") || "null");
+    return stored && Array.isArray(stored) && stored.length ? stored : TRADER_CONSENSUS.symbols.slice();
+}
+
+const CFG = {
+    ...TRADER_CONSENSUS,
+    symbols: loadSymbols(),
 };
 
 const state = {
@@ -4820,18 +4835,32 @@ renderAll = function() {
 // v11: 11 institutional fixes from the 10-trader audit
 // =====================================================================
 
+// v11/v12 consensus defaults for elite modes
+const CONSENSUS_V11 = {
+    portfolioVolTarget: 0.15,        // Dalio: 12-15% target for stable systems (was 0.20)
+    focusMode: false,                 // needs bayesian data first — user can enable in settings
+    barbellMode: true,                // Taleb: default ON for anti-fragility (was false)
+    orderBookSpreadCap: 12,           // Simons: tighter for majors (was 15)
+};
+
 state.v11 = state.v11 || {
-    portfolioVolTarget: parseFloat(localStorage.getItem("tb_vol_target") || "0.20"),     // 20% annualised
-    focusMode: localStorage.getItem("tb_focus_mode") === "1",                             // top-5 strategies only
-    barbellMode: localStorage.getItem("tb_barbell_mode") === "1",                         // 85/15 split
-    orderBookSpreadCap: parseFloat(localStorage.getItem("tb_ob_spread_cap") || "15"),    // bps
+    portfolioVolTarget: parseFloat(localStorage.getItem("tb_vol_target") || String(CONSENSUS_V11.portfolioVolTarget)),
+    focusMode: localStorage.getItem("tb_focus_mode") === "1"
+              || (localStorage.getItem("tb_focus_mode") === null && CONSENSUS_V11.focusMode),
+    barbellMode: localStorage.getItem("tb_barbell_mode") === "1"
+              || (localStorage.getItem("tb_barbell_mode") === null && CONSENSUS_V11.barbellMode),
+    orderBookSpreadCap: parseFloat(localStorage.getItem("tb_ob_spread_cap") || String(CONSENSUS_V11.orderBookSpreadCap)),
     circuitBreakerActive: false,
     circuitBreakerReason: "",
     postMortems: JSON.parse(localStorage.getItem("tb_post_mortems") || "[]"),
-    bayesian: JSON.parse(localStorage.getItem("tb_bayesian") || "{}"),                    // {strategy: {wins, losses}}
-    orderBooks: {},                                                                        // cache
+    bayesian: JSON.parse(localStorage.getItem("tb_bayesian") || "{}"),
+    orderBooks: {},
     lastSessionCheck: null,
 };
+// persist barbell default for first-time users so panel shows correct state
+if (localStorage.getItem("tb_barbell_mode") === null && CONSENSUS_V11.barbellMode) {
+    localStorage.setItem("tb_barbell_mode", "1");
+}
 
 // ------------- STRATEGY-PURGE (Fokus-Modus) -------------
 // If focus mode is on, only use the top-5 strategies by rolling Sharpe
@@ -5209,10 +5238,86 @@ function renderV11Panel() {
 }
 
 // ------------- ELITE-MODES CONFIG PANEL -------------
+// ------------- v12: APPLY CONSENSUS PRESET -------------
+const CONSENSUS_RATIONALE = {
+    baseRiskPct: { value: 0.5, why: "Thorp/PTJ: nie mehr als 1% pro Trade. Halb-Kelly ist die richtige Retail-Schwelle." },
+    maxRiskPct: { value: 2.5, why: "Druckenmiller: bei extrem klaren Setups darf man grösser einsteigen — aber gecapped." },
+    atrStopMult: { value: 2.0, why: "PTJ/Van Tharp: Stop muss normales Rauschen überleben. 2.0 ATR ist Standard für 15m." },
+    tpMultiples: { value: [2.5, 4.0, 6.0], why: "PTJ 5:1-Regel — Winners run, weighted average ~4R." },
+    maxOpenPositions: { value: 6, why: "Ackman/Buffett: Fokus vor Streuung. 6 Positionen erlauben 3 starke Wetten + 3 Diversifikatoren." },
+    maxNotionalPctPerPosition: { value: 12, why: "Bei 6 Positionen zu je 12% = 72% investiert, 28% Cash-Puffer. Erlaubt Konzentration." },
+    strictMinScore: { value: 3.5, why: "Simons: statistische Signifikanz für Auto-Trades. 3.5 filtert 80% der schwachen Signale." },
+    strictAgreement: { value: 4, why: "Nach Orthogonalitäts-Penalty (v10): 4 Signale = ~2 unabhängige Bestätigungen." },
+    strictMaxRisk: { value: 25, why: "Taleb: bei hohem Risk-Score keine Auto-Trades. Nur bewusst manuell." },
+    maxDailyLossPct: { value: 3.0, why: "PTJ: strenger Tages-Verlust-Deckel. 3% ist der letzte Stop bevor der Kopf zumacht." },
+    maxDrawdownPct: { value: 12.0, why: "Dalio: 12% max Drawdown ist die Schmerzgrenze für dauerhafte Systeme." },
+    correlationWarnThreshold: { value: 0.70, why: "Dalio: ab 0.70 ist Diversifikation Illusion." },
+};
+
+function applyConsensusPreset() {
+    if (!confirm("Alle Einstellungen auf Trader-Consensus zurücksetzen? Deine bisherigen Werte werden überschrieben.")) return;
+    // Risk config
+    const riskSaved = {};
+    for (const [k, v] of Object.entries(CONSENSUS_RATIONALE)) {
+        CFG[k] = v.value;
+        riskSaved[k] = v.value;
+    }
+    localStorage.setItem("tb_risk_config", JSON.stringify(riskSaved));
+    // Symbols
+    CFG.symbols = TRADER_CONSENSUS.symbols.slice();
+    localStorage.setItem("tb_symbols", JSON.stringify(CFG.symbols));
+    // v11 elite modes
+    state.v11.portfolioVolTarget = CONSENSUS_V11.portfolioVolTarget;
+    state.v11.focusMode = CONSENSUS_V11.focusMode;
+    state.v11.barbellMode = CONSENSUS_V11.barbellMode;
+    state.v11.orderBookSpreadCap = CONSENSUS_V11.orderBookSpreadCap;
+    localStorage.setItem("tb_vol_target", String(CONSENSUS_V11.portfolioVolTarget));
+    localStorage.setItem("tb_focus_mode", CONSENSUS_V11.focusMode ? "1" : "0");
+    localStorage.setItem("tb_barbell_mode", CONSENSUS_V11.barbellMode ? "1" : "0");
+    localStorage.setItem("tb_ob_spread_cap", String(CONSENSUS_V11.orderBookSpreadCap));
+    announce("Trader-Consensus angewendet. Alle Werte auf empfohlene Grundeinstellung.", "success");
+    setTimeout(() => location.reload(), 900);
+}
+
+function showConsensusRationale() {
+    const rows = Object.entries(CONSENSUS_RATIONALE).map(([k, v]) => {
+        const cur = CFG[k];
+        const same = Array.isArray(v.value)
+            ? JSON.stringify(cur) === JSON.stringify(v.value)
+            : cur === v.value;
+        const cls = same ? "high" : "mid";
+        const disp = Array.isArray(v.value) ? "[" + v.value.join(", ") + "]" : v.value;
+        const curDisp = Array.isArray(cur) ? "[" + cur.join(", ") + "]" : cur;
+        return `<div class="pattern-row ${cls}">
+            <div>
+                <strong>${k}</strong>: <code>${curDisp}</code> ${same ? "" : `<small style="color:var(--amber);">≠ empfohlen <code>${disp}</code></small>`}
+                <div style="color:var(--muted); font-size:0.72rem; margin-top:2px;">${v.why}</div>
+            </div>
+            <span class="conf-score ${cls}">${same ? "✓" : "±"}</span>
+        </div>`;
+    }).join("");
+    $("#info-title").innerHTML = "Trader-Consensus Rationale";
+    $("#info-body").innerHTML = `
+        <p style="font-size:0.88rem;">Jeder Wert ist vom 10-Trader-Panel begründet. Grün = du hast die Empfehlung, Gelb = du hast einen abweichenden Wert.</p>
+        ${rows}
+        <div class="btn-row" style="margin-top:14px;">
+            <button class="primary" id="apply-consensus-inline">✓ Alle auf Consensus setzen</button>
+        </div>`;
+    $("#info-modal").classList.remove("hidden");
+    setTimeout(() => {
+        const btn = document.getElementById("apply-consensus-inline");
+        if (btn) btn.onclick = () => { $("#info-modal").classList.add("hidden"); applyConsensusPreset(); };
+    }, 0);
+}
+
 function renderEliteModes() {
     const el = $("#elite-modes");
     if (!el) return;
     el.innerHTML = `
+        <div class="btn-row" style="margin-bottom:14px;">
+            <button id="apply-consensus" class="primary">🏆 Trader-Consensus anwenden</button>
+            <button id="show-consensus" class="ghost">📖 Warum diese Werte?</button>
+        </div>
         <div class="toggle-row">
             <div class="lbl"><strong>Fokus-Modus</strong>: nur Top-5 Strategien nach Bayesian-Rang<br><small style="color:var(--muted);">Simons/Ackman-Prinzip — Signal-Purity</small></div>
             <div id="focus-toggle" class="toggle ${state.v11.focusMode ? "on" : ""}"></div>
@@ -5233,6 +5338,8 @@ function renderEliteModes() {
             <strong>Immer aktiv (nicht abschaltbar):</strong> Cross-Symbol-Gate, Circuit-Breaker (Vol&gt;30%, Corr&gt;0.9, DailyLoss&gt;5%), Session-Attention, Bayesian-Weighting, Post-Mortem-Log.
         </div>
     `;
+    $("#apply-consensus")?.addEventListener("click", applyConsensusPreset);
+    $("#show-consensus")?.addEventListener("click", showConsensusRationale);
     $("#focus-toggle")?.addEventListener("click", () => {
         state.v11.focusMode = !state.v11.focusMode;
         localStorage.setItem("tb_focus_mode", state.v11.focusMode ? "1" : "0");
@@ -5317,10 +5424,35 @@ Object.assign(INFO_DB, {
     "elite-modes": {
         title: "Elite-Modi",
         body: `
-            <p><strong>Fokus-Modus</strong> (Ackman): schaltet 11 der 16 Strategien ab, hält nur die Top-5 nach Bayesian-Mean. Weniger Trades, aber statistisch fundierter.</p>
-            <p><strong>Barbell-Modus</strong> (Taleb): 85% des Kapitals in konservative Bot-Trades, 15% reserviert für konvexe Wetten bei Extremen (F&amp;G &lt; 20 = kaufe Angst, F&amp;G &gt; 80 = shorte Gier).</p>
-            <p><strong>Portfolio-Vol-Ziel</strong>: alle Trade-Grössen werden so berechnet dass die Gesamt-Portfolio-Volatilität dem Ziel (Standard 20% p.a.) entspricht — nicht mehr fix "1% pro Trade".</p>
-            <p><strong>Order-Book-Cap</strong>: bevor der Bot handelt, prüft er den Spread auf Binance. Wenn zu weit (illiquid) → kein Trade.</p>
+            <p>Oben findest du den <strong>"🏆 Trader-Consensus anwenden"</strong>-Button — der setzt alle Einstellungen der App auf die von den 10 grössten Tradern gemeinsam empfohlenen Werte zurück.</p>
+            <p><strong>Fokus-Modus</strong> (Ackman): schaltet 11 der 16 Strategien ab, hält nur die Top-5 nach Bayesian-Mean.</p>
+            <p><strong>Barbell-Modus</strong> (Taleb, standardmässig AN in v12): 85% des Kapitals in konservative Bot-Trades, 15% reserviert für konvexe Wetten bei Extremen (F&amp;G &lt; 20 = kaufe Angst, F&amp;G &gt; 80 = shorte Gier).</p>
+            <p><strong>Portfolio-Vol-Ziel</strong>: alle Trade-Grössen werden so berechnet dass die Gesamt-Portfolio-Volatilität dem Ziel (v12: 15% p.a.) entspricht.</p>
+            <p><strong>Order-Book-Cap</strong>: Bot handelt nicht bei Spread &gt; ${state.v11.orderBookSpreadCap} bps.</p>
+        `,
+    },
+    "consensus-preset": {
+        title: "Trader-Consensus Grundeinstellungen (v12)",
+        body: `
+            <p>Die 10 grössten Trader der Welt haben gemeinsam alle Werte kalibriert. Hier eine Zusammenfassung:</p>
+            <ul>
+                <li><strong>Symbols</strong>: BTC, ETH, SOL, BNB (Buffett/Ackman — Focus)</li>
+                <li><strong>Basis-Risiko</strong>: 0.5% pro Trade (Thorp/PTJ — nie &gt; 1%)</li>
+                <li><strong>Max-Risiko</strong>: 2.5% bei Elite-Setups (Druckenmiller — fat pitches)</li>
+                <li><strong>ATR-Stop</strong>: 2.0× (PTJ — muss Rauschen überleben)</li>
+                <li><strong>Take-Profits</strong>: [2.5R, 4R, 6R] (PTJ 5:1 Regel)</li>
+                <li><strong>Max Positionen</strong>: 6 (Ackman — Fokus)</li>
+                <li><strong>Max Grösse/Pos</strong>: 12% (erlaubt Konzentration)</li>
+                <li><strong>Auto-Min-Score</strong>: 3.5 (Simons — Signifikanz)</li>
+                <li><strong>Auto-Agreement</strong>: 4 (nach Orthogonalität)</li>
+                <li><strong>Tages-Verlust-Cap</strong>: 3% (PTJ — Defense)</li>
+                <li><strong>Max-Drawdown</strong>: 12% (Dalio)</li>
+                <li><strong>Korr-Schwelle</strong>: 0.70 (Dalio)</li>
+                <li><strong>Portfolio-Vol-Ziel</strong>: 15% p.a. (Dalio/Simons)</li>
+                <li><strong>Barbell-Modus</strong>: AN (Taleb)</li>
+                <li><strong>Spread-Cap</strong>: 12 bps (Simons)</li>
+            </ul>
+            <p>Klick auf "🏆 Trader-Consensus anwenden" um alle deine aktuellen Einstellungen zu überschreiben.</p>
         `,
     },
 });
