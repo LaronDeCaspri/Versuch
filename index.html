@@ -126,6 +126,7 @@
     <button class="tab-btn" data-tab="markt"><span class="ic">🌍</span><span>Markt</span></button>
     <button class="tab-btn" data-tab="analyse"><span class="ic">📈</span><span>Analyse</span></button>
     <button class="tab-btn" data-tab="journal"><span class="ic">📒</span><span>Journal</span></button>
+    <button class="tab-btn" data-tab="status"><span class="ic">🛡</span><span>Status</span></button>
     <button class="tab-btn" data-tab="einstellungen"><span class="ic">⚙</span><span>Einstellungen</span></button>
 </nav>
 
@@ -509,7 +510,46 @@
 </section>
 
 <!-- =============================================================== -->
-<!-- TAB 6: EINSTELLUNGEN                                             -->
+<!-- TAB 6: STATUS — was ist live und was nicht                      -->
+<!-- =============================================================== -->
+<section class="tab-pane" data-pane="status">
+
+    <div class="card">
+        <h2>System-Status <span class="badge" id="status-overall">–</span> <span class="info" data-info="status-overview">ⓘ</span></h2>
+        <div class="perf-hint">Live-Übersicht aller Datenquellen. Grün = frisch, Gelb = alt, Rot = ausgefallen.</div>
+        <div id="status-overview" style="margin-top:10px;"></div>
+        <div class="btn-row" style="margin-top:10px;">
+            <button id="status-refresh-all" class="primary">↻ Alle Quellen jetzt aktualisieren</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Bot-Aktivität <span class="info" data-info="bot-activity">ⓘ</span></h2>
+        <div id="bot-activity"></div>
+    </div>
+
+    <div class="card">
+        <h2>Kurs-Daten pro Symbol <span class="info" data-info="symbol-data-status">ⓘ</span></h2>
+        <div class="perf-hint">Für jedes aktive Handelspaar: wie viele Kerzen sind geladen, wann war der letzte Kurs-Update.</div>
+        <div id="symbol-data-status"></div>
+    </div>
+
+    <div class="card">
+        <h2>API-Endpoint-Health <span class="badge">Direkt-Pings</span> <span class="info" data-info="health">ⓘ</span></h2>
+        <div class="perf-hint">Testet die Erreichbarkeit jeder externen API mit Status-Code und Latenz.</div>
+        <div id="health-panel-status"></div>
+    </div>
+
+    <div class="card">
+        <h2>Letzte Fehler <span class="info" data-info="error-log">ⓘ</span></h2>
+        <div class="perf-hint">Chronologisch aufgezeichnete Fetch-Fehler der letzten Stunde.</div>
+        <div id="error-log"></div>
+    </div>
+
+</section>
+
+<!-- =============================================================== -->
+<!-- TAB 7: EINSTELLUNGEN                                             -->
 <!-- =============================================================== -->
 <section class="tab-pane" data-pane="einstellungen">
 

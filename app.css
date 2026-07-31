@@ -1278,6 +1278,58 @@ h2 .info { vertical-align: baseline; position: relative; top: -1px; }
     border-radius: 4px; background: rgba(255,255,255,0.03);
 }
 .pattern-mini svg { width: 100% !important; max-width: 62px !important; height: auto; padding: 0 !important; }
+
+/* -------- v15: Status tab -------- */
+.status-row {
+    display: grid; grid-template-columns: auto 1fr auto auto;
+    gap: 12px; align-items: center;
+    padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: 8px; margin-bottom: 6px; font-size: 0.86rem;
+}
+.status-row.ok { border-left: 3px solid var(--green); }
+.status-row.warn { border-left: 3px solid var(--amber); }
+.status-row.err { border-left: 3px solid var(--red); }
+.status-row.pending { border-left: 3px solid var(--muted); }
+.status-light {
+    width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+    box-shadow: 0 0 8px currentColor;
+}
+.status-light.ok { background: var(--green); color: var(--green); }
+.status-light.warn { background: var(--amber); color: var(--amber); }
+.status-light.err { background: var(--red); color: var(--red); box-shadow: none; }
+.status-light.pending { background: var(--muted); color: transparent; box-shadow: none; }
+.status-details {
+    font-size: 0.72rem; color: var(--muted); text-align: right;
+    line-height: 1.35;
+}
+.status-details strong { color: var(--text-2); }
+.status-summary {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+    margin-bottom: 10px;
+}
+.status-tile {
+    background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+    padding: 8px 10px; border-radius: 6px; text-align: center;
+}
+.status-tile .k { color: var(--muted); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.4px; }
+.status-tile .v { font-weight: 700; font-size: 1.1rem; margin-top: 2px; }
+.status-tile.ok .v { color: var(--green); }
+.status-tile.warn .v { color: var(--amber); }
+.status-tile.err .v { color: var(--red); }
+.status-badge {
+    display: inline-block; padding: 3px 8px; border-radius: 4px;
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.status-badge.live { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+.status-badge.stale { background: rgba(245, 158, 11, 0.15); color: var(--amber); }
+.status-badge.off { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+.error-log-row {
+    padding: 6px 10px; font-size: 0.75rem; border-left: 2px solid var(--red);
+    background: rgba(239, 68, 68, 0.04); border-radius: 4px; margin-bottom: 4px;
+}
+.error-log-row .ts { color: var(--muted); }
+.error-log-row .src { color: var(--amber); font-weight: 700; }
 .pattern-row:hover { transform: translateX(3px); border-color: var(--accent); }
 .pattern-row.high { border-left: 3px solid var(--green); }
 .pattern-row.low  { border-left: 3px solid var(--red); }

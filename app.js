@@ -5233,6 +5233,447 @@ renderAll = function() {
 };
 
 // =====================================================================
+// v15: STATUS TAB — live data source overview + error log
+// =====================================================================
+
+// Central error log (last 50 entries)
+state.errorLog = state.errorLog || JSON.parse(localStorage.getItem("tb_error_log") || "[]");
+function logError(source, message) {
+    state.errorLog.push({
+        ts: Date.now(),
+        source: source || "?",
+        message: (message || "unknown").toString().slice(0, 200),
+    });
+    if (state.errorLog.length > 50) state.errorLog = state.errorLog.slice(-50);
+    try { localStorage.setItem("tb_error_log", JSON.stringify(state.errorLog.slice(-30))); } catch (e) {}
+}
+
+// Central status descriptor: each source can be probed via getStatus()
+function _fmtAge(ms) {
+    if (ms == null || !isFinite(ms)) return "nie";
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s} s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h} h`;
+    return `${Math.floor(h / 24)} T`;
+}
+function _statusFromAge(ageMs, freshMs, staleMs) {
+    if (ageMs == null) return "pending";
+    if (ageMs <= freshMs) return "ok";
+    if (ageMs <= staleMs) return "warn";
+    return "err";
+}
+
+function collectSourceStatus() {
+    const now = Date.now();
+    const sources = [];
+
+    // Binance klines (main scan) — inferred from candle timestamps
+    const btcCandles = state.candles["BTC/USDT"];
+    const lastBtcTs = btcCandles ? btcCandles[btcCandles.length - 1].ts : null;
+    sources.push({
+        name: "Binance Kerzen (Kern)", url: "api.binance.com/klines",
+        lastOk: lastBtcTs ? lastBtcTs : null,
+        age: lastBtcTs ? now - lastBtcTs : null,
+        status: _statusFromAge(lastBtcTs ? now - lastBtcTs : null, 60000, 300000),
+        detail: btcCandles ? `${btcCandles.length} Kerzen · aktuellste ${new Date(lastBtcTs).toLocaleTimeString("de-DE")}` : "keine Daten",
+    });
+
+    // Live prices
+    const priceCount = Object.keys(state.prices || {}).length;
+    sources.push({
+        name: "Binance Live-Preise", url: "api.binance.com/ticker/price",
+        lastOk: state.pricesLastUpdate,
+        age: state.pricesLastUpdate ? now - state.pricesLastUpdate : null,
+        status: priceCount > 0 ? _statusFromAge(state.pricesLastUpdate ? now - state.pricesLastUpdate : null, 20000, 60000) : "pending",
+        detail: `${priceCount} Preise geladen`,
+    });
+
+    // 24h tickers
+    const tickerCount = Object.keys(state.tickers || {}).length;
+    sources.push({
+        name: "Binance 24h Ticker", url: "api.binance.com/ticker/24hr",
+        lastOk: state.tickersLastUpdate,
+        age: state.tickersLastUpdate ? now - state.tickersLastUpdate : null,
+        status: tickerCount > 0 ? _statusFromAge(state.tickersLastUpdate ? now - state.tickersLastUpdate : null, 90000, 300000) : "pending",
+        detail: `${tickerCount} Symbole`,
+    });
+
+    // Futures data
+    const futuresCount = (state.futuresData || []).length;
+    sources.push({
+        name: "Binance Futures (Funding/OI)", url: "fapi.binance.com",
+        lastOk: state.futuresLastUpdate,
+        age: state.futuresLastUpdate ? now - state.futuresLastUpdate : null,
+        status: futuresCount > 0 ? _statusFromAge(state.futuresLastUpdate ? now - state.futuresLastUpdate : null, 200000, 600000) : "pending",
+        detail: `${futuresCount} Symbole mit Funding-Daten`,
+    });
+
+    // Fear & Greed (alternative.me)
+    sources.push({
+        name: "Fear & Greed (alternative.me)", url: "api.alternative.me/fng",
+        lastOk: state.fng?.ts,
+        age: state.fng?.ts ? now - state.fng.ts : null,
+        status: state.fng
+            ? (state.fng.fallback ? "warn" : _statusFromAge(now - state.fng.ts, 6 * 3600 * 1000, 24 * 3600 * 1000))
+            : "err",
+        detail: state.fng
+            ? (state.fng.fallback ? "Fallback: Binance-Composite" : `Wert ${state.fng.value} · ${state.fng.label}`)
+            : (state.fngError || "keine Daten"),
+    });
+
+    // CoinGecko Global (market context)
+    sources.push({
+        name: "CoinGecko Global (BTC-Dom, Mcap)", url: "api.coingecko.com/global",
+        lastOk: state.marketCtxLastUpdate,
+        age: state.marketCtxLastUpdate ? now - state.marketCtxLastUpdate : null,
+        status: state.marketGlobal ? _statusFromAge(state.marketCtxLastUpdate ? now - state.marketCtxLastUpdate : null, 6 * 60 * 1000, 30 * 60 * 1000) : "err",
+        detail: state.marketGlobal ? `BTC-Dom ${state.marketGlobal.btcDominance?.toFixed(1)}%` : (state.marketCtxError || "keine Daten"),
+    });
+
+    // CoinGecko Trending
+    sources.push({
+        name: "CoinGecko Trending", url: "api.coingecko.com/search/trending",
+        lastOk: state.marketCtxLastUpdate,
+        age: state.marketCtxLastUpdate ? now - state.marketCtxLastUpdate : null,
+        status: (state.trending?.length > 0) ? "ok" : "err",
+        detail: state.trending?.length ? `${state.trending.length} Coins` : "keine Daten",
+    });
+
+    // On-Chain (mempool.space)
+    sources.push({
+        name: "On-Chain (mempool.space)", url: "mempool.space/api",
+        lastOk: state.onchainLastUpdate,
+        age: state.onchainLastUpdate ? now - state.onchainLastUpdate : null,
+        status: state.onchain ? _statusFromAge(state.onchainLastUpdate ? now - state.onchainLastUpdate : null, 6 * 60 * 1000, 30 * 60 * 1000) : "err",
+        detail: state.onchain ? `Fees ${state.onchain.fastFee ?? "?"} sat/vB · ${state.onchain.mempoolSize ?? "?"} TX` : (state.onchainError || "keine Daten"),
+    });
+
+    // Whale transfers
+    sources.push({
+        name: "Whale-Transfers", url: "mempool.space/api/mempool/recent",
+        lastOk: state.whalesLastUpdate,
+        age: state.whalesLastUpdate ? now - state.whalesLastUpdate : null,
+        status: state.whales ? "ok" : "pending",
+        detail: state.whales ? `${state.whales.length} Transfers > 10 BTC` : "warten",
+    });
+
+    // EUR rate
+    sources.push({
+        name: "EUR-Rate (Frankfurter)", url: "api.frankfurter.app",
+        lastOk: state.eurRateLastUpdate,
+        age: state.eurRateLastUpdate ? now - state.eurRateLastUpdate : null,
+        status: state.eurRate ? "ok" : "err",
+        detail: state.eurRate ? `1 USD = ${state.eurRate.toFixed(4)} EUR` : "keine Daten",
+    });
+
+    // News
+    sources.push({
+        name: "Live-News", url: "rss2json / cryptocompare / reddit",
+        lastOk: state.lastNewsFetch,
+        age: state.lastNewsFetch ? now - state.lastNewsFetch : null,
+        status: (state.news?.length > 0) ? _statusFromAge(state.lastNewsFetch ? now - state.lastNewsFetch : null, 10 * 60 * 1000, 30 * 60 * 1000) : "err",
+        detail: state.news?.length ? `${state.news.length} News · Quelle ${state.newsSource || "?"}` : (state.newsError || "keine Daten"),
+    });
+
+    return sources;
+}
+
+function renderStatusOverview() {
+    const el = $("#status-overview");
+    if (!el) return;
+    const sources = collectSourceStatus();
+    const okCount = sources.filter((s) => s.status === "ok").length;
+    const warnCount = sources.filter((s) => s.status === "warn").length;
+    const errCount = sources.filter((s) => s.status === "err").length;
+    const pendCount = sources.filter((s) => s.status === "pending").length;
+    // overall badge
+    const overallEl = $("#status-overall");
+    if (overallEl) {
+        if (errCount > 3) { overallEl.textContent = "PROBLEM"; overallEl.className = "badge"; overallEl.style.background = "rgba(239,68,68,0.2)"; overallEl.style.color = "var(--red)"; }
+        else if (errCount > 0 || warnCount > 2) { overallEl.textContent = "TEILWEISE"; overallEl.style.background = "rgba(245,158,11,0.2)"; overallEl.style.color = "var(--amber)"; }
+        else { overallEl.textContent = "ALLES LIVE"; overallEl.style.background = "rgba(34,197,94,0.2)"; overallEl.style.color = "var(--green)"; }
+    }
+    const summary = `
+        <div class="status-summary">
+            <div class="status-tile ok"><div class="k">Live</div><div class="v">${okCount}</div></div>
+            <div class="status-tile warn"><div class="k">Alt</div><div class="v">${warnCount}</div></div>
+            <div class="status-tile err"><div class="k">Aus</div><div class="v">${errCount}</div></div>
+            <div class="status-tile"><div class="k">Warten</div><div class="v" style="color:var(--muted);">${pendCount}</div></div>
+        </div>`;
+    const rows = sources.map((s) => {
+        const badgeMap = { ok: "live", warn: "stale", err: "off", pending: "…" };
+        const badgeClass = { ok: "live", warn: "stale", err: "off", pending: "off" }[s.status];
+        return `<div class="status-row ${s.status}">
+            <span class="status-light ${s.status}"></span>
+            <div>
+                <strong>${s.name}</strong>
+                <div style="color:var(--muted); font-size:0.72rem;">${s.detail}</div>
+            </div>
+            <span class="status-badge ${badgeClass}">${badgeMap[s.status]}</span>
+            <div class="status-details">
+                <div><strong>${_fmtAge(s.age)}</strong></div>
+                <div style="font-size:0.66rem;">${s.url}</div>
+            </div>
+        </div>`;
+    }).join("");
+    el.innerHTML = summary + rows;
+}
+
+function renderBotActivity() {
+    const el = $("#bot-activity");
+    if (!el) return;
+    const now = Date.now();
+    const nextScanIn = state.lastScanTime ? Math.max(0, (state.lastScanTime + CFG.scanIntervalSec * 1000 - now)) : null;
+    const eq = broker.equity(state.prices);
+    const pnl = broker.realizedPnl();
+    const posCount = Object.keys(broker.positions).length;
+    const pendCount = state.pending?.length || 0;
+    const scanCount = state.scanCount || 0;
+    el.innerHTML = `
+        <div class="status-summary">
+            <div class="status-tile ${state.autoMode ? "ok" : ""}"><div class="k">Modus</div><div class="v">${state.autoMode ? "AUTO" : "MANUELL"}</div></div>
+            <div class="status-tile ${state.halted ? "err" : "ok"}"><div class="k">Bot-Status</div><div class="v">${state.halted ? "PAUSIERT" : "AKTIV"}</div></div>
+            <div class="status-tile ${state.v11?.circuitBreakerActive ? "err" : "ok"}"><div class="k">Circuit-Breaker</div><div class="v">${state.v11?.circuitBreakerActive ? "AN" : "AUS"}</div></div>
+            <div class="status-tile"><div class="k">Scans</div><div class="v">${scanCount}</div></div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:0.85rem; margin-top:8px;">
+            <div class="row"><span>Equity</span><strong class="num">${fmt(eq, 2)} USDT</strong></div>
+            <div class="row"><span>Realisierter PnL</span><strong class="num" style="color:${pnl >= 0 ? "var(--green)" : "var(--red)"}">${pnl >= 0 ? "+" : ""}${fmt(pnl, 2)}</strong></div>
+            <div class="row"><span>Offene Positionen</span><strong>${posCount} / ${CFG.maxOpenPositions}</strong></div>
+            <div class="row"><span>Pending-Signale</span><strong>${pendCount}</strong></div>
+            <div class="row"><span>Nächster Scan in</span><strong>${nextScanIn != null ? Math.round(nextScanIn / 1000) + " s" : "–"}</strong></div>
+            <div class="row"><span>Scan-Intervall</span><strong>${CFG.scanIntervalSec} s</strong></div>
+        </div>
+        ${state.v11?.circuitBreakerActive ? `<div style="margin-top:8px; padding:8px 12px; background:rgba(239,68,68,0.08); border-left:3px solid var(--red); border-radius:6px; font-size:0.82rem; color:var(--red);">⛔ ${state.v11.circuitBreakerReason}</div>` : ""}
+        ${state.halted ? `<div style="margin-top:8px; padding:8px 12px; background:rgba(245,158,11,0.08); border-left:3px solid var(--amber); border-radius:6px; font-size:0.82rem;">Kill-Switch aktiv — Bot handelt nicht. Reset über Übersicht-Tab.</div>` : ""}
+    `;
+}
+
+function renderSymbolDataStatus() {
+    const el = $("#symbol-data-status");
+    if (!el) return;
+    const now = Date.now();
+    const rows = CFG.symbols.map((sym) => {
+        const c = state.candles[sym];
+        const p = state.prices[sym];
+        const lastCandleTs = c ? c[c.length - 1].ts : null;
+        const ageStr = lastCandleTs ? _fmtAge(now - lastCandleTs) : "–";
+        const status = c && c.length >= 100 && (now - lastCandleTs) < 5 * 60 * 1000 ? "ok"
+                     : c && c.length >= 20 ? "warn"
+                     : "err";
+        const patterns = state.livePatterns?.[sym] ? Object.keys(state.livePatterns[sym]).length : 0;
+        return `<div class="status-row ${status}">
+            <span class="status-light ${status}"></span>
+            <div>
+                <strong>${sym}</strong>
+                <div style="color:var(--muted); font-size:0.72rem;">
+                    ${c?.length || 0} Kerzen · Preis ${p ? p.toFixed(4) : "–"}
+                    ${patterns ? ` · ${patterns} Muster erkannt` : ""}
+                </div>
+            </div>
+            <span class="status-badge ${status === "ok" ? "live" : status === "warn" ? "stale" : "off"}">${status === "ok" ? "frisch" : status === "warn" ? "wenige" : "leer"}</span>
+            <div class="status-details">
+                <div><strong>${ageStr}</strong></div>
+                <div style="font-size:0.66rem;">seit letzter Kerze</div>
+            </div>
+        </div>`;
+    }).join("");
+    el.innerHTML = rows || "keine Symbole konfiguriert";
+}
+
+async function renderStatusHealth() {
+    const el = $("#health-panel-status");
+    if (!el) return;
+    el.innerHTML = HEALTH_ENDPOINTS.map((e) => `<div class="status-row pending" data-hname="${e.name}"><span class="status-light pending"></span><div><strong>${e.name}</strong></div><span class="status-badge off">…prüfe</span><div class="status-details">–</div></div>`).join("");
+    for (const ep of HEALTH_ENDPOINTS) {
+        const start = performance.now();
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 6000);
+            const res = await fetch(ep.url, { signal: controller.signal });
+            clearTimeout(timer);
+            const ms = Math.round(performance.now() - start);
+            const row = el.querySelector(`[data-hname="${ep.name}"]`);
+            if (!row) continue;
+            const status = res.ok ? (ms > 2000 ? "warn" : "ok") : "err";
+            row.className = `status-row ${status}`;
+            row.innerHTML = `
+                <span class="status-light ${status}"></span>
+                <div><strong>${ep.name}</strong><div style="color:var(--muted); font-size:0.72rem;">${ep.url.replace(/^https?:\/\//, "").split("/")[0]}</div></div>
+                <span class="status-badge ${status === "ok" ? "live" : status === "warn" ? "stale" : "off"}">HTTP ${res.status}</span>
+                <div class="status-details"><div><strong>${ms} ms</strong></div><div style="font-size:0.66rem;">Latenz</div></div>`;
+        } catch (err) {
+            const row = el.querySelector(`[data-hname="${ep.name}"]`);
+            if (row) {
+                row.className = "status-row err";
+                row.innerHTML = `<span class="status-light err"></span><div><strong>${ep.name}</strong></div><span class="status-badge off">FEHLER</span><div class="status-details"><div style="color:var(--red);">unerreichbar</div></div>`;
+            }
+        }
+    }
+}
+
+function renderErrorLog() {
+    const el = $("#error-log");
+    if (!el) return;
+    const now = Date.now();
+    const recent = state.errorLog.filter((e) => now - e.ts < 3600 * 1000).slice(-20).reverse();
+    if (!recent.length) {
+        el.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">keine Fehler in der letzten Stunde ✓</div>`;
+        return;
+    }
+    el.innerHTML = recent.map((e) => `<div class="error-log-row">
+        <span class="ts">${new Date(e.ts).toLocaleTimeString("de-DE")}</span>
+        · <span class="src">${e.source}</span>
+        · ${e.message}
+    </div>`).join("");
+}
+
+async function refreshStatusTab() {
+    renderStatusOverview();
+    renderBotActivity();
+    renderSymbolDataStatus();
+    renderErrorLog();
+    renderStatusHealth();          // async — updates as pings complete
+}
+
+async function refreshAllLiveData() {
+    const btn = $("#status-refresh-all");
+    if (btn) { btn.disabled = true; btn.textContent = "…läuft"; }
+    await Promise.allSettled([
+        refreshFng(),
+        refreshMarketCtx(),
+        refreshOnChain(),
+        refreshEurRate(),
+        refreshWhales(),
+        refreshPrices(),
+        refresh24hTickers(),
+        fetchNews(true).then(renderNewsList),
+        fetchFuturesData(CFG.symbols.slice(0, 5)).then((d) => { state.futuresLastUpdate = Date.now(); return d; }),
+    ]);
+    refreshStatusTab();
+    if (btn) { btn.disabled = false; btn.textContent = "↻ Alle Quellen jetzt aktualisieren"; }
+    announce("Alle Live-Daten aktualisiert.", "success");
+}
+
+// Track timestamps for refresh functions to enable freshness checks
+// Wrap existing refresh functions to set timestamps + log errors
+function _installFetchTracking() {
+    const wrap = (name, tsField, errSource) => {
+        const orig = window[name];
+        if (typeof orig !== "function") return;
+        window[name] = async function(...args) {
+            try {
+                const r = await orig.apply(this, args);
+                state[tsField] = Date.now();
+                return r;
+            } catch (e) { logError(errSource, e.message || e); throw e; }
+        };
+    };
+}
+
+// Hook price/ticker/etc updates directly since they aren't on window
+const _origRefreshPrices = refreshPrices;
+refreshPrices = async function() {
+    try { await _origRefreshPrices(); state.pricesLastUpdate = Date.now(); }
+    catch (e) { logError("Binance Preise", e.message); throw e; }
+};
+
+const _origRefresh24 = refresh24hTickers;
+refresh24hTickers = async function() {
+    try { await _origRefresh24(); state.tickersLastUpdate = Date.now(); }
+    catch (e) { logError("Binance 24h Ticker", e.message); }
+};
+
+const _origRefreshWhales = refreshWhales;
+refreshWhales = async function() {
+    try { await _origRefreshWhales(); state.whalesLastUpdate = Date.now(); }
+    catch (e) { logError("Whales", e.message); }
+};
+
+const _origRefreshOnChainV15 = refreshOnChain;
+refreshOnChain = async function() {
+    try { await _origRefreshOnChainV15(); state.onchainLastUpdate = Date.now(); }
+    catch (e) { logError("On-Chain", e.message); }
+};
+
+const _origRefreshMktV15 = refreshMarketCtx;
+refreshMarketCtx = async function() {
+    try { await _origRefreshMktV15(); state.marketCtxLastUpdate = Date.now(); }
+    catch (e) { logError("CoinGecko", e.message); }
+};
+
+const _origRefreshEurV15 = refreshEurRate;
+refreshEurRate = async function() {
+    try { await _origRefreshEurV15(); state.eurRateLastUpdate = Date.now(); }
+    catch (e) { logError("Frankfurter EUR", e.message); }
+};
+
+// Track scan completion time
+const _origScanAllV15 = scanAll;
+scanAll = async function() {
+    await _origScanAllV15();
+    state.lastScanTime = Date.now();
+};
+
+// Add v15 info tooltips
+Object.assign(INFO_DB, {
+    "status-overview": {
+        title: "System-Status",
+        body: `
+            <p>Zeigt live welche Datenquellen der Bot aktuell erreichen kann:</p>
+            <ul>
+                <li><strong>🟢 Live</strong> — Daten aktuell (letzter Fetch OK, nicht älter als Schwellwert)</li>
+                <li><strong>🟡 Alt</strong> — Daten vorhanden aber veraltet (letzter Fetch länger her)</li>
+                <li><strong>🔴 Aus</strong> — API unerreichbar, keine Daten</li>
+                <li><strong>⚪ Warten</strong> — noch nicht abgerufen</li>
+            </ul>
+            <p>Der Bot funktioniert auch wenn einzelne Quellen rot sind — er nutzt was er kriegt. Nur Binance-Klines sind kritisch (ohne die kein Trade).</p>
+        `,
+    },
+    "bot-activity": {
+        title: "Bot-Aktivität",
+        body: `
+            <p>Live-Übersicht des Bot-Zustands: Modus (Manuell/Auto), aktive Pause (Kill-Switch/Circuit-Breaker), Scan-Zähler, offene Positionen, pending-Signale, Zeit bis zum nächsten Scan.</p>
+            <p>Wenn Circuit-Breaker aktiv: konkrete Ursache wird angezeigt (Vol&gt;30% / Corr&gt;0.9 / DailyLoss&gt;5%).</p>
+        `,
+    },
+    "symbol-data-status": {
+        title: "Kurs-Daten pro Symbol",
+        body: `
+            <p>Für jedes aktive Handelspaar: wie viele Kerzen der Bot geladen hat, aktueller Preis, wann die letzte Kerze war.</p>
+            <p><strong>Frisch</strong>: ≥ 100 Kerzen und letzte Kerze &lt; 5 Min alt. <strong>Wenige</strong>: 20-100 Kerzen (Ensemble kann nicht scoren). <strong>Leer</strong>: Fehler beim Laden.</p>
+        `,
+    },
+    "error-log": {
+        title: "Fehler-Log",
+        body: `
+            <p>Chronologisch aufgezeichnete Fetch-Fehler der letzten Stunde. Zeigt Zeit, Quelle, Fehlermeldung.</p>
+            <p>Hilfreich für Debugging wenn eine API zeitweise ausfällt oder Rate-Limits triggert.</p>
+        `,
+    },
+});
+
+// Wire refresh button + auto-tick every 5 sec when Status tab is active
+document.addEventListener("DOMContentLoaded", () => {
+    $("#status-refresh-all")?.addEventListener("click", refreshAllLiveData);
+    // auto-refresh status tab every 5s while it's active
+    setInterval(() => {
+        const active = document.querySelector('.tab-pane.active[data-pane="status"]');
+        if (active) {
+            renderStatusOverview();
+            renderBotActivity();
+            renderSymbolDataStatus();
+            renderErrorLog();
+        }
+    }, 5000);
+    // initial render if user lands on Status tab first
+    setTimeout(refreshStatusTab, 1500);
+});
+
+// =====================================================================
 // v11: 11 institutional fixes from the 10-trader audit
 // =====================================================================
 
