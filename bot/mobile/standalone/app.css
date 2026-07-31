@@ -1265,13 +1265,19 @@ h2 .info { vertical-align: baseline; position: relative; top: -1px; }
 
 /* -------- v9: Pattern rows -------- */
 .pattern-row {
-    display: grid; grid-template-columns: 1fr auto;
+    display: grid; grid-template-columns: 68px 1fr auto;
     gap: 10px; align-items: center;
     padding: 10px 12px; border: 1px solid var(--border);
     border-radius: 8px; margin-bottom: 6px;
     background: rgba(255,255,255,0.02);
     cursor: pointer; transition: all 0.12s;
 }
+.pattern-mini {
+    width: 62px; height: 40px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; background: rgba(255,255,255,0.03);
+}
+.pattern-mini svg { width: 100% !important; max-width: 62px !important; height: auto; padding: 0 !important; }
 .pattern-row:hover { transform: translateX(3px); border-color: var(--accent); }
 .pattern-row.high { border-left: 3px solid var(--green); }
 .pattern-row.low  { border-left: 3px solid var(--red); }

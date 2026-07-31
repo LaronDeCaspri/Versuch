@@ -4081,6 +4081,7 @@ function renderLivePatterns() {
                 ? `${(stats.winRate * 100).toFixed(0)}% Win-Rate · Ø ${stats.avgReturn >= 0 ? "+" : ""}${stats.avgReturn.toFixed(2)}%`
                 : "Statistik noch nicht berechnet";
             rows.push(`<div class="pattern-row ${biasCls}" data-pkey="${key}">
+                ${miniPatternSvg(key)}
                 <div>
                     <strong>${sym}</strong> · <span style="color:var(--accent);">${info.name}</span>
                     <div style="color:var(--muted); font-size:0.7rem;">${statTxt}</div>
@@ -4095,6 +4096,241 @@ function renderLivePatterns() {
     });
 }
 
+// ---- v13: SVG generators for pattern illustrations ----
+
+// Candlestick pattern SVG — draws bodies + wicks to scale
+function candlePatternSvg(patternKey) {
+    const C = { bull: "#22c55e", bear: "#ef4444", neutral: "#94a3b8", muted: "#64748b" };
+    // Each pattern = array of candles { o, c, h, l, color } normalized 0-100
+    // Some patterns include preceding-trend context bars in "muted"
+    const configs = {
+        doji: {
+            candles: [{ o: 50, c: 51, h: 78, l: 22, color: "neutral" }],
+        },
+        hammer: {
+            // context: 2 declining candles, then hammer
+            candles: [
+                { o: 82, c: 68, h: 84, l: 65, color: "bear" },
+                { o: 68, c: 50, h: 70, l: 47, color: "bear" },
+                { o: 50, c: 55, h: 58, l: 15, color: "bull" },
+            ],
+        },
+        hanging_man: {
+            // context: 2 rising candles, then hanging man (SAME SHAPE, opposite context)
+            candles: [
+                { o: 20, c: 40, h: 42, l: 18, color: "bull" },
+                { o: 40, c: 60, h: 62, l: 38, color: "bull" },
+                { o: 60, c: 65, h: 68, l: 25, color: "bear" },
+            ],
+        },
+        shooting_star: {
+            candles: [
+                { o: 18, c: 32, h: 34, l: 15, color: "bull" },
+                { o: 32, c: 52, h: 54, l: 30, color: "bull" },
+                { o: 52, c: 47, h: 88, l: 45, color: "bear" },
+            ],
+        },
+        inv_hammer: {
+            candles: [
+                { o: 82, c: 65, h: 84, l: 62, color: "bear" },
+                { o: 65, c: 45, h: 68, l: 42, color: "bear" },
+                { o: 45, c: 48, h: 82, l: 42, color: "bull" },
+            ],
+        },
+        bull_engulfing: {
+            candles: [
+                { o: 60, c: 45, h: 62, l: 42, color: "bear" },
+                { o: 40, c: 68, h: 72, l: 38, color: "bull" },
+            ],
+        },
+        bear_engulfing: {
+            candles: [
+                { o: 45, c: 58, h: 60, l: 42, color: "bull" },
+                { o: 65, c: 35, h: 68, l: 32, color: "bear" },
+            ],
+        },
+        morning_star: {
+            candles: [
+                { o: 78, c: 40, h: 80, l: 38, color: "bear" },
+                { o: 36, c: 34, h: 42, l: 28, color: "neutral" },
+                { o: 42, c: 72, h: 76, l: 40, color: "bull" },
+            ],
+        },
+        evening_star: {
+            candles: [
+                { o: 22, c: 60, h: 62, l: 20, color: "bull" },
+                { o: 64, c: 66, h: 72, l: 58, color: "neutral" },
+                { o: 58, c: 28, h: 62, l: 24, color: "bear" },
+            ],
+        },
+        harami: {
+            candles: [
+                { o: 82, c: 22, h: 86, l: 18, color: "bear" },
+                { o: 42, c: 60, h: 62, l: 38, color: "bull" },
+            ],
+        },
+        piercing: {
+            candles: [
+                { o: 78, c: 30, h: 80, l: 26, color: "bear" },
+                { o: 22, c: 58, h: 62, l: 18, color: "bull" },
+            ],
+        },
+        dark_cloud: {
+            candles: [
+                { o: 22, c: 70, h: 74, l: 20, color: "bull" },
+                { o: 78, c: 42, h: 82, l: 38, color: "bear" },
+            ],
+        },
+        three_soldiers: {
+            candles: [
+                { o: 22, c: 40, h: 44, l: 20, color: "bull" },
+                { o: 38, c: 58, h: 62, l: 36, color: "bull" },
+                { o: 56, c: 78, h: 82, l: 54, color: "bull" },
+            ],
+        },
+        three_crows: {
+            candles: [
+                { o: 78, c: 60, h: 82, l: 56, color: "bear" },
+                { o: 62, c: 42, h: 66, l: 40, color: "bear" },
+                { o: 44, c: 22, h: 46, l: 18, color: "bear" },
+            ],
+        },
+    };
+    const cfg = configs[patternKey];
+    if (!cfg) return "";
+    const w = 220, h = 130, pad = 14;
+    const candles = cfg.candles;
+    const cw = Math.min(30, (w - 2 * pad) / (candles.length * 1.6));
+    const gap = cw * 0.6;
+    const totalW = candles.length * cw + (candles.length - 1) * gap;
+    const startX = (w - totalW) / 2;
+    const yScale = (v) => h - pad - (v / 100) * (h - 2 * pad);
+    const bars = candles.map((cd, i) => {
+        const x = startX + i * (cw + gap);
+        const color = C[cd.color] || C.neutral;
+        const bodyTop = yScale(Math.max(cd.o, cd.c));
+        const bodyBot = yScale(Math.min(cd.o, cd.c));
+        const bodyH = Math.max(3, bodyBot - bodyTop);
+        return `
+            <line x1="${x + cw / 2}" y1="${yScale(cd.h)}" x2="${x + cw / 2}" y2="${yScale(cd.l)}" stroke="${color}" stroke-width="1.8"/>
+            <rect x="${x}" y="${bodyTop}" width="${cw}" height="${bodyH}" fill="${color}" stroke="${color}" rx="1"/>
+        `;
+    }).join("");
+    return `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="width:100%; max-width:220px; background:rgba(255,255,255,0.03); border-radius:8px; padding:4px;">${bars}</svg>`;
+}
+
+// Chart pattern SVG — schematic price curves
+function chartPatternSvg(patternKey) {
+    const G = "#22c55e", R = "#ef4444", A = "#4d94ff", M = "#94a3b8";
+    const w = 280, h = 130;
+    const configs = {
+        double_top: {
+            line: "M 20,100 L 55,55 L 85,25 L 115,60 L 145,25 L 175,60 L 220,105",
+            aux: `<line x1="55" y1="60" x2="175" y2="60" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <text x="10" y="55" fill="${A}" font-size="10">Neckline</text>
+                  <text x="80" y="18" fill="${R}" font-size="10">Top 1</text>
+                  <text x="140" y="18" fill="${R}" font-size="10">Top 2</text>`,
+            stroke: R,
+        },
+        double_bottom: {
+            line: "M 20,30 L 55,75 L 85,105 L 115,70 L 145,105 L 175,70 L 220,25",
+            aux: `<line x1="55" y1="70" x2="175" y2="70" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <text x="80" y="120" fill="${G}" font-size="10">Boden 1</text>
+                  <text x="140" y="120" fill="${G}" font-size="10">Boden 2</text>`,
+            stroke: G,
+        },
+        hns: {
+            line: "M 15,95 L 40,60 L 65,35 L 85,60 L 115,15 L 145,60 L 170,40 L 195,65 L 240,105",
+            aux: `<line x1="40" y1="60" x2="195" y2="60" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <text x="55" y="28" fill="${M}" font-size="9">L. Schulter</text>
+                  <text x="100" y="10" fill="${R}" font-size="9">Kopf</text>
+                  <text x="155" y="35" fill="${M}" font-size="9">R. Schulter</text>`,
+            stroke: R,
+        },
+        inv_hns: {
+            line: "M 15,35 L 40,70 L 65,95 L 85,70 L 115,115 L 145,70 L 170,90 L 195,65 L 240,25",
+            aux: `<line x1="40" y1="70" x2="195" y2="70" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>`,
+            stroke: G,
+        },
+        asc_triangle: {
+            line: "M 20,90 L 55,25 L 80,75 L 110,25 L 135,60 L 165,25 L 220,25",
+            aux: `<line x1="55" y1="25" x2="220" y2="25" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <line x1="20" y1="90" x2="220" y2="25" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <text x="230" y="20" fill="${A}" font-size="9">Widerstand</text>`,
+            stroke: G,
+        },
+        desc_triangle: {
+            line: "M 20,20 L 55,90 L 80,35 L 110,90 L 135,50 L 165,90 L 220,90",
+            aux: `<line x1="55" y1="90" x2="220" y2="90" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <line x1="20" y1="20" x2="220" y2="90" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <text x="225" y="95" fill="${A}" font-size="9">Support</text>`,
+            stroke: R,
+        },
+        sym_triangle: {
+            line: "M 20,25 L 50,85 L 80,45 L 110,80 L 140,55 L 170,70 L 200,60",
+            aux: `<line x1="20" y1="25" x2="200" y2="60" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <line x1="20" y1="95" x2="200" y2="60" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <text x="205" y="60" fill="${A}" font-size="9">Apex</text>`,
+            stroke: A,
+        },
+        bull_flag: {
+            line: "M 15,105 L 35,95 L 55,80 L 75,50 L 95,25 L 115,15 L 135,25 L 155,35 L 175,45 L 195,55 L 240,15",
+            aux: `<line x1="95" y1="20" x2="175" y2="45" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <line x1="115" y1="18" x2="195" y2="55" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <text x="30" y="70" fill="${G}" font-size="9">Impuls</text>
+                  <text x="130" y="10" fill="${A}" font-size="9">Flagge</text>`,
+            stroke: G,
+        },
+        bear_flag: {
+            line: "M 15,25 L 35,35 L 55,50 L 75,80 L 95,105 L 115,115 L 135,105 L 155,95 L 175,85 L 195,75 L 240,115",
+            aux: `<line x1="95" y1="110" x2="175" y2="85" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <line x1="115" y1="112" x2="195" y2="75" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>`,
+            stroke: R,
+        },
+        rising_wedge: {
+            line: "M 15,105 L 40,55 L 65,80 L 90,40 L 115,65 L 140,30 L 165,50 L 190,25 L 220,35",
+            aux: `<line x1="40" y1="55" x2="220" y2="25" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <line x1="15" y1="105" x2="220" y2="35" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>`,
+            stroke: R,
+        },
+        falling_wedge: {
+            line: "M 15,25 L 40,75 L 65,50 L 90,90 L 115,65 L 140,100 L 165,80 L 190,105 L 220,95",
+            aux: `<line x1="40" y1="75" x2="220" y2="95" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>
+                  <line x1="15" y1="25" x2="220" y2="105" stroke="${A}" stroke-dasharray="4 3" stroke-width="1"/>`,
+            stroke: G,
+        },
+        cup_handle: {
+            line: "M 15,25 L 35,35 L 55,55 L 75,80 L 100,100 L 130,105 L 155,100 L 175,80 L 195,55 L 215,35 L 220,30 L 230,45 L 240,55 L 250,40 L 260,15",
+            aux: `<text x="90" y="122" fill="${G}" font-size="9">Cup (U-Form)</text>
+                  <text x="230" y="70" fill="${A}" font-size="9">Handle</text>`,
+            stroke: G,
+        },
+    };
+    const cfg = configs[patternKey];
+    if (!cfg) return "";
+    return `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="width:100%; max-width:280px; background:rgba(255,255,255,0.03); border-radius:8px; padding:4px;">
+        ${cfg.aux || ""}
+        <path d="${cfg.line}" fill="none" stroke="${cfg.stroke}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+}
+
+function patternIllustration(key) {
+    const info = window.TB.PATTERN_INFO[key];
+    if (!info) return "";
+    const svg = info.type === "candle" ? candlePatternSvg(key) : chartPatternSvg(key);
+    return svg ? `<div style="text-align:center; margin:8px 0 14px;">${svg}<div style="font-size:0.68rem; color:var(--muted); margin-top:4px;">Schema — nicht massstabsgetreu</div></div>` : "";
+}
+
+// Mini SVG for inline row previews (~62x40)
+function miniPatternSvg(key) {
+    const info = window.TB.PATTERN_INFO[key];
+    if (!info) return "";
+    const full = info.type === "candle" ? candlePatternSvg(key) : chartPatternSvg(key);
+    if (!full) return "";
+    // Wrap in a small viewport container to shrink the SVG
+    return `<div class="pattern-mini">${full}</div>`;
+}
+
 function showPatternDetail(key) {
     const info = window.TB.PATTERN_INFO[key];
     if (!info) return;
@@ -4107,6 +4343,7 @@ function showPatternDetail(key) {
             Typ: <strong style="color:var(--text)">${info.type === "chart" ? "Chart-Pattern" : "Candlestick"}</strong>
             · Bias: <strong style="color:var(--text)">${info.bias.toUpperCase()}</strong>
         </div>
+        ${patternIllustration(key)}
         <p>${info.desc}</p>
         ${symbols.length ? `
         <div class="example">
@@ -4180,6 +4417,7 @@ function renderPatternLibrary() {
             ? `<span style="color:${s.winRate >= 0.55 ? "var(--green)" : s.winRate <= 0.45 ? "var(--red)" : "var(--amber)"};"><strong>${(s.winRate * 100).toFixed(0)}%</strong></span> · ${s.count} Vorkommen · Ø ${s.avgReturn >= 0 ? "+" : ""}${s.avgReturn.toFixed(2)}%`
             : `<span style="color:var(--muted);">noch nicht analysiert</span>`;
         return `<div class="pattern-row ${biasCls}" data-pkey="${k}">
+            ${miniPatternSvg(k)}
             <div>
                 <strong>${biasSym} ${i.name}</strong>
                 <div style="color:var(--muted); font-size:0.7rem;">${statTxt}</div>

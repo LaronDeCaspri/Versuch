@@ -227,8 +227,10 @@ function detectRegime(h, l, c) {
 
 const PATTERN_INFO = {
     "doji":              { name: "Doji", type: "candle", bias: "reversal", desc: "Der Kurs schliesst fast dort wo er eröffnet hat. Zeigt Unentschlossenheit — Käufer und Verkäufer im Gleichgewicht. Oft Vorbote einer Trendumkehr." },
-    "hammer":            { name: "Hammer", type: "candle", bias: "bull", desc: "Kleiner Körper oben, langer Docht nach unten. Käufer haben die Verkäufer nach starkem Abverkauf zurückgedrängt. Bullisches Umkehrsignal." },
-    "shooting_star":     { name: "Shooting Star", type: "candle", bias: "bear", desc: "Kleiner Körper unten, langer Docht nach oben. Verkäufer haben eine Rally abgewürgt. Bärisches Umkehrsignal." },
+    "hammer":            { name: "Hammer", type: "candle", bias: "bull", desc: "Kleiner Körper oben, langer Docht nach unten. Erscheint nach einem <strong>Abwärtstrend</strong>. Käufer haben die Verkäufer nach starkem Abverkauf zurückgedrängt. Bullisches Umkehrsignal." },
+    "hanging_man":       { name: "Hanging Man", type: "candle", bias: "bear", desc: "<strong>Gleiche Form wie Hammer</strong>, aber am Top eines Aufwärtstrends. Der lange Docht nach unten zeigt: Verkaufsdruck hat begonnen, Käufer konnten gerade noch retten. Warnung vor Trendwende <em>nach unten</em>." },
+    "shooting_star":     { name: "Shooting Star", type: "candle", bias: "bear", desc: "Kleiner Körper unten, langer Docht nach oben. Erscheint nach einem <strong>Aufwärtstrend</strong>. Verkäufer haben eine Rally abgewürgt. Bärisches Umkehrsignal." },
+    "inv_hammer":        { name: "Inverted Hammer", type: "candle", bias: "bull", desc: "Gleiche Form wie Shooting Star, aber am <strong>Boden eines Abwärtstrends</strong>. Käufer testeten hoch — auch wenn nicht gehalten, zeigt es Käufer-Interesse. Bullishes Reversal-Signal." },
     "bull_engulfing":    { name: "Bullish Engulfing", type: "candle", bias: "bull", desc: "Grüne Kerze verschlingt die vorherige rote komplett. Käufer übernehmen aggressiv die Kontrolle — starkes Kauf-Signal." },
     "bear_engulfing":    { name: "Bearish Engulfing", type: "candle", bias: "bear", desc: "Rote Kerze verschlingt die vorherige grüne. Verkäufer sind zurück in der Kontrolle — starkes Verkauf-Signal." },
     "morning_star":      { name: "Morning Star", type: "candle", bias: "bull", desc: "3-Kerzen-Muster: grosse rote → kleine Kerze → grosse grüne. Der Boden ist erreicht, Trendwende bullish." },
@@ -471,12 +473,24 @@ function detectPatterns(candles) {
     if (!candles || candles.length < 30) return {};
     const found = {};
     const n = candles.length;
+    // determine trend context for hanging-man vs hammer disambiguation
+    const closesArr = closes(candles);
+    const trendUp = n >= 25 && closesArr[n - 1] > closesArr[n - 15] * 1.02;
+    const trendDown = n >= 25 && closesArr[n - 1] < closesArr[n - 15] * 0.98;
     // candlestick — last 3 bars
     if (n >= 1) {
         const c = candles[n - 1];
         if (_detectDoji(c))         found.doji = { at: n - 1 };
-        if (_detectHammer(c))       found.hammer = { at: n - 1 };
-        if (_detectShootingStar(c)) found.shooting_star = { at: n - 1 };
+        if (_detectHammer(c)) {
+            // Same shape = hammer (in downtrend) or hanging_man (in uptrend)
+            if (trendUp)   found.hanging_man = { at: n - 1 };
+            else           found.hammer = { at: n - 1 };
+        }
+        if (_detectShootingStar(c)) {
+            // Same shape = shooting_star (in uptrend) or inv_hammer (in downtrend)
+            if (trendDown) found.inv_hammer = { at: n - 1 };
+            else           found.shooting_star = { at: n - 1 };
+        }
     }
     if (n >= 2) {
         const prev = candles[n - 2], curr = candles[n - 1];
