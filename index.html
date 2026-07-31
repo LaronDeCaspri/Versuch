@@ -59,6 +59,18 @@
     </div>
 </div>
 
+<!-- Pre-Mortem modal (before manual trades) -->
+<div id="premortem-modal" class="modal hidden">
+    <div class="modal-card" style="max-width:520px;">
+        <h2>Pre-Mortem: Warum könnte das schiefgehen?</h2>
+        <div id="premortem-body"></div>
+        <div class="btn-row" style="margin-top:14px;">
+            <button id="pm-cancel" class="ghost">Abbrechen</button>
+            <button id="pm-proceed" class="primary" disabled>Trade trotzdem eröffnen</button>
+        </div>
+    </div>
+</div>
+
 <!-- WHY (trade rationale) modal -->
 <div id="why-modal" class="modal hidden">
     <div class="modal-card" style="max-width:640px;">
@@ -373,6 +385,26 @@
     </div>
 
     <div class="card">
+        <h2>Institutional-Schutz v11 <span class="badge">10-Trader Audit</span> <span class="info" data-info="v11-audit">ⓘ</span></h2>
+        <div class="perf-hint">
+            <strong>Circuit-Breaker · Portfolio-Vol-Target · Cross-Symbol-Gate · Bayesian-Weights · Session-Attention</strong>
+        </div>
+        <div id="v11-panel"></div>
+    </div>
+
+    <div class="card">
+        <h2>Bayesian-Strategie-Gewichte <span class="badge">v11</span> <span class="info" data-info="bayesian">ⓘ</span></h2>
+        <div class="perf-hint">Beta-Distribution Prior + Update pro Trade. Konfidenz-Intervalle statt Punkt-Schätzung.</div>
+        <div id="bayesian-panel"></div>
+    </div>
+
+    <div class="card">
+        <h2>Post-Mortem-Log <span class="badge">Lernen aus Trades</span> <span class="info" data-info="postmortem">ⓘ</span></h2>
+        <div class="perf-hint">Nach jedem Trade automatisch analysiert: was gut lief, was schlecht.</div>
+        <div id="postmortem-log"></div>
+    </div>
+
+    <div class="card">
         <h2>Institutional-Schutz <span class="badge">v10</span> <span class="info" data-info="v10-status">ⓘ</span></h2>
         <div class="perf-hint">
             Der Bot verwendet 8 Institutional-Grade Regeln um Verluste zu minimieren:
@@ -502,6 +534,11 @@
     <div class="card">
         <h2>Risiko-Einstellungen <span class="info" data-info="risk-config">ⓘ</span></h2>
         <div id="risk-config"></div>
+    </div>
+
+    <div class="card">
+        <h2>Elite-Modi (v11) <span class="badge">Institutional</span> <span class="info" data-info="elite-modes">ⓘ</span></h2>
+        <div id="elite-modes"></div>
     </div>
 
     <div class="card">

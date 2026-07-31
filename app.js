@@ -4816,6 +4816,525 @@ renderAll = function() {
     renderV10StatusPanel();
 };
 
+// =====================================================================
+// v11: 11 institutional fixes from the 10-trader audit
+// =====================================================================
+
+state.v11 = state.v11 || {
+    portfolioVolTarget: parseFloat(localStorage.getItem("tb_vol_target") || "0.20"),     // 20% annualised
+    focusMode: localStorage.getItem("tb_focus_mode") === "1",                             // top-5 strategies only
+    barbellMode: localStorage.getItem("tb_barbell_mode") === "1",                         // 85/15 split
+    orderBookSpreadCap: parseFloat(localStorage.getItem("tb_ob_spread_cap") || "15"),    // bps
+    circuitBreakerActive: false,
+    circuitBreakerReason: "",
+    postMortems: JSON.parse(localStorage.getItem("tb_post_mortems") || "[]"),
+    bayesian: JSON.parse(localStorage.getItem("tb_bayesian") || "{}"),                    // {strategy: {wins, losses}}
+    orderBooks: {},                                                                        // cache
+    lastSessionCheck: null,
+};
+
+// ------------- STRATEGY-PURGE (Fokus-Modus) -------------
+// If focus mode is on, only use the top-5 strategies by rolling Sharpe
+function focusFilter(sigs) {
+    if (!state.v11.focusMode) return sigs;
+    // Ranking by bayesian mean (higher = better recent performance)
+    const scores = {};
+    for (const [name, rec] of Object.entries(state.v11.bayesian)) {
+        const b = window.TB.bayesianWinRate(rec.wins || 0, rec.losses || 0);
+        scores[name] = b.mean;
+    }
+    const top5 = Object.entries(scores)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([k]) => k);
+    if (top5.length < 5) return sigs;   // not enough data yet
+    return sigs.filter((s) => top5.includes(s.strategy));
+}
+
+// ------------- BAYESIAN STRATEGY WEIGHTING -------------
+function updateBayesian(strategy, won) {
+    if (!state.v11.bayesian[strategy]) state.v11.bayesian[strategy] = { wins: 0, losses: 0 };
+    if (won) state.v11.bayesian[strategy].wins++;
+    else state.v11.bayesian[strategy].losses++;
+    localStorage.setItem("tb_bayesian", JSON.stringify(state.v11.bayesian));
+}
+
+// hook close to update bayesian per strategy
+const _origCloseV11 = broker.close.bind(broker);
+broker.close = function(symbol, price, fraction) {
+    const posBefore = broker.positions[symbol];
+    const stratsUsed = (posBefore?.meta?.strategy || "").split(",").filter(Boolean);
+    const r = _origCloseV11(symbol, price, fraction);
+    if (r && r.pnl !== undefined) {
+        for (const s of stratsUsed) updateBayesian(s, r.pnl > 0);
+        // Post-mortem log
+        logPostMortem(symbol, posBefore, price, r.pnl);
+    }
+    return r;
+};
+
+function renderBayesianPanel() {
+    const el = $("#bayesian-panel");
+    if (!el) return;
+    const entries = Object.entries(state.v11.bayesian);
+    if (!entries.length) { el.textContent = "noch keine abgeschlossenen Trades"; return; }
+    const rows = entries
+        .map(([name, rec]) => {
+            const b = window.TB.bayesianWinRate(rec.wins || 0, rec.losses || 0);
+            return { name, ...b, wins: rec.wins || 0, losses: rec.losses || 0 };
+        })
+        .sort((a, b) => b.mean - a.mean)
+        .map((b) => {
+            const cls = b.mean >= 0.55 ? "high" : b.mean >= 0.45 ? "mid" : "low";
+            const conf = b.confidence >= 0.7 ? "sicher" : b.confidence >= 0.4 ? "mittel" : "unsicher";
+            const barPct = b.mean * 100;
+            const lowerPct = b.lower * 100;
+            const upperPct = b.upper * 100;
+            return `<div style="padding:8px 0; border-bottom:1px solid var(--border);">
+                <div style="display:flex; justify-content:space-between; font-size:0.82rem;">
+                    <span>${b.name.replace(/_/g, " ")}</span>
+                    <span class="conf-score ${cls}">${(b.mean * 100).toFixed(0)}%</span>
+                </div>
+                <div style="font-size:0.7rem; color:var(--muted); margin-top:2px;">
+                    ${b.wins}W / ${b.losses}L · CI [${lowerPct.toFixed(0)}%, ${upperPct.toFixed(0)}%] · <em>${conf}</em>
+                </div>
+                <div class="ks-bar-bg" style="margin-top:4px; position:relative;">
+                    <div style="position:absolute; left:${lowerPct}%; right:${100 - upperPct}%; height:100%; background:rgba(77, 148, 255, 0.15);"></div>
+                    <div class="ks-bar-fill risk-color-${cls === "high" ? "green" : cls === "mid" ? "yellow" : "red"}" style="width:${barPct}%"></div>
+                </div>
+            </div>`;
+        }).join("");
+    el.innerHTML = rows;
+}
+
+// ------------- PORTFOLIO-VOL TARGETING -------------
+function volTargetingFactor() {
+    const pv = window.TB.computePortfolioVol(broker.positions, state.prices, state.candles);
+    if (!pv || !pv.vol) return { factor: 1, current: 0 };
+    // If current portfolio vol > target, scale next trades down
+    const target = state.v11.portfolioVolTarget;
+    const factor = pv.vol > target ? target / pv.vol : 1;
+    return { factor: Math.max(0.25, Math.min(1, factor)), current: pv.vol, target };
+}
+
+// ------------- CROSS-SYMBOL CONFLUENCE GATE -------------
+function crossSymbolOk(symbol, side) {
+    const cs = window.TB.crossSymbolConfluence(symbol, side, state.candles);
+    state.v11.lastCrossSymbol = { symbol, side, ...cs };
+    return cs.ok;
+}
+
+// ------------- ORDER-BOOK GATE -------------
+async function orderBookOk(symbol) {
+    const ob = await window.TB.fetchOrderBookSnapshot(symbol);
+    state.v11.orderBooks[symbol] = ob;
+    if (!ob) return true;    // no data → allow (soft)
+    return ob.spreadBps <= state.v11.orderBookSpreadCap;
+}
+
+// ------------- SESSION-ATTENTION -------------
+function checkSessionAttention() {
+    const events = window.TB.economicCalendar ? window.TB.economicCalendar().slice(0, 5) : [];
+    const s = window.TB.sessionAttention(events);
+    state.v11.lastSessionCheck = s;
+    return s;
+}
+
+// ------------- CIRCUIT BREAKERS -------------
+function checkCircuitBreakers() {
+    // 1. Portfolio vol > 30% annualised → pause new trades
+    const pv = window.TB.computePortfolioVol(broker.positions, state.prices, state.candles);
+    if (pv.vol > 0.30) {
+        state.v11.circuitBreakerActive = true;
+        state.v11.circuitBreakerReason = `Portfolio-Vol ${(pv.vol * 100).toFixed(0)}% &gt; 30% Ziel — Crisis-Mode`;
+        return { active: true, reason: state.v11.circuitBreakerReason };
+    }
+    // 2. Correlation crisis: all pairs > 0.9 → everything moves together
+    const posSyms = Object.keys(broker.positions);
+    if (posSyms.length >= 3) {
+        let allHigh = true;
+        for (let i = 0; i < posSyms.length; i++) {
+            for (let j = i + 1; j < posSyms.length; j++) {
+                const c = correlationOf(posSyms[i], posSyms[j]);
+                if (Math.abs(c) < 0.9) { allHigh = false; break; }
+            }
+            if (!allHigh) break;
+        }
+        if (allHigh) {
+            state.v11.circuitBreakerActive = true;
+            state.v11.circuitBreakerReason = "Alle Positionen ρ &gt; 0.9 — Korrelations-Crash droht";
+            return { active: true, reason: state.v11.circuitBreakerReason };
+        }
+    }
+    // 3. Daily loss > 5% → hard stop for today
+    const eq = broker.equity(state.prices);
+    const dailyLoss = (state.dayStartEquity - eq) / state.dayStartEquity * 100;
+    if (dailyLoss >= 5) {
+        state.v11.circuitBreakerActive = true;
+        state.v11.circuitBreakerReason = `Tages-Verlust ${dailyLoss.toFixed(1)}% ≥ 5% — kein Trade heute`;
+        return { active: true, reason: state.v11.circuitBreakerReason };
+    }
+    state.v11.circuitBreakerActive = false;
+    state.v11.circuitBreakerReason = "";
+    return { active: false, portfolioVol: pv.vol };
+}
+
+// ------------- BARBELL MODE -------------
+// If enabled, 85% of trades follow normal system, 15% reserved for
+// extreme F&G bets (buy panic, short euphoria)
+function barbellCategorise(pending, fngValue) {
+    if (!state.v11.barbellMode) return "core";
+    // Convex bet: fear ≤ 20 → long-only convex; greed ≥ 80 → short-only convex
+    if (fngValue != null) {
+        if (fngValue <= 20 && pending.side === "long") return "convex";
+        if (fngValue >= 80 && pending.side === "short") return "convex";
+    }
+    return "core";
+}
+
+// ------------- MAKE-PENDING v11 WRAP -------------
+const _origMakePendingV11 = makePending;
+makePending = function(symbol, sig, candles, price) {
+    // Fokus-Filter für Signals
+    if (state.v11.focusMode) {
+        sig = { ...sig, signals: focusFilter(sig.signals) };
+        if (sig.signals.length < 2) return null;
+    }
+    const pending = _origMakePendingV11(symbol, sig, candles, price);
+    if (!pending) return null;
+
+    // Circuit breaker
+    const cb = checkCircuitBreakers();
+    if (cb.active) {
+        console.log("[v11] rejected: circuit breaker", cb.reason);
+        return null;
+    }
+
+    // Cross-symbol confluence
+    if (!crossSymbolOk(symbol, pending.side)) {
+        console.log("[v11] rejected: cross-symbol confluence weak", symbol, pending.side);
+        return null;
+    }
+
+    // Session attention
+    const attn = checkSessionAttention();
+    if (!attn.permitted) {
+        console.log("[v11] rejected: session gate", attn.reasons.join(", "));
+        return null;
+    }
+    // Apply session sizing
+    pending.size *= attn.sizeMultiplier;
+    pending.qty *= attn.sizeMultiplier;
+    pending.riskAmount *= attn.sizeMultiplier;
+
+    // Portfolio-vol targeting
+    const vtf = volTargetingFactor();
+    pending.size *= vtf.factor;
+    pending.qty *= vtf.factor;
+    pending.riskAmount *= vtf.factor;
+
+    // Barbell mode
+    pending.barbell = barbellCategorise(pending, state.fng?.value);
+    if (state.v11.barbellMode) {
+        // Reserve 15% of equity for convex bets, 85% for core
+        const eq = broker.equity(state.prices);
+        const coreBudget = eq * 0.85;
+        const convexBudget = eq * 0.15;
+        const budget = pending.barbell === "convex" ? convexBudget : coreBudget;
+        const notional = pending.qty * price;
+        if (notional > budget * 0.2) {
+            const scale = (budget * 0.2) / notional;
+            pending.qty *= scale;
+            pending.size *= scale;
+            pending.riskAmount *= scale;
+        }
+    }
+
+    // Attach v11 metadata to rationale
+    if (pending.rationale) {
+        pending.rationale.v11 = {
+            sessionAttn: attn,
+            volTarget: vtf,
+            crossSymbol: state.v11.lastCrossSymbol,
+            barbell: pending.barbell,
+        };
+    }
+    return pending;
+};
+
+// ------------- ORDER-BOOK GATE (async, before confirmPending in auto mode) -------------
+const _origConfirmPendingV11 = confirmPending;
+confirmPending = async function(p) {
+    const ok = await orderBookOk(p.symbol);
+    if (!ok) {
+        const ob = state.v11.orderBooks[p.symbol];
+        announce(`Trade abgelehnt: Spread ${ob?.spreadBps?.toFixed(1)} bps &gt; ${state.v11.orderBookSpreadCap} bps Cap.`, "warn");
+        // remove from pending
+        state.pending = state.pending.filter((x) => x.symbol !== p.symbol);
+        renderAll();
+        return;
+    }
+    return _origConfirmPendingV11(p);
+};
+
+// ------------- POST-MORTEM LOG -------------
+function logPostMortem(symbol, pos, exitPrice, pnl) {
+    if (!pos) return;
+    const holdMs = pos.opened_at ? Date.now() - new Date(pos.opened_at).getTime() : 0;
+    const r = pos.original_stop ? Math.abs(pos.entry - pos.original_stop) : 0;
+    const rMult = r > 0 ? pnl / (r * pos.qty) : 0;
+    const outcome = pnl > 0 ? "gewonnen" : pnl < 0 ? "verloren" : "neutral";
+    const rationale = pos.rationale;
+    let lesson = "";
+    if (pnl < 0) {
+        // Post-mortem: what went wrong?
+        if (Math.abs(exitPrice - pos.stop) / pos.stop < 0.005) lesson = "Stop-Loss knapp ausgelöst — hätte weiter atmen sollen?";
+        else if (holdMs < 15 * 60 * 1000) lesson = "Sehr schneller Exit — falsches Entry-Timing";
+        else if (rationale?.regime?.volatility === "panic") lesson = "Entry in Panik-Regime — Regel: nicht in Panik traden";
+        else lesson = "Analyse in Ruhe: Muster + Regime prüfen";
+    } else if (pnl > 0) {
+        if (rMult >= 2) lesson = "Sehr gut — Trend gelaufen, TPs korrekt gestaffelt";
+        else lesson = "Kleiner Gewinn — Trailing-Stop hat früh gegriffen";
+    }
+    const pm = {
+        ts: new Date().toISOString(),
+        symbol, side: pos.side,
+        entry: pos.entry, exit: exitPrice, pnl, rMult,
+        holdMs, outcome, lesson,
+        strategy: pos.meta?.strategy || "",
+        v11: rationale?.v11,
+    };
+    state.v11.postMortems.push(pm);
+    if (state.v11.postMortems.length > 200) state.v11.postMortems = state.v11.postMortems.slice(-200);
+    localStorage.setItem("tb_post_mortems", JSON.stringify(state.v11.postMortems));
+}
+
+function renderPostMortemLog() {
+    const el = $("#postmortem-log");
+    if (!el) return;
+    const list = state.v11.postMortems.slice(-15).reverse();
+    if (!list.length) { el.textContent = "noch keine geschlossenen Trades"; return; }
+    el.innerHTML = list.map((pm) => {
+        const cls = pm.pnl > 0 ? "high" : pm.pnl < 0 ? "low" : "mid";
+        const sideBadge = pm.side === "long" ? "▲ LONG" : "▼ SHORT";
+        return `<div class="pattern-row ${cls}">
+            <div>
+                <strong>${pm.symbol}</strong> ${sideBadge}
+                · <span style="color:${pm.pnl > 0 ? "var(--green)" : "var(--red)"};">${pm.pnl >= 0 ? "+" : ""}${pm.pnl.toFixed(2)} USDT · ${pm.rMult >= 0 ? "+" : ""}${pm.rMult.toFixed(2)}R</span>
+                <div style="color:var(--muted); font-size:0.7rem; margin-top:2px;">
+                    ${new Date(pm.ts).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} · ${pm.outcome}
+                </div>
+                <div style="font-size:0.75rem; color:var(--accent); margin-top:4px;"><b>📝 Lektion:</b> ${pm.lesson}</div>
+            </div>
+            <span class="conf-score ${cls}">${pm.pnl >= 0 ? "+" : ""}${pm.pnl.toFixed(1)}</span>
+        </div>`;
+    }).join("");
+}
+
+// ------------- PRE-MORTEM MODAL (before manual trades) -------------
+let _preMortemPending = null;
+function openPreMortem(pendingCallback) {
+    _preMortemPending = pendingCallback;
+    $("#premortem-body").innerHTML = `
+        <p style="font-size:0.9rem;">Bevor du diesen Trade eröffnest, denk 30 Sekunden nach:</p>
+        <div style="margin: 12px 0;">
+            <label style="display:block; margin:8px 0; font-size:0.85rem; cursor:pointer;">
+                <input type="checkbox" class="pm-check"> Was passiert wenn der Preis <strong>sofort in die falsche Richtung</strong> geht?
+            </label>
+            <label style="display:block; margin:8px 0; font-size:0.85rem; cursor:pointer;">
+                <input type="checkbox" class="pm-check"> Ist mein <strong>Stop-Loss weit genug</strong> um normales Rauschen zu überleben?
+            </label>
+            <label style="display:block; margin:8px 0; font-size:0.85rem; cursor:pointer;">
+                <input type="checkbox" class="pm-check"> Habe ich diesen Trade <strong>nicht aus Emotionen</strong> (FOMO, Wut, Angst) gewählt?
+            </label>
+        </div>
+        <div class="example" style="font-size:0.82rem;">
+            💡 Nur wenn alle 3 Fragen bewusst beantwortet sind, wird der Trade eröffnet.
+        </div>`;
+    const btn = $("#pm-proceed");
+    btn.disabled = true;
+    document.querySelectorAll(".pm-check").forEach((c) => {
+        c.onchange = () => {
+            const all = Array.from(document.querySelectorAll(".pm-check")).every((x) => x.checked);
+            btn.disabled = !all;
+        };
+    });
+    $("#premortem-modal").classList.remove("hidden");
+}
+
+// Hook manual order submission through pre-mortem
+const _origSubmitManualOrder = submitManualOrder;
+submitManualOrder = function() {
+    openPreMortem(() => _origSubmitManualOrder());
+};
+
+// ------------- V11 STATUS PANEL -------------
+function renderV11Panel() {
+    const el = $("#v11-panel");
+    if (!el) return;
+    const cb = checkCircuitBreakers();
+    const vtf = volTargetingFactor();
+    const attn = state.v11.lastSessionCheck;
+    const cs = state.v11.lastCrossSymbol;
+    const cbCls = cb.active ? "low" : "high";
+    el.innerHTML = `
+        <div class="mkt-grid">
+            <div class="mkt-tile">
+                <div class="k">Circuit-Breaker</div>
+                <div class="v" style="color:${cb.active ? "var(--red)" : "var(--green)"}">${cb.active ? "⛔ AKTIV" : "✓ frei"}</div>
+                ${cb.reason ? `<small style="color:var(--red); font-size:0.68rem;">${cb.reason}</small>` : ""}
+            </div>
+            <div class="mkt-tile">
+                <div class="k">Portfolio-Vol</div>
+                <div class="v" style="color:${vtf.current > vtf.target ? "var(--amber)" : "var(--green)"}">${(vtf.current * 100).toFixed(1)}%</div>
+                <small style="color:var(--muted); font-size:0.68rem;">Ziel: ${(vtf.target * 100).toFixed(0)}% · Faktor ${vtf.factor.toFixed(2)}×</small>
+            </div>
+            <div class="mkt-tile">
+                <div class="k">Session-Grösse</div>
+                <div class="v" style="color:${attn?.sizeMultiplier === 1 ? "var(--green)" : attn?.sizeMultiplier > 0 ? "var(--amber)" : "var(--red)"}">${attn ? (attn.sizeMultiplier * 100).toFixed(0) : "–"}%</div>
+                ${attn?.reasons?.length ? `<small style="color:var(--amber); font-size:0.68rem;">${attn.reasons[0]}</small>` : ""}
+            </div>
+            <div class="mkt-tile">
+                <div class="k">Cross-Symbol</div>
+                <div class="v" style="color:${cs?.ok ? "var(--green)" : "var(--red)"}">${cs?.ok ? "✓ OK" : "✗ konflikt"}</div>
+                ${cs ? `<small style="color:var(--muted); font-size:0.68rem;">${cs.agrees}× ja · ${cs.opposes}× nein</small>` : ""}
+            </div>
+        </div>
+        ${state.v11.focusMode ? `<div style="margin-top:10px; padding:8px; background:rgba(77, 148, 255, 0.08); border-radius:6px; font-size:0.8rem; color:var(--accent);">
+            🎯 <strong>Fokus-Modus aktiv</strong>: nur Top-5 Strategien werden gehandelt
+        </div>` : ""}
+        ${state.v11.barbellMode ? `<div style="margin-top:6px; padding:8px; background:rgba(168, 85, 247, 0.08); border-radius:6px; font-size:0.8rem; color:var(--purple);">
+            🎪 <strong>Barbell-Modus aktiv</strong>: 85% Core-Trades + 15% Konvex-Bets bei F&amp;G-Extremen
+        </div>` : ""}`;
+}
+
+// ------------- ELITE-MODES CONFIG PANEL -------------
+function renderEliteModes() {
+    const el = $("#elite-modes");
+    if (!el) return;
+    el.innerHTML = `
+        <div class="toggle-row">
+            <div class="lbl"><strong>Fokus-Modus</strong>: nur Top-5 Strategien nach Bayesian-Rang<br><small style="color:var(--muted);">Simons/Ackman-Prinzip — Signal-Purity</small></div>
+            <div id="focus-toggle" class="toggle ${state.v11.focusMode ? "on" : ""}"></div>
+        </div>
+        <div class="toggle-row">
+            <div class="lbl"><strong>Barbell-Modus</strong>: 85% konservativ + 15% konvex bei F&amp;G-Extremen<br><small style="color:var(--muted);">Taleb-Prinzip — Anti-Fragilität</small></div>
+            <div id="barbell-toggle" class="toggle ${state.v11.barbellMode ? "on" : ""}"></div>
+        </div>
+        <div class="risk-config-row">
+            <div class="lbl">Portfolio-Vol-Ziel<small>Simons/Dalio — Vol-Targeting statt fixer Grösse</small></div>
+            <div><input type="number" id="vol-target-inp" min="0.05" max="0.60" step="0.05" value="${state.v11.portfolioVolTarget}"/><span style="color:var(--muted); font-size:0.72rem; margin-left:4px;">annualisiert</span></div>
+        </div>
+        <div class="risk-config-row">
+            <div class="lbl">Order-Book Spread-Cap<small>Simons — kein Trade in illiquiden Momenten</small></div>
+            <div><input type="number" id="ob-cap-inp" min="1" max="100" step="1" value="${state.v11.orderBookSpreadCap}"/><span style="color:var(--muted); font-size:0.72rem; margin-left:4px;">bps</span></div>
+        </div>
+        <div class="perf-hint" style="margin-top:10px;">
+            <strong>Immer aktiv (nicht abschaltbar):</strong> Cross-Symbol-Gate, Circuit-Breaker (Vol&gt;30%, Corr&gt;0.9, DailyLoss&gt;5%), Session-Attention, Bayesian-Weighting, Post-Mortem-Log.
+        </div>
+    `;
+    $("#focus-toggle")?.addEventListener("click", () => {
+        state.v11.focusMode = !state.v11.focusMode;
+        localStorage.setItem("tb_focus_mode", state.v11.focusMode ? "1" : "0");
+        renderEliteModes(); renderV11Panel();
+        announce(state.v11.focusMode ? "Fokus-Modus aktiv." : "Fokus-Modus aus.", "info");
+    });
+    $("#barbell-toggle")?.addEventListener("click", () => {
+        state.v11.barbellMode = !state.v11.barbellMode;
+        localStorage.setItem("tb_barbell_mode", state.v11.barbellMode ? "1" : "0");
+        renderEliteModes(); renderV11Panel();
+    });
+    $("#vol-target-inp")?.addEventListener("change", (e) => {
+        state.v11.portfolioVolTarget = parseFloat(e.target.value) || 0.20;
+        localStorage.setItem("tb_vol_target", String(state.v11.portfolioVolTarget));
+    });
+    $("#ob-cap-inp")?.addEventListener("change", (e) => {
+        state.v11.orderBookSpreadCap = parseFloat(e.target.value) || 15;
+        localStorage.setItem("tb_ob_spread_cap", String(state.v11.orderBookSpreadCap));
+    });
+}
+
+// ------------- PRE-MORTEM MODAL BINDINGS -------------
+document.addEventListener("DOMContentLoaded", () => {
+    $("#pm-cancel")?.addEventListener("click", () => {
+        _preMortemPending = null;
+        $("#premortem-modal").classList.add("hidden");
+    });
+    $("#pm-proceed")?.addEventListener("click", () => {
+        const cb = _preMortemPending;
+        _preMortemPending = null;
+        $("#premortem-modal").classList.add("hidden");
+        if (cb) cb();
+    });
+});
+
+// ------------- Add v11 info popups -------------
+Object.assign(INFO_DB, {
+    "v11-audit": {
+        title: "Institutional-Schutz v11 — 10-Trader Audit",
+        body: `
+            <p>Nach dem 2. Audit der 10 grössten Trader wurden 11 zusätzliche Regeln implementiert:</p>
+            <ul>
+                <li><strong>Circuit-Breaker</strong>: Portfolio-Vol &gt; 30% ODER alle Positionen ρ &gt; 0.9 ODER Tages-Verlust &gt; 5% → sofort Pause</li>
+                <li><strong>Portfolio-Vol-Targeting (Dalio/Simons)</strong>: alle Positionsgrössen werden so skaliert dass Gesamt-Vola dem Ziel entspricht</li>
+                <li><strong>Cross-Symbol-Gate (Druckenmiller)</strong>: BTC-Long nur wenn Peer-Coins (ETH/BNB/SOL) nicht entgegengesetzt</li>
+                <li><strong>Session-Attention</strong>: Wochenende × 0,5 · Asien-Slot × 0,5 · vor/nach Fed/CPI Pause bzw. × 0,25</li>
+                <li><strong>Bayesian-Weighting (Thorp)</strong>: Beta-Distribution Prior + Updates statt naive Win-Rate</li>
+                <li><strong>Order-Book-Gate (Simons)</strong>: Bid-Ask-Spread &gt; 15 bps → Trade abgelehnt</li>
+                <li><strong>Barbell-Modus (Taleb)</strong>: 85% konservativ + 15% konvex bei F&amp;G-Extremen</li>
+                <li><strong>Fokus-Modus (Ackman)</strong>: nur Top-5 Strategien nach Bayesian-Rang</li>
+                <li><strong>Pre-Mortem (Dalio)</strong>: vor manuellen Trades müssen 3 Loss-Szenarien angedacht werden</li>
+                <li><strong>Post-Mortem-Log</strong>: nach jedem Close automatische Lektion protokolliert</li>
+            </ul>
+        `,
+    },
+    "bayesian": {
+        title: "Bayesian-Strategie-Gewichte",
+        body: `
+            <p>Statt "diese Strategie hat 60% Win-Rate" (kann bei 3 Trades zufällig sein), berechnet der Bot ein <strong>Konfidenz-Intervall</strong>:</p>
+            <ul>
+                <li>Prior: alle Strategien starten mit Beta(5,5) = "50% mit Unsicherheit"</li>
+                <li>Jeder Trade updated die Beta-Verteilung: Win → alpha+1, Loss → beta+1</li>
+                <li>Nach 5 Trades: [30%, 70%] CI = noch sehr unsicher</li>
+                <li>Nach 50 Trades: [55%, 62%] CI = "wirklich" gut</li>
+            </ul>
+            <p>Die Farb-Skala zeigt: weites CI = unsicher, schmales CI = statistisch signifikant.</p>
+        `,
+    },
+    "postmortem": {
+        title: "Post-Mortem-Log",
+        body: `
+            <p>Nach jedem geschlossenen Trade wird automatisch analysiert:</p>
+            <ul>
+                <li>Stop-Loss knapp ausgelöst → "hätte weiter atmen sollen?"</li>
+                <li>Exit &lt; 15 Min → "falsches Entry-Timing"</li>
+                <li>Entry in Panik-Regime → "Regel: nicht in Panik traden"</li>
+                <li>2R+ Gewinn → "TPs korrekt gestaffelt"</li>
+            </ul>
+            <p>So lernst du <strong>bewusst</strong> aus jedem Trade — nicht nur der Bot.</p>
+        `,
+    },
+    "elite-modes": {
+        title: "Elite-Modi",
+        body: `
+            <p><strong>Fokus-Modus</strong> (Ackman): schaltet 11 der 16 Strategien ab, hält nur die Top-5 nach Bayesian-Mean. Weniger Trades, aber statistisch fundierter.</p>
+            <p><strong>Barbell-Modus</strong> (Taleb): 85% des Kapitals in konservative Bot-Trades, 15% reserviert für konvexe Wetten bei Extremen (F&amp;G &lt; 20 = kaufe Angst, F&amp;G &gt; 80 = shorte Gier).</p>
+            <p><strong>Portfolio-Vol-Ziel</strong>: alle Trade-Grössen werden so berechnet dass die Gesamt-Portfolio-Volatilität dem Ziel (Standard 20% p.a.) entspricht — nicht mehr fix "1% pro Trade".</p>
+            <p><strong>Order-Book-Cap</strong>: bevor der Bot handelt, prüft er den Spread auf Binance. Wenn zu weit (illiquid) → kein Trade.</p>
+        `,
+    },
+});
+
+// Extend renderAll
+const _origRenderAllV11 = renderAll;
+renderAll = function() {
+    _origRenderAllV11();
+    renderV11Panel();
+    renderBayesianPanel();
+    renderPostMortemLog();
+    renderEliteModes();
+};
+
 // Delegated click handler — always catches ANY Warum click, even if
 // the button was re-rendered and lost its inline onclick handler
 document.addEventListener("click", (e) => {

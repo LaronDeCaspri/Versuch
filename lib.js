@@ -1861,6 +1861,154 @@ function attributeTradeLoss(trade, marketState) {
     return causes;
 }
 
+// =========================================================================
+// v11: Institutional-grade helpers
+// =========================================================================
+
+// Order-book snapshot: bid, ask, spread bps
+async function fetchOrderBookSnapshot(symbol) {
+    try {
+        const sym = symbol.replace("/", "");
+        const raw = await fetch(`https://api.binance.com/api/v3/ticker/bookTicker?symbol=${sym}`).then((r) => r.json());
+        if (!raw?.bidPrice || !raw?.askPrice) return null;
+        const bid = parseFloat(raw.bidPrice);
+        const ask = parseFloat(raw.askPrice);
+        const mid = (bid + ask) / 2;
+        const spreadBps = (ask - bid) / mid * 10000;
+        return { bid, ask, mid, spreadBps };
+    } catch { return null; }
+}
+
+// Bayesian beta update: posterior win-rate + credible interval
+// Prior Beta(a,b) + observed (wins, losses) → Posterior Beta(a+wins, b+losses)
+function bayesianWinRate(wins, losses, priorAlpha = 5, priorBeta = 5) {
+    const a = priorAlpha + wins;
+    const b = priorBeta + losses;
+    const mean = a / (a + b);
+    // std of beta: sqrt(a*b / ((a+b)^2 * (a+b+1)))
+    const variance = (a * b) / (Math.pow(a + b, 2) * (a + b + 1));
+    const std = Math.sqrt(variance);
+    // Approximate 95% credible interval (Wilson-style)
+    const z = 1.96;
+    return {
+        mean, std,
+        lower: Math.max(0, mean - z * std),
+        upper: Math.min(1, mean + z * std),
+        n: wins + losses,
+        confidence: 1 - std * 2,                   // 0=very uncertain, 1=certain
+    };
+}
+
+// Portfolio-vol calculation from positions using empirical covariance
+function computePortfolioVol(positions, prices, candlesBySym, annualise = 365) {
+    const syms = Object.keys(positions).filter((s) => candlesBySym[s] && candlesBySym[s].length >= 50);
+    if (!syms.length) return { vol: 0, weights: {}, cov: null };
+    // Compute daily returns per symbol (last 50 candles)
+    const rets = {};
+    for (const s of syms) {
+        const c = candlesBySym[s].slice(-50);
+        const r = [];
+        for (let i = 1; i < c.length; i++) r.push((c[i].close - c[i - 1].close) / c[i - 1].close);
+        rets[s] = r;
+    }
+    // Weights = value / total portfolio value
+    const values = {}, valueSum = { v: 0 };
+    for (const s of syms) {
+        const p = positions[s];
+        const price = prices[s] || p.entry;
+        const val = Math.abs(p.qty * price);
+        values[s] = val;
+        valueSum.v += val;
+    }
+    if (valueSum.v <= 0) return { vol: 0, weights: {}, cov: null };
+    const w = {};
+    for (const s of syms) w[s] = values[s] / valueSum.v;
+    // Covariance matrix
+    let portVar = 0;
+    for (const a of syms) {
+        for (const b of syms) {
+            const ra = rets[a], rb = rets[b];
+            const n = Math.min(ra.length, rb.length);
+            let meanA = 0, meanB = 0;
+            for (let i = 0; i < n; i++) { meanA += ra[i]; meanB += rb[i]; }
+            meanA /= n; meanB /= n;
+            let cov = 0;
+            for (let i = 0; i < n; i++) cov += (ra[i] - meanA) * (rb[i] - meanB);
+            cov /= (n - 1);
+            portVar += w[a] * w[b] * cov;
+        }
+    }
+    const dailyVol = Math.sqrt(Math.max(portVar, 0));
+    const annualVol = dailyVol * Math.sqrt(annualise);
+    return { vol: annualVol, dailyVol, weights: w };
+}
+
+// Cross-symbol confluence check: does the signal for one symbol agree
+// with the direction of peer symbols? BTC-long alone = noise;
+// BTC+ETH+BNB all bullish = trend.
+function crossSymbolConfluence(signalSymbol, side, allCandles, peers = 3) {
+    const symbols = Object.keys(allCandles);
+    if (symbols.length < 2) return { agrees: 0, opposes: 0, neutral: 0, ok: true };
+    let agrees = 0, opposes = 0, neutral = 0;
+    for (const s of symbols) {
+        if (s === signalSymbol) continue;
+        const c = allCandles[s];
+        if (!c || c.length < 210) continue;
+        const closesArr = closes(c);
+        const e50 = ema(closesArr, 50);
+        const e200 = ema(closesArr, 200);
+        const i = closesArr.length - 1;
+        if (isNaN(e50[i]) || isNaN(e200[i])) continue;
+        let peerSide;
+        if (closesArr[i] > e50[i] && e50[i] > e200[i]) peerSide = "long";
+        else if (closesArr[i] < e50[i] && e50[i] < e200[i]) peerSide = "short";
+        else peerSide = "flat";
+        if (peerSide === side) agrees++;
+        else if (peerSide !== "flat") opposes++;
+        else neutral++;
+    }
+    // rule: at least 1 agreeing peer, no more than 2 opposing
+    const ok = agrees >= 1 && opposes <= 2;
+    return { agrees, opposes, neutral, ok };
+}
+
+// Session attention: is now a good time to trade?
+// (Time gate + event gate combined)
+function sessionAttention(econEvents = []) {
+    const now = new Date();
+    const hourUTC = now.getUTCHours();
+    const dow = now.getUTCDay();               // 0 = Sunday
+    const reasons = [];
+    let sizeMultiplier = 1.0;
+    // 1. Weekend crypto = reduced liquidity — halve size
+    if (dow === 0 || dow === 6) {
+        sizeMultiplier *= 0.5;
+        reasons.push("Wochenende: reduzierte Liquidität, Grösse halbiert");
+    }
+    // 2. Off-hours (very early morning UTC or very late) — quarter
+    if (hourUTC >= 3 && hourUTC < 6) {
+        sizeMultiplier *= 0.5;
+        reasons.push("Asien-Übergangszone (03-06 UTC): dünne Volumina");
+    }
+    // 3. FOMC/CPI/NFP imminent — pause new entries
+    if (econEvents && econEvents.length) {
+        for (const e of econEvents) {
+            const diff = e.ts - now.getTime();
+            if (diff > 0 && diff < 30 * 60 * 1000) {
+                sizeMultiplier = 0;
+                reasons.push(`${e.type} in ${Math.round(diff / 60000)} min — kein neuer Trade`);
+                break;
+            }
+            if (diff > -30 * 60 * 1000 && diff < 0) {
+                sizeMultiplier = 0.25;
+                reasons.push(`${e.type} vor ${Math.round(-diff / 60000)} min — Vola-Nachwehen, geringe Grösse`);
+                break;
+            }
+        }
+    }
+    return { sizeMultiplier, reasons, permitted: sizeMultiplier > 0 };
+}
+
 // Walk-forward backtest — splits data into rolling train/test windows.
 // Trains on N bars, tests on next M bars, rolls forward. Detects overfitting.
 async function walkForwardBacktest(candles, symbol, cfg, ensembleFn, planFn, atrFn, opts = {}) {
@@ -1920,6 +2068,8 @@ return {
     detectPatterns, computePatternStats, fetchHistory, PATTERN_INFO,
     historicalVaR, historicalES, mtfTrendDirection, strategyCorrelation,
     attributeTradeLoss, walkForwardBacktest,
+    fetchOrderBookSnapshot, bayesianWinRate, computePortfolioVol,
+    crossSymbolConfluence, sessionAttention,
     closes, highs, lows, vols,
     STRATEGIES, ensemble,
     planTrade, forecast, assessRisk,
