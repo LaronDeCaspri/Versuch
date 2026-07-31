@@ -462,15 +462,29 @@ function renderStrategies() {
 
 function renderFng() {
     const el = $("#fng-value");
-    if (!state.fng) return;
+    if (!el) return;
+    if (!state.fng) {
+        // Explicit "unavailable" state — better than silent "–"
+        el.innerHTML = '?<div class="fng-needle" id="fng-needle"></div>';
+        el.style.color = "var(--muted)";
+        const needle = $("#fng-needle");
+        if (needle) needle.style.transform = "translate(-50%, -90%) rotate(0deg)";
+        const cls = $("#fng-class");
+        if (cls) {
+            cls.innerHTML = state.fngError
+                ? `<span style="color:var(--amber);">⚠ alternative.me nicht erreichbar</span><br><small style="color:var(--muted); font-weight:400;">Composite unten nutzen</small>`
+                : `<span style="color:var(--muted);">lade …</span>`;
+        }
+        return;
+    }
     const v = state.fng.value;
-    // rebuild inner content while keeping needle
     el.innerHTML = v + '<div class="fng-needle" id="fng-needle"></div>';
     const needle = $("#fng-needle");
-    // 0 → -135°, 100 → +135° (270° span across the arc)
     const angle = -135 + (v / 100) * 270;
     if (needle) needle.style.transform = `translate(-50%, -90%) rotate(${angle}deg)`;
-    $("#fng-class").textContent = state.fng.label;
+    const ageMin = state.fng.ts ? Math.round((Date.now() - state.fng.ts) / 60000) : null;
+    const ageTxt = ageMin != null ? `<br><small style="color:var(--muted); font-weight:400;">vor ${ageMin} min · alternative.me</small>` : "";
+    $("#fng-class").innerHTML = state.fng.label + ageTxt;
     const color = v <= 24 ? "var(--red)" : v <= 44 ? "var(--amber)"
         : v >= 75 ? "var(--red)" : v >= 55 ? "var(--green)" : "var(--muted)";
     el.style.color = color;
@@ -855,8 +869,29 @@ async function refreshPrices() {
 }
 
 async function refreshFng() {
-    const d = await window.TB.fetchFearGreed();
-    if (d) { state.fng = d; renderFng(); }
+    try {
+        const d = await window.TB.fetchFearGreed();
+        if (d && Number.isFinite(d.value)) {
+            state.fng = { ...d, ts: Date.now() };
+            state.fngError = null;
+            renderFng();
+            return;
+        }
+        throw new Error("keine Daten");
+    } catch (e) {
+        state.fngError = e.message || "Unbekannt";
+        // Fallback: use Binance-computed composite as approximation for the dial
+        const composite = await computeBinanceCompositeFng();
+        if (composite && Number.isFinite(composite.value)) {
+            state.fng = {
+                value: composite.value,
+                label: composite.label + " (aus Binance-Daten)",
+                ts: Date.now(),
+                fallback: true,
+            };
+        }
+        renderFng();
+    }
 }
 
 // ============ NEW: equity curve tracking ============
@@ -1869,12 +1904,17 @@ async function checkHealth() {
 
 // ============ v6: MARKET CONTEXT ============
 async function refreshMarketCtx() {
-    const [global, trending] = await Promise.all([
-        window.TB.fetchGlobalMarket(),
-        window.TB.fetchTrending(),
-    ]);
-    state.marketGlobal = global;
-    state.trending = trending;
+    try {
+        const [global, trending] = await Promise.all([
+            window.TB.fetchGlobalMarket(),
+            window.TB.fetchTrending(),
+        ]);
+        state.marketGlobal = global;
+        state.trending = trending;
+        state.marketCtxError = (!global && !trending?.length) ? "keine Daten" : null;
+    } catch (e) {
+        state.marketCtxError = e.message;
+    }
     renderMarketCtx();
 }
 
@@ -1883,7 +1923,12 @@ function renderMarketCtx() {
     if (!el) return;
     const g = state.marketGlobal;
     const t = state.trending || [];
-    if (!g && !t.length) { el.textContent = "lade …"; return; }
+    if (!g && !t.length) {
+        el.innerHTML = state.marketCtxError
+            ? `<div style="color:var(--amber); font-size:0.82rem;">⚠ CoinGecko nicht erreichbar (evtl. Rate-Limit). Nächster Versuch in 5 Min.</div>`
+            : `<div style="color:var(--muted); font-size:0.82rem;">lade …</div>`;
+        return;
+    }
     const mcapT = g?.totalMcap ? (g.totalMcap / 1e12).toFixed(2) + " T$" : "–";
     const volB = g?.totalVolume ? (g.totalVolume / 1e9).toFixed(1) + " B$" : "–";
     const chgCls = g?.mcapChange24h > 0 ? "pnl-pos" : g?.mcapChange24h < 0 ? "pnl-neg" : "";
@@ -1906,7 +1951,10 @@ function renderMarketCtx() {
 
 // ============ v6: ON-CHAIN ============
 async function refreshOnChain() {
-    state.onchain = await window.TB.fetchOnChain();
+    try {
+        state.onchain = await window.TB.fetchOnChain();
+        state.onchainError = state.onchain ? null : "leer";
+    } catch (e) { state.onchainError = e.message; }
     renderOnChain();
 }
 
@@ -1914,7 +1962,10 @@ function renderOnChain() {
     const el = $("#onchain");
     if (!el) return;
     const d = state.onchain;
-    if (!d) { el.textContent = "lade …"; return; }
+    if (!d) {
+        el.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">mempool.space ${state.onchainError ? "nicht erreichbar" : "lädt …"}</div>`;
+        return;
+    }
     const hashEH = d.hashrate ? (d.hashrate / 1e18).toFixed(1) + " EH/s" : "–";
     const diffT = d.difficulty ? (d.difficulty / 1e12).toFixed(2) + " T" : "–";
     el.innerHTML = `
@@ -3151,39 +3202,143 @@ broker.submit = function(symbol, side, qty, price, meta) {
 
 // ============ v7: real PDF via html2pdf CDN ============
 async function generatePdfTaxReport() {
-    // load html2pdf on demand
+    // load html2pdf on demand with clear error handling
     if (!window.html2pdf) {
-        await new Promise((resolve, reject) => {
-            const s = document.createElement("script");
-            s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-            s.onload = resolve; s.onerror = reject;
-            document.head.appendChild(s);
-        });
+        try {
+            await new Promise((resolve, reject) => {
+                const existing = document.querySelector('script[src*="html2pdf"]');
+                if (existing) { existing.addEventListener("load", resolve); return; }
+                const s = document.createElement("script");
+                s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+                s.onload = resolve;
+                s.onerror = () => reject(new Error("html2pdf-Bibliothek konnte nicht geladen werden (CDN unerreichbar)"));
+                document.head.appendChild(s);
+                setTimeout(() => reject(new Error("html2pdf Lade-Timeout (10s)")), 10000);
+            });
+        } catch (e) {
+            alert("PDF-Erzeugung fehlgeschlagen: " + e.message + "\n\nAlternative: Nutze den 'Drucken / PDF'-Button im Journal — funktioniert offline.");
+            return;
+        }
+    }
+    if (!window.html2pdf) {
+        alert("html2pdf-Bibliothek konnte nicht initialisiert werden.");
+        return;
     }
     const trades = _pairTrades();
     trades.sort((a, b) => new Date(a.close_ts) - new Date(b.close_ts));
-    const total = trades.reduce((s, t) => s + t.pnl, 0);
-    const rows = trades.map((t) => {
-        const days = (new Date(t.close_ts) - new Date(t.open_ts)) / (86400 * 1000);
-        return `<tr><td>${new Date(t.open_ts).toLocaleDateString("de-DE")}</td><td>${new Date(t.close_ts).toLocaleDateString("de-DE")}</td><td>${t.symbol}</td><td>${t.side}</td><td style="text-align:right">${t.qty.toFixed(6)}</td><td style="text-align:right">${t.pnl.toFixed(2)}</td><td>${days >= 365 ? "§23 frei" : Math.round(days) + " T"}</td></tr>`;
-    }).join("");
+
+    // Handle empty trades case — show meaningful placeholder instead of empty pages
+    let bodyContent;
+    if (!trades.length) {
+        bodyContent = `
+            <h1 style="color:#1e40af; margin-bottom:8px;">Steuerreport § 23 EStG</h1>
+            <div style="color:#555; margin-bottom:24px;">Erstellt am ${new Date().toLocaleString("de-DE")}</div>
+            <div style="background:#fef3c7; border-left:4px solid #f59e0b; padding:16px; border-radius:4px; margin:16px 0;">
+                <strong>Keine abgeschlossenen Trades im Handelskonto.</strong><br>
+                Ein Steuerreport nach § 23 EStG kann erst erstellt werden, sobald mindestens ein Trade komplett geschlossen wurde
+                (also nach dem ersten Verkauf einer Position).
+            </div>
+            <div style="margin-top:24px; color:#555; font-size:12px;">
+                <p><strong>Was ist § 23 EStG?</strong></p>
+                <p>Private Veräußerungsgeschäfte mit Kryptowährungen sind in Deutschland steuerpflichtig, wenn zwischen Kauf und Verkauf weniger als 1 Jahr liegt (Haltefrist). Danach steuerfrei.</p>
+                <p style="margin-top:12px;"><strong>Was steht später in diesem Bericht?</strong></p>
+                <ul>
+                    <li>Übersicht aller Trades mit Kauf-/Verkaufsdatum</li>
+                    <li>Bruttogewinn und Bruttoverlust</li>
+                    <li>Netto-PnL, davon steuerpflichtig vs. steuerfrei</li>
+                    <li>Vollständige Trade-Aufstellung für die Anlage SO</li>
+                </ul>
+            </div>`;
+    } else {
+        const wins = trades.filter((t) => t.pnl > 0);
+        const losses = trades.filter((t) => t.pnl < 0);
+        const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+        const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+        const total = trades.reduce((s, t) => s + t.pnl, 0);
+        const netTaxable = trades.filter((t) => {
+            const days = (new Date(t.close_ts) - new Date(t.open_ts)) / (86400 * 1000);
+            return days < 365;
+        }).reduce((s, t) => s + t.pnl, 0);
+        const rows = trades.map((t) => {
+            const days = (new Date(t.close_ts) - new Date(t.open_ts)) / (86400 * 1000);
+            const taxFree = days >= 365;
+            return `<tr>
+                <td>${new Date(t.open_ts).toLocaleDateString("de-DE")}</td>
+                <td>${new Date(t.close_ts).toLocaleDateString("de-DE")}</td>
+                <td>${t.symbol}</td>
+                <td>${t.side}</td>
+                <td style="text-align:right">${t.open_price.toFixed(4)}</td>
+                <td style="text-align:right">${t.close_price.toFixed(4)}</td>
+                <td style="text-align:right">${t.qty.toFixed(6)}</td>
+                <td style="text-align:right">${Math.round(days)} T</td>
+                <td style="text-align:right; color:${t.pnl >= 0 ? "#16a34a" : "#dc2626"};">${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)}</td>
+                <td style="font-size:10px;">${taxFree ? "§23 frei" : "steuerpflichtig"}</td>
+            </tr>`;
+        }).join("");
+        bodyContent = `
+            <h1 style="color:#1e40af; margin-bottom:8px;">Steuerreport § 23 EStG</h1>
+            <div style="color:#555; margin-bottom:16px; font-size:12px;">
+                Erstellt am ${new Date().toLocaleString("de-DE")} · Trading Bot Demo · alle Beträge in USDT
+            </div>
+            <div style="background:#f1f5f9; padding:16px; border-radius:6px; margin-bottom:20px;">
+                <div style="display:flex; justify-content:space-between; padding:3px 0; font-size:12px;"><span>Trades gesamt</span><strong>${trades.length}</strong></div>
+                <div style="display:flex; justify-content:space-between; padding:3px 0; font-size:12px;"><span>Bruttogewinn</span><strong style="color:#16a34a;">+${grossWin.toFixed(2)}</strong></div>
+                <div style="display:flex; justify-content:space-between; padding:3px 0; font-size:12px;"><span>Bruttoverlust</span><strong style="color:#dc2626;">-${grossLoss.toFixed(2)}</strong></div>
+                <div style="display:flex; justify-content:space-between; padding:3px 0; font-size:12px;"><span>Netto-PnL</span><strong>${total >= 0 ? "+" : ""}${total.toFixed(2)}</strong></div>
+                <div style="display:flex; justify-content:space-between; padding:3px 0; font-size:12px;"><span>Davon steuerpflichtig (Haltedauer &lt; 1 Jahr)</span><strong>${netTaxable >= 0 ? "+" : ""}${netTaxable.toFixed(2)}</strong></div>
+                <div style="display:flex; justify-content:space-between; padding:3px 0; font-size:12px;"><span>Steuerfreier Anteil (Haltedauer ≥ 1 Jahr)</span><strong>${(total - netTaxable) >= 0 ? "+" : ""}${(total - netTaxable).toFixed(2)}</strong></div>
+            </div>
+            <table style="border-collapse:collapse; width:100%; font-size:10px;">
+                <thead>
+                    <tr style="background:#e2e8f0;">
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:left;">Kauf</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:left;">Verkauf</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:left;">Symbol</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:left;">Seite</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:right;">Kaufpreis</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:right;">Verkaufspreis</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:right;">Menge</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:right;">Haltedauer</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:right;">PnL</th>
+                        <th style="padding:5px 4px; border:1px solid #cbd5e1; text-align:left;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>${rows.replace(/<td>/g, '<td style="padding:4px; border:1px solid #cbd5e1;">')
+                            .replace(/<td style="text-align:right">/g, '<td style="padding:4px; border:1px solid #cbd5e1; text-align:right;">')}
+                </tbody>
+            </table>
+            <div style="margin-top:24px; padding-top:12px; border-top:1px solid #cbd5e1; color:#666; font-size:10px;">
+                Hinweis: Diese Aufstellung dient zur Vorbereitung der Anlage SO. Keine Steuerberatung.
+                Bei Krypto-zu-Krypto-Trades und komplexen Fällen bitte Steuerberater konsultieren.
+            </div>`;
+    }
+
+    // Position container OFF-SCREEN but with explicit A4 width so html2canvas
+    // can measure it properly. Just appending with padding fails because
+    // the effective width depends on viewport and html2canvas may render nothing.
     const container = document.createElement("div");
-    container.style.cssText = "padding:24px; font-family:Arial; color:#111;";
-    container.innerHTML = `
-        <h1 style="color:#1e40af;">Steuerreport § 23 EStG</h1>
-        <div style="color:#555; margin-bottom:16px;">Erstellt ${new Date().toLocaleDateString("de-DE")} · ${trades.length} Trades · Netto ${total.toFixed(2)} USDT</div>
-        <table style="border-collapse:collapse; width:100%; font-size:11px;">
-            <thead><tr style="background:#e2e8f0;"><th style="padding:4px;border:1px solid #cbd5e1;">Kauf</th><th style="padding:4px;border:1px solid #cbd5e1;">Verkauf</th><th style="padding:4px;border:1px solid #cbd5e1;">Symbol</th><th style="padding:4px;border:1px solid #cbd5e1;">Seite</th><th style="padding:4px;border:1px solid #cbd5e1;">Menge</th><th style="padding:4px;border:1px solid #cbd5e1;">PnL</th><th style="padding:4px;border:1px solid #cbd5e1;">Status</th></tr></thead>
-            <tbody>${rows}</tbody>
-        </table>`;
+    container.style.cssText = `
+        position: fixed; left: -10000px; top: 0;
+        width: 794px; padding: 24px; box-sizing: border-box;
+        font-family: Arial, sans-serif; color: #111; background: #fff;
+        line-height: 1.4;
+    `;
+    container.innerHTML = bodyContent;
     document.body.appendChild(container);
-    await window.html2pdf().from(container).set({
-        margin: 10,
-        filename: `steuerreport_${new Date().toISOString().slice(0, 10)}.pdf`,
-        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-    }).save();
-    container.remove();
-    announce("PDF-Steuerreport erzeugt.", "success");
+    try {
+        await window.html2pdf().from(container).set({
+            margin: [10, 10, 10, 10],
+            filename: `steuerreport_${new Date().toISOString().slice(0, 10)}.pdf`,
+            html2canvas: { scale: 2, backgroundColor: "#ffffff", useCORS: false },
+            jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+            pagebreak: { mode: ["avoid-all", "css", "legacy"] },
+        }).save();
+        announce("PDF-Steuerreport erzeugt.", "success");
+    } catch (e) {
+        alert("PDF-Erzeugung fehlgeschlagen: " + (e.message || e));
+    } finally {
+        container.remove();
+    }
 }
 
 // ============ v7: ENCRYPTED BACKUP ============
@@ -4729,6 +4884,14 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#pattern-modal")?.addEventListener("click", (e) => { if (e.target.id === "pattern-modal") $("#pattern-modal").classList.add("hidden"); });
     $("#load-history-btn")?.addEventListener("click", loadHistoryAndCalcStats);
     $("#wf-run")?.addEventListener("click", runWalkForwardBacktest);
+    $("#fng-refresh")?.addEventListener("click", async () => {
+        const btn = $("#fng-refresh");
+        btn.textContent = "…lade";
+        btn.disabled = true;
+        await refreshFng();
+        btn.textContent = "↻ Aktualisieren";
+        btn.disabled = false;
+    });
 });
 
 // =====================================================================
