@@ -77,18 +77,114 @@ function renderTopbar() {
     topbar.innerHTML = "";
     return;
   }
-  topbar.innerHTML = `
-    <span class="stat level" title="Level"><span class="stat-icon">🎓</span>Lvl ${level()}</span>
-    <span class="stat streak" title="Streak in Tagen"><span class="stat-icon">🔥</span>${state.streak}</span>
-    <span class="stat xp" title="Erfahrungspunkte"><span class="stat-icon">⭐</span>${state.xp} XP</span>
-    <span class="stat hearts" title="Verbleibende Herzen"><span class="stat-icon">❤</span>${state.hearts}/${state.maxHearts}</span>
-    <button class="btn btn-ghost btn-small" onclick="goHome()">Menü</button>
-  `;
+  // Erstelle nur einmal – danach nur Werte updaten, damit Animationen greifen können.
+  if (!document.getElementById("stat-xp")) {
+    topbar.innerHTML = `
+      <span class="stat level" id="stat-level" title="Level"><span class="stat-icon">🎓</span>Lvl <span class="stat-val">${level()}</span></span>
+      <span class="stat streak" id="stat-streak" title="Streak in Tagen"><span class="stat-icon flame">🔥</span><span class="stat-val">${state.streak}</span></span>
+      <span class="stat xp" id="stat-xp" title="Erfahrungspunkte"><span class="stat-icon">⭐</span><span class="stat-val">${state.xp}</span> XP</span>
+      <span class="stat hearts" id="stat-hearts" title="Verbleibende Herzen"><span class="stat-icon">❤</span><span class="stat-val">${state.hearts}</span>/${state.maxHearts}</span>
+      <button class="btn btn-ghost btn-small" onclick="goHome()">Menü</button>
+    `;
+  } else {
+    setStatValue("stat-level", level());
+    setStatValue("stat-streak", state.streak);
+    setStatValue("stat-xp", state.xp);
+    setStatValue("stat-hearts", state.hearts);
+  }
+}
+
+// Setzt den Zahlenwert einer Topbar-Stat und triggert die Bump-Animation, sobald sich der Wert ändert.
+function setStatValue(id, newVal) {
+  const stat = document.getElementById(id);
+  if (!stat) return;
+  const valEl = stat.querySelector(".stat-val");
+  if (!valEl) return;
+  const old = parseInt(valEl.textContent, 10);
+  if (old === newVal) return;
+
+  if (id === "stat-xp" && newVal > old) {
+    // XP-Zähler rollt hoch
+    animateNumber(valEl, old, newVal, 500);
+  } else {
+    valEl.textContent = newVal;
+  }
+
+  stat.classList.remove("bump");
+  void stat.offsetWidth; // reflow, damit Animation erneut startet
+  stat.classList.add("bump");
+}
+
+// Animiert einen Zähler von "from" auf "to" in ms Millisekunden.
+function animateNumber(el, from, to, ms) {
+  const start = performance.now();
+  const diff = to - from;
+  function tick(now) {
+    const t = Math.min(1, (now - start) / ms);
+    const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+    el.textContent = Math.round(from + diff * eased);
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 }
 
 function render(html) {
   app.innerHTML = html;
   renderTopbar();
+}
+
+// -------- Animations-Helfer --------
+const CONFETTI_COLORS = ["#58cc02", "#1cb0f6", "#ce82ff", "#ff9600", "#ffc800", "#ff4b4b", "#84e600"];
+
+// Wirft `count` Konfetti-Teile über den Bildschirm.
+// intensity: "small" ~ 20 Teile, "burst" ~ 45, "big" ~ 110
+function launchConfetti(intensity = "burst") {
+  const counts = { small: 20, burst: 50, big: 120 };
+  const count = counts[intensity] ?? 50;
+  const layer = document.createElement("div");
+  layer.className = "confetti-layer";
+  const shapes = ["", "round", "strip"];
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement("div");
+    const shape = shapes[Math.floor(Math.random() * shapes.length)];
+    p.className = "confetti-piece" + (shape ? " " + shape : "");
+    p.style.left = (Math.random() * 100) + "vw";
+    p.style.background = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+    p.style.setProperty("--dx", ((Math.random() - 0.5) * 240) + "px");
+    p.style.setProperty("--rot", ((Math.random() * 4 + 2) * 360 * (Math.random() < 0.5 ? -1 : 1)) + "deg");
+    const dur = 1.6 + Math.random() * 1.8;
+    p.style.animationDuration = dur + "s";
+    p.style.animationDelay = (Math.random() * 0.3) + "s";
+    layer.appendChild(p);
+  }
+  document.body.appendChild(layer);
+  // Cleanup nach längster Animationsdauer
+  setTimeout(() => layer.remove(), 4200);
+}
+
+// Wechselt zu einem neuen Screen mit Slide-Animation.
+// direction: "forward" (neu von rechts) oder "back" (neu von links)
+function transitionRender(fn, direction = "forward") {
+  const existing = document.querySelector("#app .screen");
+  if (!existing) { fn(); return; }
+  const outClass = direction === "forward" ? "slide-out" : "slide-out-back";
+  const inClass  = direction === "forward" ? "slide-in"  : "slide-in-back";
+  existing.classList.add(outClass);
+  setTimeout(() => {
+    fn();
+    const fresh = document.querySelector("#app .screen");
+    if (fresh) fresh.classList.add(inClass);
+  }, 220);
+}
+
+// Kleine Check-Marke, die aus einer richtigen Option herausploppt.
+function spawnCheckBurst(optionEl) {
+  if (!optionEl) return;
+  const burst = document.createElement("span");
+  burst.className = "check-burst";
+  burst.textContent = "✓";
+  optionEl.appendChild(burst);
+  setTimeout(() => burst.remove(), 900);
 }
 
 // ==============================================================
@@ -148,10 +244,16 @@ function renderHome() {
     if (lessons.length === 0) return "";
 
     let previousDone = true;
+    let attnGiven = false;
     const nodes = lessons.map((lesson, idx) => {
       const done = !!state.completedLessons[lesson.id];
       const unlocked = previousDone || done;
-      const cls = done ? "done" : (unlocked ? "" : "locked");
+      let cls = done ? "done" : (unlocked ? "" : "locked");
+      // Erste nicht-abgeschlossene, entsperrte Lektion pulsiert.
+      if (!done && unlocked && !attnGiven) {
+        cls += " pulse-attn";
+        attnGiven = true;
+      }
       const onClick = unlocked ? `startLesson('${lesson.id}')` : "showLockedInfo()";
       previousDone = done;
       return `
@@ -223,7 +325,7 @@ function startLesson(id) {
   state.lessonCorrect = 0;
   state.lessonTotal = lesson.exercises.length;
   saveState();
-  renderExercise();
+  transitionRender(renderExercise, "forward");
 }
 
 function renderExercise() {
@@ -364,23 +466,47 @@ function checkAnswer() {
     correctText = ex.options[ex.correct];
     document.querySelectorAll(".option").forEach((el, i) => {
       el.classList.remove("selected");
-      if (i === ex.correct) el.classList.add("correct");
-      else if (i === selectedIndex && !correct) el.classList.add("wrong");
+      if (i === ex.correct) {
+        el.classList.add("correct");
+        spawnCheckBurst(el);
+      } else if (i === selectedIndex && !correct) {
+        el.classList.add("wrong");
+      }
       el.style.pointerEvents = "none";
     });
+    // bei falsch: das ganze Übungscard sanft schütteln
+    if (!correct) shakeExerciseCard();
   } else if (ex.type === "cloze") {
     const answers = [ex.answer, ...(ex.altAnswers || [])].map(normalize);
     correct = answers.includes(normalize(selectedValue));
     correctText = ex.answer;
+    const input = document.getElementById("clozeInput");
+    if (input) input.disabled = true;
+    if (!correct) shakeExerciseCard();
   } else if (ex.type === "calc") {
     const num = parseFloat(String(selectedValue).replace(",", "."));
     const tol = ex.tolerance ?? 0.01;
     correct = !isNaN(num) && Math.abs(num - ex.answer) <= tol;
     correctText = `${ex.answer}${ex.unit ? " " + ex.unit : ""}`;
+    const input = document.getElementById("calcInput");
+    if (input) input.disabled = true;
+    if (!correct) shakeExerciseCard();
   }
 
   showFeedback(correct, correctText);
   updateAfterAnswer(correct);
+
+  if (correct) {
+    launchConfetti("small");
+  }
+}
+
+function shakeExerciseCard() {
+  const card = document.querySelector(".exercise-card");
+  if (!card) return;
+  card.style.animation = "none";
+  void card.offsetWidth;
+  card.style.animation = "optionWrong 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97)";
 }
 
 function normalize(s) {
@@ -408,6 +534,13 @@ function updateAfterAnswer(correct) {
     markActiveToday();
   } else {
     state.hearts = Math.max(0, state.hearts - 1);
+    // Herz-Verlust-Animation triggern (bevor Wert im DOM aktualisiert wird)
+    const heartsEl = document.getElementById("stat-hearts");
+    if (heartsEl) {
+      heartsEl.classList.remove("lose");
+      void heartsEl.offsetWidth;
+      heartsEl.classList.add("lose");
+    }
   }
   saveState();
   renderTopbar();
@@ -420,14 +553,14 @@ function nextExercise(wasCorrect) {
   }
   state.currentIndex += 1;
   saveState();
-  renderExercise();
+  transitionRender(renderExercise, "forward");
 }
 
 function quitLesson() {
   if (confirm("Lektion wirklich verlassen? Dein Fortschritt in dieser Lektion geht verloren.")) {
     state.currentLesson = null;
     saveState();
-    goHome();
+    transitionRender(goHome, "back");
   }
 }
 
@@ -441,12 +574,14 @@ function finishLesson() {
     // Bonus XP für abgeschlossene Lektion
     state.xp += 20;
     saveState();
+    renderTopbar();
+    launchConfetti("big");
     showModal(
       "🎉",
       "Lektion abgeschlossen!",
       `Du hast <strong>${state.lessonCorrect} von ${state.lessonTotal}</strong> Aufgaben richtig (${pct}%).`,
       "Weiter",
-      () => { hideModal(); goHome(); },
+      () => { hideModal(); transitionRender(goHome, "back"); },
       `<div class="modal-stats">+${state.lessonCorrect * 10 + 20} XP • 🔥 Streak: ${state.streak}</div>`
     );
   } else {
