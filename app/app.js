@@ -105,22 +105,22 @@ function renderOnboarding() {
 
   render(`
     <div class="screen">
-      <h1>Willkommen bei ElektroLingo ⚡</h1>
-      <p class="subtitle">Lerne Elektro-Begriffe spielerisch. Wähle zuerst dein Level – du kannst es später jederzeit wechseln.</p>
+      <h1>Welcome to ElectroLingo ⚡</h1>
+      <p class="subtitle">Lerne die englischen Fachbegriffe der Elektrotechnik spielerisch. Wähle dein Sprachlevel – du kannst es jederzeit wechseln.</p>
       <div class="level-grid">${cards}</div>
     </div>
   `);
 }
 
 function levelEmoji(key) {
-  return { azubi1: "🌱", azubi2: "🔧", azubi3: "🛠️", meister: "🏆" }[key] || "⚡";
+  return { beginner: "🌱", intermediate: "🔧", advanced: "🛠️", expert: "🏆" }[key] || "⚡";
 }
 function levelDesc(key) {
   return {
-    azubi1: "Grundlagen für den Einstieg",
-    azubi2: "Bauteile & einfache Schaltungen",
-    azubi3: "Installations- und Prüfungswissen",
-    meister: "Drehstrom, Normen & Vertiefung",
+    beginner:     "Grundwortschatz zum Einstieg",
+    intermediate: "Bauteile & einfache Sätze",
+    advanced:     "Installation, AC/DC & Fehler",
+    expert:       "Prüfungsvokabular & Fachjargon",
   }[key] || "";
 }
 
@@ -141,7 +141,7 @@ function goHome() {
 
 function renderHome() {
   const availableLessons = LESSONS.filter(l => l.levels.includes(state.level));
-  const themen = ["Grundlagen", "Bauteile", "Schaltungen", "Installation"];
+  const themen = ["Basics", "Components", "Circuits", "Installation", "Measurement"];
 
   const sections = themen.map(thema => {
     const lessons = availableLessons.filter(l => l.thema === thema);
@@ -193,7 +193,7 @@ function renderHome() {
 }
 
 function themaEmoji(t) {
-  return { Grundlagen: "⚡", Bauteile: "🔩", Schaltungen: "📊", Installation: "🏠" }[t] || "📚";
+  return { Basics: "⚡", Components: "🔩", Circuits: "📊", Installation: "🏠", Measurement: "📏" }[t] || "📚";
 }
 
 function changeLevel() {
@@ -369,7 +369,8 @@ function checkAnswer() {
       el.style.pointerEvents = "none";
     });
   } else if (ex.type === "cloze") {
-    correct = normalize(selectedValue) === normalize(ex.answer);
+    const answers = [ex.answer, ...(ex.altAnswers || [])].map(normalize);
+    correct = answers.includes(normalize(selectedValue));
     correctText = ex.answer;
   } else if (ex.type === "calc") {
     const num = parseFloat(String(selectedValue).replace(",", "."));

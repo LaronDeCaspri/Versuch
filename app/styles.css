@@ -237,10 +237,11 @@ h2 {
   box-shadow: var(--shadow-btn);
 }
 
-.thema-section[data-thema="Grundlagen"] .thema-header { background: linear-gradient(135deg, var(--green), var(--green-dark)); }
-.thema-section[data-thema="Bauteile"] .thema-header { background: linear-gradient(135deg, var(--blue), var(--blue-dark)); }
-.thema-section[data-thema="Schaltungen"] .thema-header { background: linear-gradient(135deg, var(--purple), #b56bff); }
+.thema-section[data-thema="Basics"] .thema-header { background: linear-gradient(135deg, var(--green), var(--green-dark)); }
+.thema-section[data-thema="Components"] .thema-header { background: linear-gradient(135deg, var(--blue), var(--blue-dark)); }
+.thema-section[data-thema="Circuits"] .thema-header { background: linear-gradient(135deg, var(--purple), #b56bff); }
 .thema-section[data-thema="Installation"] .thema-header { background: linear-gradient(135deg, var(--orange), #e58600); }
+.thema-section[data-thema="Measurement"] .thema-header { background: linear-gradient(135deg, #ff5c8a, #e63976); }
 
 .lesson-path {
   display: flex;
