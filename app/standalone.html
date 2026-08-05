@@ -1,0 +1,1748 @@
+<title>ElectroLingo – Englische Elektro-Vokabeln lernen</title>
+<meta name="theme-color" content="#58cc02">
+<style>
+/* ==============================================================
+   Elektro-Lern-App – Modern & bunt (Duolingo-inspiriert)
+   ============================================================== */
+
+:root {
+  --green: #58cc02;
+  --green-dark: #46a302;
+  --blue: #1cb0f6;
+  --blue-dark: #1899d6;
+  --purple: #ce82ff;
+  --orange: #ff9600;
+  --red: #ff4b4b;
+  --yellow: #ffc800;
+  --gray-1: #f7f7f7;
+  --gray-2: #e5e5e5;
+  --gray-3: #afafaf;
+  --gray-4: #777;
+  --text: #3c3c3c;
+  --bg: #ffffff;
+  --card: #ffffff;
+  --shadow-btn: 0 4px 0 rgba(0, 0, 0, 0.15);
+  --shadow-card: 0 6px 20px rgba(0, 0, 0, 0.06);
+  --radius: 16px;
+  --font: "Nunito", "DIN Round Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--gray-1);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* -------------------- Kopfzeile / Statusleiste -------------------- */
+.topbar {
+  background: var(--card);
+  border-bottom: 2px solid var(--gray-2);
+  padding: 12px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 800;
+  font-size: 20px;
+  color: var(--green);
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-bolt {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  background: var(--green);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 18px;
+}
+
+.stats {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-weight: 700;
+}
+
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--gray-1);
+  font-size: 15px;
+}
+
+.stat.streak { color: var(--orange); }
+.stat.xp { color: var(--yellow); }
+.stat.hearts { color: var(--red); }
+.stat.level { color: var(--purple); }
+
+.stat.bump { animation: statBump 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.stat.hearts.lose { animation: heartLose 0.55s ease; }
+.stat.streak .flame {
+  display: inline-block;
+  transform-origin: center bottom;
+  animation: flameFlicker 1.4s ease-in-out infinite;
+}
+
+.stat-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* -------------------- Hauptbereich -------------------- */
+main {
+  flex: 1;
+  padding: 24px 16px 40px;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.screen {
+  animation: fadeIn 0.25s ease;
+}
+
+.screen.slide-in {
+  animation: slideInRight 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.screen.slide-out {
+  animation: slideOutLeft 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+.screen.slide-in-back {
+  animation: slideInLeft 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.screen.slide-out-back {
+  animation: slideOutRight 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 16px;
+}
+
+.subtitle {
+  color: var(--gray-4);
+  margin-bottom: 24px;
+  font-size: 16px;
+}
+
+/* -------------------- Buttons -------------------- */
+.btn {
+  border: none;
+  border-radius: var(--radius);
+  padding: 14px 24px;
+  font-family: var(--font);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.05s ease, filter 0.15s;
+  box-shadow: var(--shadow-btn);
+  color: #fff;
+  background: var(--green);
+  min-width: 140px;
+}
+
+.btn:hover { filter: brightness(1.05); }
+.btn:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0,0,0,0.15); }
+
+.btn-primary { background: var(--green); }
+.btn-blue { background: var(--blue); }
+.btn-orange { background: var(--orange); }
+.btn-red { background: var(--red); }
+.btn-ghost {
+  background: #fff;
+  color: var(--gray-4);
+  border: 2px solid var(--gray-2);
+  box-shadow: 0 2px 0 var(--gray-2);
+}
+.btn-ghost:hover { background: var(--gray-1); }
+
+.btn-small {
+  padding: 10px 16px;
+  font-size: 13px;
+  min-width: 90px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* -------------------- Onboarding / Level-Auswahl -------------------- */
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.level-card {
+  background: var(--card);
+  border: 3px solid var(--gray-2);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  cursor: pointer;
+  text-align: center;
+  transition: transform 0.1s, border-color 0.15s;
+  box-shadow: var(--shadow-card);
+}
+
+.level-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--green);
+}
+
+.level-card .emoji { font-size: 42px; display: block; margin-bottom: 8px; }
+.level-card .name { font-weight: 800; font-size: 18px; margin-bottom: 6px; }
+.level-card .desc { color: var(--gray-4); font-size: 14px; }
+
+/* -------------------- Lernpfad / Home -------------------- */
+.thema-section {
+  margin-bottom: 32px;
+}
+
+.thema-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, var(--blue), var(--blue-dark));
+  color: #fff;
+  padding: 14px 20px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  font-weight: 800;
+  font-size: 18px;
+  box-shadow: var(--shadow-btn);
+}
+
+.thema-section[data-thema="Basics"] .thema-header { background: linear-gradient(135deg, var(--green), var(--green-dark)); }
+.thema-section[data-thema="Components"] .thema-header { background: linear-gradient(135deg, var(--blue), var(--blue-dark)); }
+.thema-section[data-thema="Circuits"] .thema-header { background: linear-gradient(135deg, var(--purple), #b56bff); }
+.thema-section[data-thema="Installation"] .thema-header { background: linear-gradient(135deg, var(--orange), #e58600); }
+.thema-section[data-thema="Measurement"] .thema-header { background: linear-gradient(135deg, #ff5c8a, #e63976); }
+
+.lesson-path {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.lesson-node {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  cursor: pointer;
+  box-shadow: 0 6px 0 var(--green-dark);
+  transition: transform 0.1s;
+  border: 4px solid #fff;
+}
+
+.lesson-node { transition: transform 0.12s, box-shadow 0.12s; }
+.lesson-node:hover { transform: translateY(-3px); }
+.lesson-node:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--green-dark); }
+
+.lesson-node.pulse-attn {
+  animation: nodePulse 1.6s ease-in-out infinite;
+}
+
+.lesson-node.locked {
+  background: var(--gray-3);
+  box-shadow: 0 6px 0 var(--gray-4);
+  cursor: not-allowed;
+}
+
+.lesson-node.done {
+  background: var(--yellow);
+  box-shadow: 0 6px 0 #d3a500;
+}
+
+.lesson-node.done::after {
+  content: "✓";
+  position: absolute;
+  bottom: -8px;
+  right: -4px;
+  background: #fff;
+  color: var(--green);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--green);
+  font-weight: 800;
+}
+
+.lesson-node-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.lesson-title {
+  font-size: 14px;
+  color: var(--gray-4);
+  font-weight: 700;
+  text-align: center;
+  max-width: 160px;
+}
+
+/* Zickzack-Layout: gerade Nodes leicht links, ungerade leicht rechts */
+.lesson-node-wrapper:nth-child(odd) { margin-left: -60px; }
+.lesson-node-wrapper:nth-child(even) { margin-left: 60px; }
+
+/* -------------------- Lektions-Screen -------------------- */
+.lesson-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: var(--gray-3);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.close-btn:hover { color: var(--gray-4); }
+
+.progress-bar {
+  flex: 1;
+  height: 14px;
+  background: var(--gray-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--green);
+  background-image: linear-gradient(90deg,
+    var(--green) 0%,
+    var(--green) 40%,
+    rgba(255,255,255,0.55) 50%,
+    var(--green) 60%,
+    var(--green) 100%);
+  background-size: 200% 100%;
+  background-position: 100% 0;
+  border-radius: 999px;
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  animation: progressShine 2.4s ease-in-out infinite;
+}
+
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 6px;
+  right: 6px;
+  height: 4px;
+  background: rgba(255,255,255,0.5);
+  border-radius: 999px;
+}
+
+.exercise-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 32px 24px;
+  box-shadow: var(--shadow-card);
+  margin-bottom: 24px;
+  min-height: 260px;
+}
+
+.exercise-question {
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 24px;
+  line-height: 1.3;
+}
+
+.options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.option {
+  background: #fff;
+  border: 2px solid var(--gray-2);
+  border-bottom-width: 4px;
+  border-radius: 12px;
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font-family: var(--font);
+  transition: background 0.12s, transform 0.12s, border-color 0.12s;
+}
+
+.option:hover { background: var(--gray-1); transform: translateY(-1px); }
+.option:active:not([disabled]) { transform: translateY(2px); border-bottom-width: 2px; }
+
+.option.selected {
+  border-color: var(--blue);
+  background: #ddf4ff;
+  color: var(--blue-dark);
+  animation: optionSelect 0.22s ease;
+}
+
+.option.correct {
+  border-color: var(--green);
+  background: #d7ffb8;
+  color: var(--green-dark);
+  animation: optionCorrect 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.option.wrong {
+  border-color: var(--red);
+  background: #ffdfe0;
+  color: #ea2b2b;
+  animation: optionWrong 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* Flashcards */
+.flashcard {
+  perspective: 1000px;
+  min-height: 260px;
+  cursor: pointer;
+}
+.flashcard-inner {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  transition: transform 0.6s;
+  transform-style: preserve-3d;
+}
+.flashcard.flipped .flashcard-inner {
+  transform: rotateY(180deg);
+}
+.flashcard-front, .flashcard-back {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  backface-visibility: hidden;
+  border: 3px solid var(--blue);
+}
+.flashcard-front {
+  background: linear-gradient(135deg, #e6f7ff, #ffffff);
+}
+.flashcard-back {
+  background: linear-gradient(135deg, #fff7dd, #ffffff);
+  border-color: var(--orange);
+  transform: rotateY(180deg);
+}
+.flashcard .front-text { font-size: 26px; font-weight: 800; }
+.flashcard .back-text { font-size: 17px; line-height: 1.5; }
+.flashcard .hint { font-size: 13px; color: var(--gray-4); margin-top: 16px; }
+
+/* Schaltzeichen-Bereich */
+.symbol-box {
+  background: var(--gray-1);
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+
+.symbol-box svg {
+  max-width: 200px;
+  height: auto;
+  color: var(--text);
+}
+
+/* Eingabefeld (Lückentext / Rechenaufgabe) */
+.text-input {
+  width: 100%;
+  padding: 16px;
+  border: 2px solid var(--gray-2);
+  border-radius: 12px;
+  font-size: 20px;
+  font-weight: 700;
+  font-family: var(--font);
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.text-input:focus { border-color: var(--blue); }
+
+.hint-text {
+  color: var(--gray-4);
+  font-size: 14px;
+  text-align: center;
+  margin-top: 12px;
+  font-style: italic;
+}
+
+/* -------------------- Feedback-Leiste unten -------------------- */
+.feedback {
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  font-weight: 700;
+  display: none;
+}
+.feedback.show { display: block; animation: slideUp 0.25s ease; }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.feedback.correct { background: #d7ffb8; color: var(--green-dark); border: 2px solid var(--green); }
+.feedback.wrong { background: #ffdfe0; color: #ea2b2b; border: 2px solid var(--red); }
+.feedback .feedback-title { font-size: 18px; margin-bottom: 4px; }
+.feedback .feedback-detail { font-size: 14px; font-weight: 600; }
+
+.footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* -------------------- Modal (Level up / Complete / Game over) -------------------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+.modal-backdrop.show { display: flex; animation: fadeIn 0.2s ease; }
+
+.modal {
+  background: #fff;
+  border-radius: 20px;
+  padding: 32px;
+  max-width: 400px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+}
+.modal { animation: modalPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.modal-emoji { font-size: 64px; margin-bottom: 12px; animation: emojiBounce 0.8s ease 0.2s both; }
+.modal h2 { margin-bottom: 12px; }
+.modal p { color: var(--gray-4); margin-bottom: 24px; line-height: 1.5; }
+.modal .modal-stats {
+  background: var(--gray-1);
+  padding: 12px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* -------------------- Responsive -------------------- */
+@media (max-width: 600px) {
+  .topbar-inner { justify-content: center; }
+  .stats { gap: 8px; }
+  .stat { padding: 5px 8px; font-size: 13px; }
+  .brand { font-size: 17px; }
+  h1 { font-size: 22px; }
+  .lesson-node { width: 76px; height: 76px; font-size: 30px; }
+  .lesson-node-wrapper:nth-child(odd) { margin-left: -30px; }
+  .lesson-node-wrapper:nth-child(even) { margin-left: 30px; }
+  .exercise-question { font-size: 18px; }
+  .btn { padding: 12px 18px; font-size: 14px; }
+}
+
+/* =====================================================================
+   ANIMATIONEN – Duolingo-Feel, komplett eigenständig implementiert
+   ===================================================================== */
+
+/* --- Slide-Übergänge zwischen Aufgaben --- */
+@keyframes slideInRight {
+  from { transform: translateX(28%); opacity: 0; }
+  to   { transform: translateX(0);   opacity: 1; }
+}
+@keyframes slideOutLeft {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(-24%); opacity: 0; }
+}
+@keyframes slideInLeft {
+  from { transform: translateX(-28%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes slideOutRight {
+  from { transform: translateX(0);   opacity: 1; }
+  to   { transform: translateX(24%); opacity: 0; }
+}
+
+/* --- Optionen (Antwortkacheln) --- */
+@keyframes optionSelect {
+  0%   { transform: scale(1); }
+  60%  { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+@keyframes optionCorrect {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.06); }
+  60%  { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+@keyframes optionWrong {
+  10%,90% { transform: translateX(-2px); }
+  20%,80% { transform: translateX(4px); }
+  30%,50%,70% { transform: translateX(-8px); }
+  40%,60% { transform: translateX(8px); }
+}
+
+/* --- Topbar-Statistiken --- */
+@keyframes statBump {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.22); }
+  70%  { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+@keyframes heartLose {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.3) rotate(-8deg); }
+  55%  { transform: scale(0.85) rotate(6deg); }
+  80%  { transform: scale(1.05) rotate(-3deg); }
+  100% { transform: scale(1); }
+}
+@keyframes flameFlicker {
+  0%,100% { transform: scale(1)     rotate(-2deg); }
+  25%     { transform: scale(1.15)  rotate(2deg); }
+  50%     { transform: scale(0.92)  rotate(-3deg); }
+  75%     { transform: scale(1.08)  rotate(3deg); }
+}
+
+/* --- Fortschrittsbalken (leichtes Glanz-Sweep) --- */
+@keyframes progressShine {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* --- Feedback-Leiste (Slide-Up bei Erscheinen) --- */
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* --- Modal (Pop-in mit Overshoot) --- */
+@keyframes modalPop {
+  0%   { transform: scale(0.35); opacity: 0; }
+  60%  { transform: scale(1.06); opacity: 1; }
+  80%  { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+@keyframes emojiBounce {
+  0%   { transform: translateY(0)    scale(0.6); opacity: 0; }
+  40%  { transform: translateY(-14px) scale(1.15); opacity: 1; }
+  70%  { transform: translateY(0)    scale(0.95); }
+  100% { transform: translateY(0)    scale(1); }
+}
+
+/* --- Node auf Home-Bildschirm (leichter Aufmerksamkeits-Puls) --- */
+@keyframes nodePulse {
+  0%,100% { transform: translateY(0)   scale(1); }
+  50%     { transform: translateY(-4px) scale(1.04); }
+}
+
+/* --- Karteikarten-Flip (smoother mit Bezier) --- */
+.flashcard-inner { transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* --- Konfetti --- */
+.confetti-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1000;
+}
+.confetti-piece {
+  position: absolute;
+  top: -20px;
+  width: 10px;
+  height: 16px;
+  will-change: transform, opacity;
+  animation: confettiFall linear forwards;
+  border-radius: 2px;
+}
+.confetti-piece.round { border-radius: 50%; width: 12px; height: 12px; }
+.confetti-piece.strip { width: 6px; height: 20px; }
+
+@keyframes confettiFall {
+  0%   { transform: translate3d(0, -20px, 0) rotate(0deg); opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translate3d(var(--dx, 0), 105vh, 0) rotate(var(--rot, 720deg)); opacity: 0; }
+}
+
+/* --- Check-Burst (kleines ✓ das aus einer richtigen Option herausploppt) --- */
+.check-burst {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%) scale(0);
+  width: 28px; height: 28px;
+  background: var(--green);
+  color: #fff;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800;
+  animation: checkBurst 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.option { position: relative; }
+@keyframes checkBurst {
+  0%   { transform: translateY(-50%) scale(0)   rotate(-90deg); }
+  60%  { transform: translateY(-50%) scale(1.25) rotate(10deg); }
+  100% { transform: translateY(-50%) scale(1)    rotate(0deg); }
+}
+
+/* --- Prefers-reduced-motion respektieren --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Fallback-Font, da Google Fonts im Artifact-Kontext blockiert ist */
+:root { --font: "Nunito", "Baloo 2", "Trebuchet MS", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+</style>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-bolt">⚡</span><span>ElectroLingo</span></div>
+    <div class="stats" id="topbar-stats"></div>
+  </div>
+</header>
+<main id="app"></main>
+<div class="modal-backdrop" id="modal"></div>
+
+<script>
+// ==================================================================
+// Lerninhalte: Englisches Elektro-Vokabular
+// Du siehst deutsche Begriffe/Sätze und lernst die englischen Fachwörter.
+// ==================================================================
+
+(function() {
+
+const LEVELS = {
+  beginner:     { name: "Beginner (A1–A2)",       color: "#58cc02" },
+  intermediate: { name: "Intermediate (B1)",       color: "#1cb0f6" },
+  advanced:     { name: "Advanced (B2)",           color: "#ce82ff" },
+  expert:       { name: "Expert / Technical (C1)", color: "#ff9600" },
+};
+
+// Schaltzeichen als Inline-SVG (immer scharf, kein externes Asset)
+const SYMBOLS = {
+  resistor:      `<svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="20" y2="20" stroke="currentColor" stroke-width="2"/><rect x="20" y="10" width="60" height="20" fill="none" stroke="currentColor" stroke-width="2"/><line x1="80" y1="20" x2="100" y2="20" stroke="currentColor" stroke-width="2"/></svg>`,
+  capacitor:     `<svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="45" y2="20" stroke="currentColor" stroke-width="2"/><line x1="45" y1="5" x2="45" y2="35" stroke="currentColor" stroke-width="2"/><line x1="55" y1="5" x2="55" y2="35" stroke="currentColor" stroke-width="2"/><line x1="55" y1="20" x2="100" y2="20" stroke="currentColor" stroke-width="2"/></svg>`,
+  inductor:      `<svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="15" y2="20" stroke="currentColor" stroke-width="2"/><path d="M 15 20 Q 25 5 35 20 Q 45 5 55 20 Q 65 5 75 20 Q 85 5 85 20" fill="none" stroke="currentColor" stroke-width="2"/><line x1="85" y1="20" x2="100" y2="20" stroke="currentColor" stroke-width="2"/></svg>`,
+  diode:         `<svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="40" y2="20" stroke="currentColor" stroke-width="2"/><polygon points="40,8 40,32 60,20" fill="currentColor"/><line x1="60" y1="8" x2="60" y2="32" stroke="currentColor" stroke-width="2"/><line x1="60" y1="20" x2="100" y2="20" stroke="currentColor" stroke-width="2"/></svg>`,
+  led:           `<svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="40" y2="20" stroke="currentColor" stroke-width="2"/><polygon points="40,8 40,32 60,20" fill="currentColor"/><line x1="60" y1="8" x2="60" y2="32" stroke="currentColor" stroke-width="2"/><line x1="60" y1="20" x2="100" y2="20" stroke="currentColor" stroke-width="2"/><line x1="65" y1="5" x2="78" y2="0" stroke="currentColor" stroke-width="1.5"/><polygon points="74,-1 80,-1 77,4" fill="currentColor"/><line x1="72" y1="10" x2="85" y2="5" stroke="currentColor" stroke-width="1.5"/><polygon points="81,4 87,4 84,9" fill="currentColor"/></svg>`,
+  transistor:    `<svg viewBox="0 0 100 60"><circle cx="50" cy="30" r="22" fill="none" stroke="currentColor" stroke-width="2"/><line x1="40" y1="15" x2="40" y2="45" stroke="currentColor" stroke-width="3"/><line x1="20" y1="30" x2="40" y2="30" stroke="currentColor" stroke-width="2"/><line x1="40" y1="20" x2="60" y2="10" stroke="currentColor" stroke-width="2"/><line x1="60" y1="10" x2="60" y2="0" stroke="currentColor" stroke-width="2"/><line x1="40" y1="40" x2="60" y2="50" stroke="currentColor" stroke-width="2"/><line x1="60" y1="50" x2="60" y2="60" stroke="currentColor" stroke-width="2"/><polygon points="55,42 60,50 50,48" fill="currentColor"/></svg>`,
+  switch:        `<svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="30" y2="20" stroke="currentColor" stroke-width="2"/><circle cx="32" cy="20" r="2" fill="currentColor"/><line x1="32" y1="20" x2="65" y2="8" stroke="currentColor" stroke-width="2"/><circle cx="68" cy="20" r="2" fill="currentColor"/><line x1="68" y1="20" x2="100" y2="20" stroke="currentColor" stroke-width="2"/></svg>`,
+  ground:        `<svg viewBox="0 0 60 60"><line x1="30" y1="0" x2="30" y2="25" stroke="currentColor" stroke-width="2"/><line x1="10" y1="25" x2="50" y2="25" stroke="currentColor" stroke-width="3"/><line x1="18" y1="35" x2="42" y2="35" stroke="currentColor" stroke-width="2"/><line x1="24" y1="45" x2="36" y2="45" stroke="currentColor" stroke-width="2"/></svg>`,
+  battery:       `<svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="40" y2="20" stroke="currentColor" stroke-width="2"/><line x1="40" y1="5" x2="40" y2="35" stroke="currentColor" stroke-width="3"/><line x1="50" y1="12" x2="50" y2="28" stroke="currentColor" stroke-width="2"/><line x1="55" y1="5" x2="55" y2="35" stroke="currentColor" stroke-width="3"/><line x1="65" y1="12" x2="65" y2="28" stroke="currentColor" stroke-width="2"/><line x1="65" y1="20" x2="100" y2="20" stroke="currentColor" stroke-width="2"/></svg>`,
+  fuse:          `<svg viewBox="0 0 100 40"><line x1="0" y1="20" x2="20" y2="20" stroke="currentColor" stroke-width="2"/><rect x="20" y="12" width="60" height="16" fill="none" stroke="currentColor" stroke-width="2"/><line x1="20" y1="20" x2="80" y2="20" stroke="currentColor" stroke-width="2"/><line x1="80" y1="20" x2="100" y2="20" stroke="currentColor" stroke-width="2"/></svg>`,
+  bulb:          `<svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="18" fill="none" stroke="currentColor" stroke-width="2"/><line x1="17" y1="17" x2="43" y2="43" stroke="currentColor" stroke-width="2"/><line x1="43" y1="17" x2="17" y2="43" stroke="currentColor" stroke-width="2"/></svg>`,
+  motor:         `<svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="20" fill="none" stroke="currentColor" stroke-width="2"/><text x="30" y="37" font-size="20" font-weight="bold" text-anchor="middle" fill="currentColor">M</text></svg>`,
+  transformer:   `<svg viewBox="0 0 120 60"><line x1="0" y1="30" x2="30" y2="30" stroke="currentColor" stroke-width="2"/><path d="M 30 30 Q 35 20 40 30 Q 45 20 50 30 Q 55 20 55 30" fill="none" stroke="currentColor" stroke-width="2"/><line x1="60" y1="10" x2="60" y2="50" stroke="currentColor" stroke-width="2"/><line x1="64" y1="10" x2="64" y2="50" stroke="currentColor" stroke-width="2"/><path d="M 69 30 Q 74 20 79 30 Q 84 20 89 30 Q 94 20 94 30" fill="none" stroke="currentColor" stroke-width="2"/><line x1="94" y1="30" x2="120" y2="30" stroke="currentColor" stroke-width="2"/></svg>`,
+};
+
+// ==================================================================
+// LEKTIONEN – Englisches Vokabular in Themenblöcken
+// ==================================================================
+const LESSONS = [
+
+  // ============ BASICS (Grundlagen) ============
+  {
+    id: "basics_1",
+    thema: "Basics",
+    titel: "Basic Quantities",
+    icon: "⚡",
+    levels: ["beginner", "intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Spannung", back: "voltage  🔊  /ˈvəʊl.tɪdʒ/\nBeispiel: 'The voltage is 230 volts.'" },
+      { type: "flashcard", front: "Strom / Stromstärke", back: "current  🔊  /ˈkʌr.ənt/\nBeispiel: 'A current of 2 amperes flows through the wire.'" },
+      { type: "flashcard", front: "Widerstand", back: "resistance  🔊  /rɪˈzɪs.təns/\nBeispiel: 'The resistance is measured in ohms.'" },
+      { type: "flashcard", front: "Leistung", back: "power  🔊  /ˈpaʊ.ər/\nBeispiel: 'The power consumption is 60 watts.'" },
+      { type: "mc", question: "Wie heißt „Spannung“ auf Englisch?", options: ["current", "voltage", "power", "resistance"], correct: 1 },
+      { type: "mc", question: "Wie heißt „Strom“ auf Englisch?", options: ["power", "voltage", "current", "load"], correct: 2 },
+      { type: "mc", question: "„Resistance“ bedeutet …", options: ["Leistung", "Widerstand", "Spannung", "Ladung"], correct: 1 },
+      { type: "mc", question: "„Power“ bedeutet …", options: ["Strom", "Spannung", "Widerstand", "Leistung"], correct: 3 },
+      { type: "cloze", text: "Voltage is measured in ___.", answer: "volts" },
+      { type: "cloze", text: "Current is measured in ___.", answer: "amperes", altAnswers: ["amps", "ampere"] },
+    ],
+  },
+  {
+    id: "basics_2",
+    thema: "Basics",
+    titel: "Units & Symbols",
+    icon: "📐",
+    levels: ["beginner", "intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Volt (V)", back: "volt – die Einheit der Spannung (voltage).\nExample: 'a nine-volt battery'" },
+      { type: "flashcard", front: "Ampere (A)", back: "ampere / amp – die Einheit des Stroms (current)." },
+      { type: "flashcard", front: "Ohm (Ω)", back: "ohm – die Einheit des Widerstands (resistance)." },
+      { type: "flashcard", front: "Watt (W)", back: "watt – die Einheit der Leistung (power)." },
+      { type: "flashcard", front: "Farad (F)", back: "farad – die Einheit der Kapazität (capacitance)." },
+      { type: "mc", question: "Which unit measures voltage?", options: ["ampere", "ohm", "volt", "watt"], correct: 2 },
+      { type: "mc", question: "Which unit measures power?", options: ["volt", "watt", "farad", "henry"], correct: 1 },
+      { type: "mc", question: "The unit of capacitance is the …", options: ["henry", "ohm", "farad", "coulomb"], correct: 2 },
+      { type: "cloze", text: "One kilowatt equals 1000 ___.", answer: "watts", altAnswers: ["watt"] },
+      { type: "cloze", text: "Resistance is measured in ___.", answer: "ohms", altAnswers: ["ohm"] },
+    ],
+  },
+  {
+    id: "basics_3",
+    thema: "Basics",
+    titel: "Ohm's Law & Sentences",
+    icon: "🧮",
+    levels: ["intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Ohmsches Gesetz", back: "Ohm's Law:  V = I · R\n(Voltage = Current × Resistance)" },
+      { type: "flashcard", front: "Ladung", back: "charge  🔊  /tʃɑːdʒ/  – Einheit: coulomb (C)" },
+      { type: "flashcard", front: "Energie / Arbeit", back: "energy / work  – Einheit: joule (J) oder kilowatt-hour (kWh)" },
+      { type: "mc", question: "„Voltage equals current times resistance“ ist die Formel für …", options: ["Kirchhoff's Law", "Faraday's Law", "Ohm's Law", "Newton's Law"], correct: 2 },
+      { type: "cloze", text: "According to Ohm's Law: V = I × ___.", answer: "R" },
+      { type: "cloze", text: "Electrical ___ is measured in watts.", answer: "power" },
+      { type: "cloze", text: "The battery has a ___ of 12 volts.", answer: "voltage" },
+      { type: "calc", question: "V = 12 V, R = 4 Ω. Calculate the current I in amperes.", answer: 3, unit: "A", hint: "I = V / R" },
+      { type: "calc", question: "I = 2 A, R = 5 Ω. Calculate the voltage V in volts.", answer: 10, unit: "V", hint: "V = I · R" },
+      { type: "calc", question: "V = 230 V, I = 10 A. Calculate the power P in watts.", answer: 2300, unit: "W", hint: "P = V · I" },
+    ],
+  },
+
+  // ============ COMPONENTS (Bauteile) ============
+  {
+    id: "comp_1",
+    thema: "Components",
+    titel: "Passive Components",
+    icon: "🔩",
+    levels: ["beginner", "intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Widerstand (Bauteil)", back: "resistor  🔊  /rɪˈzɪs.tər/" },
+      { type: "flashcard", front: "Kondensator", back: "capacitor  🔊  /kəˈpæs.ɪ.tər/" },
+      { type: "flashcard", front: "Spule / Induktivität", back: "inductor  🔊  /ɪnˈdʌk.tər/  (auch: coil)" },
+      { type: "flashcard", front: "Transformator", back: "transformer  🔊  /trænsˈfɔː.mər/" },
+      { type: "mc", question: "Wie heißt „Kondensator“ auf Englisch?", options: ["conductor", "capacitor", "resistor", "connector"], correct: 1 },
+      { type: "mc", question: "„Inductor“ bedeutet …", options: ["Widerstand", "Kondensator", "Spule", "Transformator"], correct: 2 },
+      { type: "match", instruction: "Which component is shown? (English name)", symbol: SYMBOLS.resistor, options: ["capacitor", "resistor", "inductor", "diode"], correct: 1 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.capacitor, options: ["resistor", "battery", "capacitor", "inductor"], correct: 2 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.inductor, options: ["resistor", "capacitor", "inductor", "fuse"], correct: 2 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.transformer, options: ["motor", "generator", "transformer", "inductor"], correct: 2 },
+      { type: "cloze", text: "A ___ stores electrical charge.", answer: "capacitor" },
+      { type: "cloze", text: "A ___ limits the flow of current.", answer: "resistor" },
+    ],
+  },
+  {
+    id: "comp_2",
+    thema: "Components",
+    titel: "Semiconductors",
+    icon: "💡",
+    levels: ["intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Diode", back: "diode  🔊  /ˈdaɪ.əʊd/\nlässt Strom nur in einer Richtung durch." },
+      { type: "flashcard", front: "Leuchtdiode", back: "LED (light-emitting diode)  🔊  /ˌel.iːˈdiː/" },
+      { type: "flashcard", front: "Transistor", back: "transistor  🔊  /trænˈzɪs.tər/\nAnschlüsse: base, collector, emitter (BJT) oder gate, drain, source (FET)" },
+      { type: "flashcard", front: "Integrierter Schaltkreis (IC)", back: "integrated circuit (IC)" },
+      { type: "mc", question: "„LED“ steht für …", options: ["light-electric device", "low-energy diode", "light-emitting diode", "low-emission device"], correct: 2 },
+      { type: "mc", question: "Which term means „Halbleiter“?", options: ["conductor", "semiconductor", "insulator", "receptor"], correct: 1 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.diode, options: ["capacitor", "diode", "resistor", "switch"], correct: 1 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.led, options: ["diode", "photocell", "LED", "bulb"], correct: 2 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.transistor, options: ["diode", "IC", "transistor", "relay"], correct: 2 },
+      { type: "cloze", text: "A diode allows current to flow in only one ___.", answer: "direction" },
+      { type: "cloze", text: "The three terminals of a bipolar transistor are base, ___ and emitter.", answer: "collector" },
+    ],
+  },
+  {
+    id: "comp_3",
+    thema: "Components",
+    titel: "Electromechanical Parts",
+    icon: "⚙️",
+    levels: ["intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Schalter", back: "switch  🔊  /swɪtʃ/" },
+      { type: "flashcard", front: "Relais", back: "relay  🔊  /ˈriː.leɪ/" },
+      { type: "flashcard", front: "Motor", back: "motor  🔊  /ˈməʊ.tər/  (auch: electric motor)" },
+      { type: "flashcard", front: "Generator", back: "generator  🔊  /ˈdʒen.ə.reɪ.tər/" },
+      { type: "flashcard", front: "Sicherung", back: "fuse  🔊  /fjuːz/" },
+      { type: "flashcard", front: "Glühbirne / Lampe", back: "light bulb / lamp" },
+      { type: "mc", question: "„Fuse“ bedeutet …", options: ["Stecker", "Schalter", "Sicherung", "Buchse"], correct: 2 },
+      { type: "mc", question: "„Relay“ bedeutet …", options: ["Motor", "Relais", "Schalter", "Zähler"], correct: 1 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.switch, options: ["switch", "fuse", "relay", "diode"], correct: 0 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.fuse, options: ["resistor", "fuse", "capacitor", "wire"], correct: 1 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.bulb, options: ["motor", "light bulb", "LED", "buzzer"], correct: 1 },
+      { type: "match", instruction: "Which component is shown?", symbol: SYMBOLS.motor, options: ["meter", "motor", "generator", "battery"], correct: 1 },
+      { type: "cloze", text: "When the current is too high, the ___ blows and breaks the circuit.", answer: "fuse" },
+    ],
+  },
+
+  // ============ CIRCUITS (Schaltungen) ============
+  {
+    id: "circ_1",
+    thema: "Circuits",
+    titel: "Circuit Basics",
+    icon: "🔗",
+    levels: ["beginner", "intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Stromkreis", back: "circuit  🔊  /ˈsɜː.kɪt/" },
+      { type: "flashcard", front: "Schaltplan", back: "circuit diagram / schematic  🔊  /skɪˈmæt.ɪk/" },
+      { type: "flashcard", front: "Leitung / Kabel", back: "wire (dünn) / cable (mehrere Adern)" },
+      { type: "flashcard", front: "Reihenschaltung", back: "series circuit  🔊  /ˈsɪə.riːz/" },
+      { type: "flashcard", front: "Parallelschaltung", back: "parallel circuit  🔊  /ˈpær.ə.lel/" },
+      { type: "flashcard", front: "Knoten", back: "node  🔊  /nəʊd/" },
+      { type: "flashcard", front: "Masche", back: "loop  🔊  /luːp/" },
+      { type: "mc", question: "„Circuit diagram“ ist deutsch …", options: ["Verkabelung", "Stromkreis", "Schaltplan", "Aufbau"], correct: 2 },
+      { type: "mc", question: "In a ___ circuit, the current is the same through every component.", options: ["parallel", "series", "short", "open"], correct: 1 },
+      { type: "cloze", text: "When you press the switch, the ___ is closed and current flows.", answer: "circuit" },
+      { type: "cloze", text: "In a parallel circuit, the voltage is the same across each ___.", answer: "component", altAnswers: ["branch", "element"] },
+    ],
+  },
+  {
+    id: "circ_2",
+    thema: "Circuits",
+    titel: "Circuit States",
+    icon: "🔀",
+    levels: ["intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "geschlossener Stromkreis", back: "closed circuit – current can flow" },
+      { type: "flashcard", front: "offener Stromkreis", back: "open circuit – current cannot flow" },
+      { type: "flashcard", front: "Kurzschluss", back: "short circuit  🔊  /ˈʃɔːt ˌsɜː.kɪt/" },
+      { type: "flashcard", front: "Erdschluss / Fehlerstrom", back: "ground fault / earth fault" },
+      { type: "flashcard", front: "Überlast", back: "overload  🔊  /ˌəʊ.vərˈləʊd/" },
+      { type: "mc", question: "„Short circuit“ heißt auf Deutsch …", options: ["Kurzschluss", "Kurzleitung", "Trennstelle", "Reihenschluss"], correct: 0 },
+      { type: "mc", question: "Wenn kein Strom fließt, ist der Stromkreis …", options: ["closed", "open", "loaded", "shorted"], correct: 1 },
+      { type: "cloze", text: "When two wires touch and cause a very high current, that is a ___ circuit.", answer: "short" },
+      { type: "cloze", text: "Turning the switch on ___ the circuit.", answer: "closes", altAnswers: ["close"] },
+    ],
+  },
+  {
+    id: "circ_3",
+    thema: "Circuits",
+    titel: "AC / DC & Signals",
+    icon: "〰️",
+    levels: ["advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Wechselspannung / -strom", back: "alternating current (AC)  🔊  /ˈɔːl.tə.neɪ.tɪŋ/" },
+      { type: "flashcard", front: "Gleichspannung / -strom", back: "direct current (DC)  🔊  /dɪˈrekt/" },
+      { type: "flashcard", front: "Frequenz", back: "frequency  🔊  /ˈfriː.kwən.si/ – Einheit: hertz (Hz)" },
+      { type: "flashcard", front: "Wellenform", back: "waveform  🔊  /ˈweɪv.fɔːm/" },
+      { type: "flashcard", front: "Phase", back: "phase  🔊  /feɪz/" },
+      { type: "mc", question: "„AC“ steht für …", options: ["Active Current", "Alternating Current", "Applied Current", "Automatic Circuit"], correct: 1 },
+      { type: "mc", question: "„DC“ steht für …", options: ["Dynamic Current", "Direct Current", "Double Circuit", "Digital Charge"], correct: 1 },
+      { type: "cloze", text: "Batteries produce ___ current, but wall outlets deliver AC.", answer: "direct" },
+      { type: "cloze", text: "The mains ___ in Europe is 50 hertz.", answer: "frequency" },
+    ],
+  },
+
+  // ============ INSTALLATION ============
+  {
+    id: "inst_1",
+    thema: "Installation",
+    titel: "Wires & Cables",
+    icon: "🔌",
+    levels: ["beginner", "intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Leiter (Ader)", back: "wire / conductor  🔊  /kənˈdʌk.tər/" },
+      { type: "flashcard", front: "Kabel (mehradrig)", back: "cable  🔊  /ˈkeɪ.bəl/" },
+      { type: "flashcard", front: "Isolation / Isolierung", back: "insulation  🔊  /ˌɪn.sjʊˈleɪ.ʃən/" },
+      { type: "flashcard", front: "Isolator (Bauteil)", back: "insulator  🔊  /ˈɪn.sjʊ.leɪ.tər/" },
+      { type: "flashcard", front: "Stecker", back: "plug  🔊  /plʌɡ/" },
+      { type: "flashcard", front: "Steckdose", back: "socket / outlet  🔊  /ˈaʊt.let/ (US)" },
+      { type: "flashcard", front: "Kabelkanal / Rohr", back: "conduit  🔊  /ˈkɒn.dʒu.ɪt/" },
+      { type: "mc", question: "„Insulation“ bedeutet …", options: ["Leitung", "Isolierung", "Erdung", "Verbindung"], correct: 1 },
+      { type: "mc", question: "„Outlet“ ist die amerikanische Bezeichnung für …", options: ["Stecker", "Kabel", "Steckdose", "Sicherung"], correct: 2 },
+      { type: "cloze", text: "Insert the ___ into the socket.", answer: "plug" },
+      { type: "cloze", text: "Copper is a very good ___ of electricity.", answer: "conductor" },
+    ],
+  },
+  {
+    id: "inst_2",
+    thema: "Installation",
+    titel: "Phase, Neutral & Ground",
+    icon: "🏠",
+    levels: ["intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Außenleiter / Phase (L)", back: "line (L) / phase / hot wire (US, umgangssprachlich)" },
+      { type: "flashcard", front: "Neutralleiter (N)", back: "neutral  🔊  /ˈnjuː.trəl/  (Farbe: blau)" },
+      { type: "flashcard", front: "Schutzleiter (PE)", back: "protective earth (PE) / ground (US)  – Farbe: grün-gelb" },
+      { type: "flashcard", front: "Erde / Erdung", back: "earth (UK) / ground (US)" },
+      { type: "flashcard", front: "Drehstrom", back: "three-phase power / three-phase current" },
+      { type: "mc", question: "The color of the protective earth wire is …", options: ["blue", "brown", "green-yellow", "black"], correct: 2 },
+      { type: "mc", question: "„Neutral“ auf Deutsch …", options: ["Außenleiter", "Neutralleiter", "Schutzleiter", "Erde"], correct: 1 },
+      { type: "match", instruction: "Which symbol is this?", symbol: SYMBOLS.ground, options: ["neutral", "phase", "ground / earth", "antenna"], correct: 2 },
+      { type: "cloze", text: "In an emergency, current flows through the ___ wire to protect people.", answer: "ground", altAnswers: ["earth"] },
+      { type: "cloze", text: "Three-phase power uses three ___ conductors plus a neutral.", answer: "line", altAnswers: ["phase"] },
+    ],
+  },
+  {
+    id: "inst_3",
+    thema: "Installation",
+    titel: "Protection Devices",
+    icon: "🛡️",
+    levels: ["intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Leitungsschutzschalter (LS)", back: "circuit breaker  🔊  /ˈsɜː.kɪt ˌbreɪ.kər/" },
+      { type: "flashcard", front: "FI-Schutzschalter", back: "RCD (residual-current device) / GFCI (US, ground-fault circuit interrupter)" },
+      { type: "flashcard", front: "Sicherungskasten", back: "fuse box / distribution board / consumer unit (UK)" },
+      { type: "flashcard", front: "Überspannungsschutz", back: "surge protector  🔊  /sɜːdʒ prəˈtek.tər/" },
+      { type: "flashcard", front: "auslösen (Sicherung)", back: "to trip  🔊  /trɪp/\nExample: 'The breaker tripped when I turned on the heater.'" },
+      { type: "mc", question: "„Circuit breaker“ auf Deutsch …", options: ["FI-Schalter", "Leitungsschutzschalter", "Trennschalter", "Hauptschalter"], correct: 1 },
+      { type: "mc", question: "„RCD“ / „GFCI“ schützt vor …", options: ["over-voltage", "residual (leakage) currents", "over-load", "short circuits only"], correct: 1 },
+      { type: "cloze", text: "If there is a fault, the circuit breaker will ___.", answer: "trip" },
+      { type: "cloze", text: "Never work on live circuits without switching off the ___.", answer: "power", altAnswers: ["breaker", "circuit"] },
+    ],
+  },
+
+  // ============ MEASUREMENT & TOOLS ============
+  {
+    id: "meas_1",
+    thema: "Measurement",
+    titel: "Meters & Measurements",
+    icon: "📊",
+    levels: ["beginner", "intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Multimeter", back: "multimeter  🔊  /ˈmʌl.tiˌmiː.tər/" },
+      { type: "flashcard", front: "Oszilloskop", back: "oscilloscope  🔊  /əˈsɪl.ə.skəʊp/" },
+      { type: "flashcard", front: "Voltmeter", back: "voltmeter" },
+      { type: "flashcard", front: "Amperemeter", back: "ammeter  🔊  /ˈæm.iː.tər/" },
+      { type: "flashcard", front: "Messung / Messwert", back: "measurement / reading" },
+      { type: "flashcard", front: "Messfühler / Prüfspitze", back: "probe  🔊  /prəʊb/" },
+      { type: "mc", question: "Wie heißt „Oszilloskop“ auf Englisch?", options: ["oscilloscope", "voltmeter", "oscillator", "spectrometer"], correct: 0 },
+      { type: "mc", question: "„Reading“ (im Messkontext) heißt …", options: ["Ablesung / Messwert", "Bedienung", "Anzeige-Skala", "Kalibrierung"], correct: 0 },
+      { type: "cloze", text: "Use a multimeter to ___ the voltage.", answer: "measure" },
+      { type: "cloze", text: "Connect the ___ to the two points you want to measure.", answer: "probes", altAnswers: ["probe"] },
+    ],
+  },
+  {
+    id: "meas_2",
+    thema: "Measurement",
+    titel: "Tools & Workshop",
+    icon: "🧰",
+    levels: ["beginner", "intermediate", "advanced", "expert"],
+    exercises: [
+      { type: "flashcard", front: "Schraubendreher", back: "screwdriver  🔊  /ˈskruːˌdraɪ.vər/" },
+      { type: "flashcard", front: "Zange", back: "pliers  🔊  /ˈplaɪ.əz/  (immer im Plural)" },
+      { type: "flashcard", front: "Abisolierzange", back: "wire stripper  🔊  /ˈwaɪə ˌstrɪp.ər/" },
+      { type: "flashcard", front: "Seitenschneider", back: "side cutter / diagonal pliers" },
+      { type: "flashcard", front: "Lötkolben", back: "soldering iron  🔊  /ˈsɒl.dər.ɪŋ ˌaɪən/" },
+      { type: "flashcard", front: "Klebeband / Isolierband", back: "electrical tape / insulating tape" },
+      { type: "mc", question: "„Pliers“ bedeutet …", options: ["Zange", "Meißel", "Feile", "Schraubenschlüssel"], correct: 0 },
+      { type: "mc", question: "„Soldering iron“ bedeutet …", options: ["Bügeleisen", "Schweißgerät", "Lötkolben", "Heißluftpistole"], correct: 2 },
+      { type: "cloze", text: "Use a wire ___ to remove insulation from the end of the wire.", answer: "stripper" },
+      { type: "cloze", text: "You need a ___ to tighten the screws.", answer: "screwdriver" },
+    ],
+  },
+
+];
+
+// Für globalen Zugriff im Browser
+window.APP_DATA = { LEVELS, LESSONS, SYMBOLS };
+
+})();
+</script>
+<script>
+// ==============================================================
+// Elektro-Lern-App – Hauptlogik
+// ==============================================================
+
+const { LEVELS, LESSONS } = window.APP_DATA;
+
+// -------- State --------
+const STORAGE_KEY = "elektro_learn_state_v1";
+
+const defaultState = {
+  level: null,             // gewählte Schwierigkeitsstufe (Key aus LEVELS)
+  xp: 0,
+  hearts: 5,
+  maxHearts: 5,
+  streak: 0,
+  lastActive: null,        // ISO-Datum
+  completedLessons: {},    // { lessonId: true }
+  currentLesson: null,     // id
+  currentIndex: 0,
+  lessonCorrect: 0,
+  lessonTotal: 0,
+};
+
+let state = loadState();
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return { ...defaultState, ...JSON.parse(raw) };
+  } catch (e) { /* leer */ }
+  return { ...defaultState };
+}
+
+function saveState() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+function resetState() {
+  state = { ...defaultState };
+  saveState();
+}
+
+// -------- Streak / Herzen-Regeneration --------
+function updateStreakAndHearts() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (state.lastActive !== today) {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    if (state.lastActive === yesterday) {
+      // Streak fortgesetzt – wird beim ersten korrekten Antwort erhöht
+    } else if (state.lastActive) {
+      state.streak = 0; // Streak verloren
+    }
+    // Herzen regenerieren sich täglich auf max
+    state.hearts = state.maxHearts;
+    saveState();
+  }
+}
+
+function markActiveToday() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (state.lastActive !== today) {
+    state.streak += 1;
+    state.lastActive = today;
+  }
+  saveState();
+}
+
+// -------- Rendering-Helfer --------
+const app = document.getElementById("app");
+const topbar = document.getElementById("topbar-stats");
+
+function level() { return Math.floor(state.xp / 100) + 1; }
+function xpInLevel() { return state.xp % 100; }
+
+function renderTopbar() {
+  if (!state.level) {
+    topbar.innerHTML = "";
+    return;
+  }
+  // Erstelle nur einmal – danach nur Werte updaten, damit Animationen greifen können.
+  if (!document.getElementById("stat-xp")) {
+    topbar.innerHTML = `
+      <span class="stat level" id="stat-level" title="Level"><span class="stat-icon">🎓</span>Lvl <span class="stat-val">${level()}</span></span>
+      <span class="stat streak" id="stat-streak" title="Streak in Tagen"><span class="stat-icon flame">🔥</span><span class="stat-val">${state.streak}</span></span>
+      <span class="stat xp" id="stat-xp" title="Erfahrungspunkte"><span class="stat-icon">⭐</span><span class="stat-val">${state.xp}</span> XP</span>
+      <span class="stat hearts" id="stat-hearts" title="Verbleibende Herzen"><span class="stat-icon">❤</span><span class="stat-val">${state.hearts}</span>/${state.maxHearts}</span>
+      <button class="btn btn-ghost btn-small" onclick="goHome()">Menü</button>
+    `;
+  } else {
+    setStatValue("stat-level", level());
+    setStatValue("stat-streak", state.streak);
+    setStatValue("stat-xp", state.xp);
+    setStatValue("stat-hearts", state.hearts);
+  }
+}
+
+// Setzt den Zahlenwert einer Topbar-Stat und triggert die Bump-Animation, sobald sich der Wert ändert.
+function setStatValue(id, newVal) {
+  const stat = document.getElementById(id);
+  if (!stat) return;
+  const valEl = stat.querySelector(".stat-val");
+  if (!valEl) return;
+  const old = parseInt(valEl.textContent, 10);
+  if (old === newVal) return;
+
+  if (id === "stat-xp" && newVal > old) {
+    // XP-Zähler rollt hoch
+    animateNumber(valEl, old, newVal, 500);
+  } else {
+    valEl.textContent = newVal;
+  }
+
+  stat.classList.remove("bump");
+  void stat.offsetWidth; // reflow, damit Animation erneut startet
+  stat.classList.add("bump");
+}
+
+// Animiert einen Zähler von "from" auf "to" in ms Millisekunden.
+function animateNumber(el, from, to, ms) {
+  const start = performance.now();
+  const diff = to - from;
+  function tick(now) {
+    const t = Math.min(1, (now - start) / ms);
+    const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+    el.textContent = Math.round(from + diff * eased);
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function render(html) {
+  app.innerHTML = html;
+  renderTopbar();
+}
+
+// -------- Animations-Helfer --------
+const CONFETTI_COLORS = ["#58cc02", "#1cb0f6", "#ce82ff", "#ff9600", "#ffc800", "#ff4b4b", "#84e600"];
+
+// Wirft `count` Konfetti-Teile über den Bildschirm.
+// intensity: "small" ~ 20 Teile, "burst" ~ 45, "big" ~ 110
+function launchConfetti(intensity = "burst") {
+  const counts = { small: 20, burst: 50, big: 120 };
+  const count = counts[intensity] ?? 50;
+  const layer = document.createElement("div");
+  layer.className = "confetti-layer";
+  const shapes = ["", "round", "strip"];
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement("div");
+    const shape = shapes[Math.floor(Math.random() * shapes.length)];
+    p.className = "confetti-piece" + (shape ? " " + shape : "");
+    p.style.left = (Math.random() * 100) + "vw";
+    p.style.background = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+    p.style.setProperty("--dx", ((Math.random() - 0.5) * 240) + "px");
+    p.style.setProperty("--rot", ((Math.random() * 4 + 2) * 360 * (Math.random() < 0.5 ? -1 : 1)) + "deg");
+    const dur = 1.6 + Math.random() * 1.8;
+    p.style.animationDuration = dur + "s";
+    p.style.animationDelay = (Math.random() * 0.3) + "s";
+    layer.appendChild(p);
+  }
+  document.body.appendChild(layer);
+  // Cleanup nach längster Animationsdauer
+  setTimeout(() => layer.remove(), 4200);
+}
+
+// Wechselt zu einem neuen Screen mit Slide-Animation.
+// direction: "forward" (neu von rechts) oder "back" (neu von links)
+function transitionRender(fn, direction = "forward") {
+  const existing = document.querySelector("#app .screen");
+  if (!existing) { fn(); return; }
+  const outClass = direction === "forward" ? "slide-out" : "slide-out-back";
+  const inClass  = direction === "forward" ? "slide-in"  : "slide-in-back";
+  existing.classList.add(outClass);
+  setTimeout(() => {
+    fn();
+    const fresh = document.querySelector("#app .screen");
+    if (fresh) fresh.classList.add(inClass);
+  }, 220);
+}
+
+// Kleine Check-Marke, die aus einer richtigen Option herausploppt.
+function spawnCheckBurst(optionEl) {
+  if (!optionEl) return;
+  const burst = document.createElement("span");
+  burst.className = "check-burst";
+  burst.textContent = "✓";
+  optionEl.appendChild(burst);
+  setTimeout(() => burst.remove(), 900);
+}
+
+// ==============================================================
+// SCREEN: Onboarding / Level-Auswahl
+// ==============================================================
+function renderOnboarding() {
+  const cards = Object.entries(LEVELS).map(([key, l]) => `
+    <div class="level-card" onclick="chooseLevel('${key}')">
+      <span class="emoji">${levelEmoji(key)}</span>
+      <div class="name" style="color:${l.color}">${l.name}</div>
+      <div class="desc">${levelDesc(key)}</div>
+    </div>
+  `).join("");
+
+  render(`
+    <div class="screen">
+      <h1>Welcome to ElectroLingo ⚡</h1>
+      <p class="subtitle">Lerne die englischen Fachbegriffe der Elektrotechnik spielerisch. Wähle dein Sprachlevel – du kannst es jederzeit wechseln.</p>
+      <div class="level-grid">${cards}</div>
+    </div>
+  `);
+}
+
+function levelEmoji(key) {
+  return { beginner: "🌱", intermediate: "🔧", advanced: "🛠️", expert: "🏆" }[key] || "⚡";
+}
+function levelDesc(key) {
+  return {
+    beginner:     "Grundwortschatz zum Einstieg",
+    intermediate: "Bauteile & einfache Sätze",
+    advanced:     "Installation, AC/DC & Fehler",
+    expert:       "Prüfungsvokabular & Fachjargon",
+  }[key] || "";
+}
+
+function chooseLevel(key) {
+  state.level = key;
+  saveState();
+  goHome();
+}
+
+// ==============================================================
+// SCREEN: Home / Lernpfad
+// ==============================================================
+function goHome() {
+  updateStreakAndHearts();
+  if (!state.level) { renderOnboarding(); return; }
+  renderHome();
+}
+
+function renderHome() {
+  const availableLessons = LESSONS.filter(l => l.levels.includes(state.level));
+  const themen = ["Basics", "Components", "Circuits", "Installation", "Measurement"];
+
+  const sections = themen.map(thema => {
+    const lessons = availableLessons.filter(l => l.thema === thema);
+    if (lessons.length === 0) return "";
+
+    let previousDone = true;
+    let attnGiven = false;
+    const nodes = lessons.map((lesson, idx) => {
+      const done = !!state.completedLessons[lesson.id];
+      const unlocked = previousDone || done;
+      let cls = done ? "done" : (unlocked ? "" : "locked");
+      // Erste nicht-abgeschlossene, entsperrte Lektion pulsiert.
+      if (!done && unlocked && !attnGiven) {
+        cls += " pulse-attn";
+        attnGiven = true;
+      }
+      const onClick = unlocked ? `startLesson('${lesson.id}')` : "showLockedInfo()";
+      previousDone = done;
+      return `
+        <div class="lesson-node-wrapper">
+          <div class="lesson-node ${cls}" onclick="${onClick}">${lesson.icon}</div>
+          <div class="lesson-title">${lesson.titel}</div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <section class="thema-section" data-thema="${thema}">
+        <div class="thema-header">
+          <span>${themaEmoji(thema)}</span>
+          <span>${thema}</span>
+        </div>
+        <div class="lesson-path">${nodes}</div>
+      </section>
+    `;
+  }).join("");
+
+  const lvlInfo = LEVELS[state.level];
+  render(`
+    <div class="screen">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h1>Dein Lernpfad</h1>
+          <p class="subtitle" style="margin-bottom:0">Aktuelles Level: <strong style="color:${lvlInfo.color}">${lvlInfo.name}</strong></p>
+        </div>
+        <button class="btn btn-ghost btn-small" onclick="changeLevel()">Level ändern</button>
+      </div>
+      <div style="margin: 16px 0 24px;">
+        <div class="progress-bar" title="XP im aktuellen Level"><div class="progress-fill" style="width:${xpInLevel()}%"></div></div>
+        <div style="font-size:13px;color:var(--gray-4);margin-top:6px;">Level ${level()} • ${xpInLevel()}/100 XP bis zum nächsten Level</div>
+      </div>
+      ${sections}
+    </div>
+  `);
+}
+
+function themaEmoji(t) {
+  return { Basics: "⚡", Components: "🔩", Circuits: "📊", Installation: "🏠", Measurement: "📏" }[t] || "📚";
+}
+
+function changeLevel() {
+  if (confirm("Level wechseln? Dein Fortschritt bleibt erhalten.")) {
+    state.level = null;
+    saveState();
+    renderOnboarding();
+  }
+}
+
+function showLockedInfo() {
+  alert("Diese Lektion ist noch gesperrt. Schließe zuerst die vorherige Lektion ab!");
+}
+
+// ==============================================================
+// SCREEN: Lektion
+// ==============================================================
+function startLesson(id) {
+  if (state.hearts <= 0) {
+    showModal("💔", "Keine Herzen mehr!", "Du hast keine Herzen mehr. Komm morgen wieder – deine Herzen füllen sich täglich auf.", "OK", () => hideModal());
+    return;
+  }
+  const lesson = LESSONS.find(l => l.id === id);
+  if (!lesson) return;
+  state.currentLesson = id;
+  state.currentIndex = 0;
+  state.lessonCorrect = 0;
+  state.lessonTotal = lesson.exercises.length;
+  saveState();
+  transitionRender(renderExercise, "forward");
+}
+
+function renderExercise() {
+  const lesson = LESSONS.find(l => l.id === state.currentLesson);
+  if (!lesson) { goHome(); return; }
+  if (state.currentIndex >= lesson.exercises.length) {
+    finishLesson();
+    return;
+  }
+
+  const ex = lesson.exercises[state.currentIndex];
+  const progressPct = ((state.currentIndex) / lesson.exercises.length) * 100;
+
+  let body = "";
+  switch (ex.type) {
+    case "mc":       body = renderMC(ex); break;
+    case "match":    body = renderMatch(ex); break;
+    case "flashcard":body = renderFlashcard(ex); break;
+    case "cloze":    body = renderCloze(ex); break;
+    case "calc":     body = renderCalc(ex); break;
+  }
+
+  render(`
+    <div class="screen">
+      <div class="lesson-header">
+        <button class="close-btn" onclick="quitLesson()" title="Lektion verlassen">✕</button>
+        <div class="progress-bar"><div class="progress-fill" style="width:${progressPct}%"></div></div>
+      </div>
+      ${body}
+      <div class="feedback" id="feedback"></div>
+      <div class="footer-actions">
+        <button class="btn btn-primary" id="checkBtn" onclick="checkAnswer()" disabled>Prüfen</button>
+      </div>
+    </div>
+  `);
+
+  // spezielle Nachaktion für Flashcards (kein Check nötig)
+  if (ex.type === "flashcard") {
+    document.getElementById("checkBtn").disabled = false;
+    document.getElementById("checkBtn").textContent = "Weiter";
+    document.getElementById("checkBtn").onclick = () => nextExercise(true);
+  }
+}
+
+// ---- Renderer für die Übungstypen ----
+let selectedIndex = null;
+let selectedValue = null;
+
+function renderMC(ex) {
+  selectedIndex = null;
+  const opts = ex.options.map((o, i) =>
+    `<button class="option" data-idx="${i}" onclick="selectOption(${i})">${o}</button>`
+  ).join("");
+  return `
+    <div class="exercise-card">
+      <div class="exercise-question">${ex.question}</div>
+      <div class="options-list">${opts}</div>
+    </div>
+  `;
+}
+
+function renderMatch(ex) {
+  selectedIndex = null;
+  const opts = ex.options.map((o, i) =>
+    `<button class="option" data-idx="${i}" onclick="selectOption(${i})">${o}</button>`
+  ).join("");
+  return `
+    <div class="exercise-card">
+      <div class="exercise-question">${ex.instruction}</div>
+      <div class="symbol-box">${ex.symbol}</div>
+      <div class="options-list">${opts}</div>
+    </div>
+  `;
+}
+
+function renderFlashcard(ex) {
+  return `
+    <div class="exercise-card" style="background:transparent;box-shadow:none;padding:0;">
+      <div class="exercise-question" style="text-align:center;">Karteikarte – tippe zum Umdrehen</div>
+      <div class="flashcard" id="fc" onclick="document.getElementById('fc').classList.toggle('flipped')">
+        <div class="flashcard-inner">
+          <div class="flashcard-front">
+            <div class="front-text">${ex.front}</div>
+            <div class="hint">👆 Antippen zum Umdrehen</div>
+          </div>
+          <div class="flashcard-back">
+            <div class="back-text">${ex.back}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCloze(ex) {
+  selectedValue = null;
+  return `
+    <div class="exercise-card">
+      <div class="exercise-question">Fülle die Lücke:</div>
+      <p style="font-size:18px;margin-bottom:20px;line-height:1.5;">${ex.text.replace("___", "<strong style='color:var(--blue)'>___</strong>")}</p>
+      <input class="text-input" type="text" id="clozeInput" placeholder="Antwort" oninput="onTextInput(this)" onkeydown="if(event.key==='Enter')checkAnswer()" autocomplete="off">
+    </div>
+  `;
+}
+
+function renderCalc(ex) {
+  selectedValue = null;
+  return `
+    <div class="exercise-card">
+      <div class="exercise-question">${ex.question}</div>
+      <input class="text-input" type="text" inputmode="decimal" id="calcInput" placeholder="Zahl (z.B. 12 oder 1,5)" oninput="onTextInput(this)" onkeydown="if(event.key==='Enter')checkAnswer()" autocomplete="off">
+      ${ex.hint ? `<p class="hint-text">Tipp: ${ex.hint}${ex.unit ? " (Einheit: " + ex.unit + ")" : ""}</p>` : ""}
+    </div>
+  `;
+}
+
+// ---- Interaktion ----
+function selectOption(i) {
+  selectedIndex = i;
+  document.querySelectorAll(".option").forEach(el => el.classList.remove("selected"));
+  document.querySelector(`.option[data-idx="${i}"]`).classList.add("selected");
+  document.getElementById("checkBtn").disabled = false;
+}
+
+function onTextInput(el) {
+  selectedValue = el.value.trim();
+  document.getElementById("checkBtn").disabled = selectedValue.length === 0;
+}
+
+function checkAnswer() {
+  const lesson = LESSONS.find(l => l.id === state.currentLesson);
+  const ex = lesson.exercises[state.currentIndex];
+  let correct = false;
+  let correctText = "";
+
+  if (ex.type === "mc" || ex.type === "match") {
+    correct = selectedIndex === ex.correct;
+    correctText = ex.options[ex.correct];
+    document.querySelectorAll(".option").forEach((el, i) => {
+      el.classList.remove("selected");
+      if (i === ex.correct) {
+        el.classList.add("correct");
+        spawnCheckBurst(el);
+      } else if (i === selectedIndex && !correct) {
+        el.classList.add("wrong");
+      }
+      el.style.pointerEvents = "none";
+    });
+    // bei falsch: das ganze Übungscard sanft schütteln
+    if (!correct) shakeExerciseCard();
+  } else if (ex.type === "cloze") {
+    const answers = [ex.answer, ...(ex.altAnswers || [])].map(normalize);
+    correct = answers.includes(normalize(selectedValue));
+    correctText = ex.answer;
+    const input = document.getElementById("clozeInput");
+    if (input) input.disabled = true;
+    if (!correct) shakeExerciseCard();
+  } else if (ex.type === "calc") {
+    const num = parseFloat(String(selectedValue).replace(",", "."));
+    const tol = ex.tolerance ?? 0.01;
+    correct = !isNaN(num) && Math.abs(num - ex.answer) <= tol;
+    correctText = `${ex.answer}${ex.unit ? " " + ex.unit : ""}`;
+    const input = document.getElementById("calcInput");
+    if (input) input.disabled = true;
+    if (!correct) shakeExerciseCard();
+  }
+
+  showFeedback(correct, correctText);
+  updateAfterAnswer(correct);
+
+  if (correct) {
+    launchConfetti("small");
+  }
+}
+
+function shakeExerciseCard() {
+  const card = document.querySelector(".exercise-card");
+  if (!card) return;
+  card.style.animation = "none";
+  void card.offsetWidth;
+  card.style.animation = "optionWrong 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97)";
+}
+
+function normalize(s) {
+  return String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function showFeedback(correct, correctText) {
+  const fb = document.getElementById("feedback");
+  fb.className = "feedback show " + (correct ? "correct" : "wrong");
+  fb.innerHTML = correct
+    ? `<div class="feedback-title">✅ Richtig! +10 XP</div><div class="feedback-detail">Weiter so!</div>`
+    : `<div class="feedback-title">❌ Nicht ganz.</div><div class="feedback-detail">Richtige Antwort: <strong>${correctText}</strong></div>`;
+
+  const btn = document.getElementById("checkBtn");
+  btn.textContent = "Weiter";
+  btn.className = "btn " + (correct ? "btn-primary" : "btn-red");
+  btn.disabled = false;
+  btn.onclick = () => nextExercise(correct);
+}
+
+function updateAfterAnswer(correct) {
+  if (correct) {
+    state.xp += 10;
+    state.lessonCorrect += 1;
+    markActiveToday();
+  } else {
+    state.hearts = Math.max(0, state.hearts - 1);
+    // Herz-Verlust-Animation triggern (bevor Wert im DOM aktualisiert wird)
+    const heartsEl = document.getElementById("stat-hearts");
+    if (heartsEl) {
+      heartsEl.classList.remove("lose");
+      void heartsEl.offsetWidth;
+      heartsEl.classList.add("lose");
+    }
+  }
+  saveState();
+  renderTopbar();
+}
+
+function nextExercise(wasCorrect) {
+  if (state.hearts <= 0) {
+    showModal("💔", "Alle Herzen weg!", "Du hast keine Herzen mehr. Versuche es morgen erneut – deine Herzen füllen sich automatisch wieder auf.", "Zurück zum Menü", () => { hideModal(); goHome(); });
+    return;
+  }
+  state.currentIndex += 1;
+  saveState();
+  transitionRender(renderExercise, "forward");
+}
+
+function quitLesson() {
+  if (confirm("Lektion wirklich verlassen? Dein Fortschritt in dieser Lektion geht verloren.")) {
+    state.currentLesson = null;
+    saveState();
+    transitionRender(goHome, "back");
+  }
+}
+
+function finishLesson() {
+  const lesson = LESSONS.find(l => l.id === state.currentLesson);
+  const pct = Math.round((state.lessonCorrect / state.lessonTotal) * 100);
+  const passed = pct >= 60;
+
+  if (passed) {
+    state.completedLessons[lesson.id] = true;
+    // Bonus XP für abgeschlossene Lektion
+    state.xp += 20;
+    saveState();
+    renderTopbar();
+    launchConfetti("big");
+    showModal(
+      "🎉",
+      "Lektion abgeschlossen!",
+      `Du hast <strong>${state.lessonCorrect} von ${state.lessonTotal}</strong> Aufgaben richtig (${pct}%).`,
+      "Weiter",
+      () => { hideModal(); transitionRender(goHome, "back"); },
+      `<div class="modal-stats">+${state.lessonCorrect * 10 + 20} XP • 🔥 Streak: ${state.streak}</div>`
+    );
+  } else {
+    showModal(
+      "😕",
+      "Fast geschafft!",
+      `Du hast nur ${pct}% richtig. Ab 60% ist eine Lektion bestanden – probier es noch einmal.`,
+      "Nochmal versuchen",
+      () => { hideModal(); startLesson(lesson.id); }
+    );
+  }
+}
+
+// ==============================================================
+// Modal
+// ==============================================================
+function showModal(emoji, title, text, btnText, cb, extra = "") {
+  const bd = document.getElementById("modal");
+  bd.innerHTML = `
+    <div class="modal">
+      <div class="modal-emoji">${emoji}</div>
+      <h2>${title}</h2>
+      ${extra}
+      <p>${text}</p>
+      <button class="btn btn-primary" id="modalBtn">${btnText}</button>
+    </div>
+  `;
+  bd.classList.add("show");
+  document.getElementById("modalBtn").onclick = cb;
+}
+function hideModal() { document.getElementById("modal").classList.remove("show"); }
+
+// ==============================================================
+// Export für Inline-onclick-Handler
+// ==============================================================
+window.chooseLevel = chooseLevel;
+window.startLesson = startLesson;
+window.checkAnswer = checkAnswer;
+window.selectOption = selectOption;
+window.onTextInput = onTextInput;
+window.quitLesson = quitLesson;
+window.goHome = goHome;
+window.changeLevel = changeLevel;
+window.showLockedInfo = showLockedInfo;
+
+// ==============================================================
+// Start
+// ==============================================================
+updateStreakAndHearts();
+goHome();
+</script>
