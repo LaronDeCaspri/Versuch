@@ -1539,12 +1539,33 @@ async function fetchTrending() {
     } catch { return []; }
 }
 
-// Frankfurter.app free EUR/USD rate — no key needed
+// EUR/USD rate — chained fallbacks (Frankfurter → exchangerate.host → open.er-api → Binance BTCEUR/USDT)
 async function fetchEurRate() {
+    // Try 1: Frankfurter (ECB rates)
     try {
         const d = await fetch("https://api.frankfurter.app/latest?from=USD&to=EUR").then((r) => r.json());
-        return d?.rates?.EUR ?? null;
-    } catch { return null; }
+        if (d?.rates?.EUR) return d.rates.EUR;
+    } catch {}
+    // Try 2: exchangerate.host
+    try {
+        const d = await fetch("https://api.exchangerate.host/latest?base=USD&symbols=EUR").then((r) => r.json());
+        if (d?.rates?.EUR) return d.rates.EUR;
+    } catch {}
+    // Try 3: open.er-api.com
+    try {
+        const d = await fetch("https://open.er-api.com/v6/latest/USD").then((r) => r.json());
+        if (d?.rates?.EUR) return d.rates.EUR;
+    } catch {}
+    // Try 4: derive from Binance BTC pairs
+    try {
+        const [usdt, eur] = await Promise.all([
+            fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").then((r) => r.json()),
+            fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCEUR").then((r) => r.json()),
+        ]);
+        const pU = parseFloat(usdt?.price), pE = parseFloat(eur?.price);
+        if (pU > 0 && pE > 0) return pE / pU;
+    } catch {}
+    return null;
 }
 
 // On-chain: hashrate + mempool from mempool.space
@@ -1963,48 +1984,42 @@ function computePortfolioVol(positions, prices, candlesBySym, annualise = 365) {
 function crossSymbolConfluence(signalSymbol, side, allCandles, peers = 3) {
     const symbols = Object.keys(allCandles);
     if (symbols.length < 2) return { agrees: 0, opposes: 0, neutral: 0, ok: true };
-    let agrees = 0, opposes = 0, neutral = 0;
+    let agrees = 0, opposes = 0, neutral = 0, valid = 0;
     for (const s of symbols) {
         if (s === signalSymbol) continue;
         const c = allCandles[s];
-        if (!c || c.length < 210) continue;
+        if (!c || c.length < 100) continue;                    // v16: 100 (was 210)
         const closesArr = closes(c);
         const e50 = ema(closesArr, 50);
-        const e200 = ema(closesArr, 200);
         const i = closesArr.length - 1;
-        if (isNaN(e50[i]) || isNaN(e200[i])) continue;
+        if (isNaN(e50[i])) continue;
+        valid++;
         let peerSide;
-        if (closesArr[i] > e50[i] && e50[i] > e200[i]) peerSide = "long";
-        else if (closesArr[i] < e50[i] && e50[i] < e200[i]) peerSide = "short";
+        if (closesArr[i] > e50[i] * 1.005) peerSide = "long";
+        else if (closesArr[i] < e50[i] * 0.995) peerSide = "short";
         else peerSide = "flat";
         if (peerSide === side) agrees++;
         else if (peerSide !== "flat") opposes++;
         else neutral++;
     }
-    // rule: at least 1 agreeing peer, no more than 2 opposing
-    const ok = agrees >= 1 && opposes <= 2;
-    return { agrees, opposes, neutral, ok };
+    // v16 loosened: OK unless clear opposition majority
+    const ok = valid === 0 || opposes <= agrees + neutral;
+    return { agrees, opposes, neutral, valid, ok };
 }
 
-// Session attention: is now a good time to trade?
-// (Time gate + event gate combined)
+// Session attention — crypto trades 24/7, only pause near real events
 function sessionAttention(econEvents = []) {
     const now = new Date();
     const hourUTC = now.getUTCHours();
-    const dow = now.getUTCDay();               // 0 = Sunday
     const reasons = [];
     let sizeMultiplier = 1.0;
-    // 1. Weekend crypto = reduced liquidity — halve size
-    if (dow === 0 || dow === 6) {
-        sizeMultiplier *= 0.5;
-        reasons.push("Wochenende: reduzierte Liquidität, Grösse halbiert");
+    // v16: no weekend penalty (crypto is 24/7)
+    // Very off-hours: 03-05 UTC → only 25% off
+    if (hourUTC >= 3 && hourUTC < 5) {
+        sizeMultiplier *= 0.75;
+        reasons.push("Asien-Übergangszone (03-05 UTC): leicht dünnere Vola");
     }
-    // 2. Off-hours (very early morning UTC or very late) — quarter
-    if (hourUTC >= 3 && hourUTC < 6) {
-        sizeMultiplier *= 0.5;
-        reasons.push("Asien-Übergangszone (03-06 UTC): dünne Volumina");
-    }
-    // 3. FOMC/CPI/NFP imminent — pause new entries
+    // FOMC/CPI/NFP: pause 30min BEFORE, resume at 25% for 30min AFTER
     if (econEvents && econEvents.length) {
         for (const e of econEvents) {
             const diff = e.ts - now.getTime();
@@ -2015,7 +2030,7 @@ function sessionAttention(econEvents = []) {
             }
             if (diff > -30 * 60 * 1000 && diff < 0) {
                 sizeMultiplier = 0.25;
-                reasons.push(`${e.type} vor ${Math.round(-diff / 60000)} min — Vola-Nachwehen, geringe Grösse`);
+                reasons.push(`${e.type} vor ${Math.round(-diff / 60000)} min — Vola-Nachwehen`);
                 break;
             }
         }

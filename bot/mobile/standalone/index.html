@@ -137,6 +137,16 @@
 <!-- =============================================================== -->
 <section class="tab-pane active" data-pane="dashboard">
 
+    <!-- v16: pulsing health banner at top of overview -->
+    <div id="health-pulse" class="health-pulse ok">
+        <div class="pulse-dot"></div>
+        <div class="pulse-content">
+            <div class="pulse-title">Alles läuft</div>
+            <div class="pulse-detail">Bot arbeitet vollautomatisch</div>
+        </div>
+        <button class="pulse-action" style="display:none;">Aktion</button>
+    </div>
+
     <div id="signal-tile" class="signal grey">
         <div class="signal-badge">Handelsentscheidung <span class="info" data-info="signal">ⓘ</span></div>
         <div class="signal-label">HALTEN</div>
