@@ -1,59 +1,365 @@
 /* -----------------------------------------------------------------------
- * Trading Bot — pro dark theme
- * palette: deep navy background, glass cards, precision typography
+ * Trading Bot — v18: minimal professional theme (21st.dev / Linear / shadcn)
+ * palette: near-black background, subtle borders, restrained accent
  * ----------------------------------------------------------------------- */
 :root {
-    --bg-0:      #05070c;                         /* absolute bg */
-    --bg-1:      #0a0e17;                         /* main bg */
-    --bg-2:      #10151f;                         /* elevated bg */
-    --surface:   rgba(24, 30, 42, 0.72);          /* card */
-    --surface-2: rgba(35, 44, 60, 0.85);          /* elevated card */
-    --border:    rgba(140, 160, 200, 0.10);
-    --border-strong: rgba(140, 160, 200, 0.22);
-    --text:      #eef2f7;
-    --text-2:    #a8b4c9;
-    --muted:     #6b7891;
-    --accent:    #4d94ff;
-    --accent-glow: rgba(77, 148, 255, 0.4);
-    --green:     #22c55e;
-    --green-dim: rgba(34, 197, 94, 0.14);
+    --bg-0:      #08090b;                         /* absolute bg (near-black) */
+    --bg-1:      #0a0b0d;                         /* main bg */
+    --bg-2:      #111214;                         /* elevated bg */
+    --surface:   rgba(19, 20, 24, 0.85);          /* card */
+    --surface-2: rgba(28, 30, 36, 0.9);           /* elevated card */
+    --border:    rgba(255, 255, 255, 0.06);       /* very subtle */
+    --border-strong: rgba(255, 255, 255, 0.11);   /* interactive */
+    --text:      #f5f5f7;                         /* Apple-white */
+    --text-2:    #a1a1aa;                         /* Zinc-400 */
+    --muted:     #71717a;                         /* Zinc-500 */
+    --accent:    #8b5cf6;                         /* Violet-500 — restrained, not aggressive */
+    --accent-2:  #a78bfa;                         /* Violet-400 lighter */
+    --accent-glow: rgba(139, 92, 246, 0.28);
+    --green:     #10b981;                         /* Emerald */
+    --green-dim: rgba(16, 185, 129, 0.10);
     --red:       #ef4444;
-    --red-dim:   rgba(239, 68, 68, 0.14);
+    --red-dim:   rgba(239, 68, 68, 0.10);
     --amber:     #f59e0b;
-    --amber-dim: rgba(245, 158, 11, 0.14);
+    --amber-dim: rgba(245, 158, 11, 0.10);
     --purple:    #a855f7;
-    --grey:      #52607a;
-    --radius:    14px;
-    --radius-sm: 8px;
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
-    --shadow-md: 0 6px 18px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.3);
-    --shadow-lg: 0 24px 60px rgba(0,0,0,0.6);
+    --grey:      #52525b;
+    --radius:    10px;                            /* was 14 — tighter */
+    --radius-sm: 6px;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.35);
+    --shadow-lg: 0 20px 50px rgba(0,0,0,0.5);
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 html, body {
     margin: 0; padding: 0;
-    background:
-        radial-gradient(circle at 30% -10%, rgba(77, 148, 255, 0.10), transparent 42%),
-        radial-gradient(circle at 90% 110%, rgba(168, 85, 247, 0.08), transparent 45%),
-        var(--bg-1);
+    background: var(--bg-1);                      /* no gradients — pure calm */
     color: var(--text);
     font-family:
         "Inter", -apple-system, BlinkMacSystemFont,
         "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    font-size: 15px;
-    line-height: 1.4;
+    font-size: 14px;                              /* was 15 — tighter */
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     padding-bottom: env(safe-area-inset-bottom);
     min-height: 100vh;
+    letter-spacing: -0.01em;
 }
 
 .mono, .num {
     font-family: "JetBrains Mono", "SF Mono", "Menlo", "Roboto Mono", ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.2px;
+}
+
+/* -------------------- v18: refined card + typography -------------------- */
+.card {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    padding: 18px 20px !important;
+    margin-bottom: 12px !important;
+    box-shadow: none !important;
+    backdrop-filter: blur(20px);
+}
+.card h2 {
+    font-size: 0.82rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-2) !important;
+    margin: 0 0 14px !important;
+    display: flex; align-items: center; gap: 8px;
+}
+
+/* Badge minimalism */
+.badge {
+    background: transparent !important;
+    color: var(--muted) !important;
+    border: 1px solid var(--border) !important;
+    padding: 2px 8px !important;
+    font-size: 0.65rem !important;
+    font-weight: 500 !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    border-radius: 4px !important;
+}
+
+/* Buttons — clean shadcn-style */
+button.primary, button.danger, button.ghost, .primary, .danger, .ghost {
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    transition: all 0.15s ease;
+    font-size: 0.85rem;
+}
+button.primary, .primary {
+    background: var(--accent) !important;
+    color: #fff !important;
+    border: 1px solid var(--accent) !important;
+}
+button.primary:hover, .primary:hover {
+    background: var(--accent-2) !important;
+    border-color: var(--accent-2) !important;
+}
+button.ghost, .ghost {
+    background: transparent !important;
+    color: var(--text-2) !important;
+    border: 1px solid var(--border-strong) !important;
+}
+button.ghost:hover, .ghost:hover {
+    background: rgba(255,255,255,0.04) !important;
+    color: var(--text) !important;
+    border-color: rgba(255,255,255,0.18) !important;
+}
+button.danger, .danger {
+    background: transparent !important;
+    color: var(--red) !important;
+    border: 1px solid rgba(239, 68, 68, 0.35) !important;
+}
+button.danger:hover, .danger:hover {
+    background: rgba(239, 68, 68, 0.08) !important;
+    border-color: var(--red) !important;
+}
+
+/* Row/list refinements */
+.row {
+    padding: 8px 0 !important;
+    border-bottom: 1px solid var(--border) !important;
+    font-size: 0.85rem;
+}
+.row:last-child { border-bottom: none !important; }
+.row strong { font-weight: 500; color: var(--text); }
+
+/* Header refinement */
+header {
+    padding: 14px 20px !important;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,11,13,0.75);
+    backdrop-filter: blur(20px);
+}
+.brand-mark {
+    background: var(--accent) !important;
+    box-shadow: none !important;
+}
+
+/* Status pills lighter */
+.pill {
+    background: transparent !important;
+    border: 1px solid var(--border) !important;
+    padding: 4px 10px !important;
+    font-size: 0.7rem !important;
+    color: var(--text-2) !important;
+}
+.pill.on { border-color: var(--green) !important; color: var(--green) !important; background: var(--green-dim) !important; }
+
+/* Signal tile — minimal */
+.signal {
+    padding: 24px 20px !important;
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--border) !important;
+    background: var(--surface) !important;
+    margin-bottom: 12px !important;
+    box-shadow: none !important;
+}
+.signal.green { border-left: 3px solid var(--green) !important; }
+.signal.red { border-left: 3px solid var(--red) !important; }
+.signal.grey { border-left: 3px solid var(--muted) !important; }
+.signal-badge {
+    font-size: 0.65rem !important;
+    color: var(--muted) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+}
+.signal-label {
+    font-size: 1.4rem !important;
+    font-weight: 600 !important;
+    margin: 8px 0 4px !important;
+}
+.signal-symbol {
+    font-size: 1.05rem !important;
+    color: var(--text-2);
+    font-weight: 500;
+}
+.signal-price {
+    font-size: 0.85rem !important;
+    color: var(--muted);
+    margin-top: 4px !important;
+}
+
+/* Tabs refined */
+.tab-nav {
+    background: rgba(10,11,13,0.9) !important;
+    border-top: 1px solid var(--border) !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+.tab-btn {
+    color: var(--muted) !important;
+    font-size: 0.62rem !important;
+    letter-spacing: 0.03em !important;
+    text-transform: none !important;
+    font-weight: 500 !important;
+}
+.tab-btn .ic { font-size: 1.05rem !important; }
+.tab-btn.active {
+    background: rgba(139, 92, 246, 0.08) !important;
+    color: var(--accent-2) !important;
+    border-color: rgba(139, 92, 246, 0.22) !important;
+}
+
+/* Mkt-tile refined */
+.mkt-tile {
+    background: rgba(255,255,255,0.015) !important;
+    border: 1px solid var(--border) !important;
+    padding: 12px !important;
+    border-radius: 8px !important;
+}
+.mkt-tile .k {
+    font-size: 0.62rem !important;
+    color: var(--muted) !important;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+.mkt-tile .v {
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    margin-top: 5px !important;
+    color: var(--text) !important;
+}
+
+/* Toggle */
+.toggle-row {
+    padding: 12px 0 !important;
+    border-top: 1px solid var(--border) !important;
+    font-size: 0.85rem;
+}
+.toggle {
+    width: 42px !important; height: 24px !important;
+    background: rgba(255,255,255,0.08) !important;
+    border-radius: 12px !important;
+    border: 1px solid var(--border) !important;
+    transition: all 0.2s;
+}
+.toggle.on { background: var(--accent) !important; border-color: var(--accent) !important; }
+
+/* Perf-hint (secondary text) */
+.perf-hint {
+    font-size: 0.75rem !important;
+    color: var(--muted) !important;
+    line-height: 1.5;
+    margin-top: -4px;
+    margin-bottom: 12px;
+}
+
+/* Modal refined */
+.modal { background: rgba(0,0,0,0.85) !important; backdrop-filter: blur(12px); }
+.modal-card {
+    background: var(--bg-2) !important;
+    border: 1px solid var(--border-strong) !important;
+    border-radius: var(--radius) !important;
+    padding: 24px !important;
+}
+
+/* Info icon subtler */
+.info {
+    background: transparent !important;
+    color: var(--muted) !important;
+    border: 1px solid var(--border) !important;
+    width: 16px !important; height: 16px !important;
+    font-size: 0.62rem !important;
+}
+.info:hover, .info:active {
+    background: var(--accent) !important; color: #fff !important;
+    border-color: var(--accent) !important;
+    transform: none !important;
+}
+
+/* Health pulse — cleaner */
+.health-pulse {
+    padding: 16px 20px !important;
+    border-radius: 10px !important;
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+}
+.health-pulse.ok { border-color: rgba(16, 185, 129, 0.25) !important; }
+.health-pulse.warn { border-color: rgba(245, 158, 11, 0.35) !important; }
+.health-pulse.err { border-color: rgba(239, 68, 68, 0.4) !important; }
+
+/* Auto-refresh subtle indicator (small dot near live labels) */
+.live-dot {
+    display: inline-block;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--green);
+    animation: livePulse 2s ease-in-out infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+@keyframes livePulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+    50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
+}
+
+/* Fear & greed — dial subtler */
+.fng-dial {
+    border-color: var(--border) !important;
+}
+.fng-inner {
+    background: var(--bg-2) !important;
+    border: 1px solid var(--border) !important;
+}
+
+/* Confluence rows cleaner */
+.confluence-row {
+    background: transparent !important;
+    border: 1px solid var(--border) !important;
+    padding: 10px 12px !important;
+}
+.confluence-row.high { border-left: 3px solid var(--green) !important; }
+.confluence-row.mid { border-left: 3px solid var(--amber) !important; }
+.confluence-row.low { border-left: 3px solid var(--muted) !important; }
+
+/* Positions card cleaner */
+.pos-card {
+    background: rgba(255,255,255,0.015) !important;
+    border: 1px solid var(--border) !important;
+    padding: 14px !important;
+    border-radius: 8px !important;
+}
+
+/* Tables cleaner */
+.perf-table, .journal-table {
+    font-size: 0.78rem !important;
+}
+.perf-table th, .journal-table th {
+    color: var(--muted) !important;
+    font-weight: 500 !important;
+    font-size: 0.68rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: transparent !important;
+    border-bottom: 1px solid var(--border) !important;
+    padding: 8px 6px !important;
+}
+.perf-table td, .journal-table td {
+    padding: 8px 6px !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+
+/* Chip refinement */
+.chip {
+    background: transparent !important;
+    border: 1px solid var(--border-strong) !important;
+    color: var(--text-2) !important;
+    padding: 4px 10px !important;
+    font-size: 0.72rem !important;
+    border-radius: 12px !important;
+    font-weight: 500 !important;
 }
 
 /* -------------------- header -------------------- */

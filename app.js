@@ -1655,10 +1655,12 @@ function checkStructuralBreak() {
 }
 
 // =========== event bindings ============================================
-$("#btn-scan").onclick = async () => {
-    $("#btn-scan").textContent = "…scanne";
+// v18: btn-scan removed from UI — bot auto-scans every 30s. Handler kept for legacy safety.
+const _btnScan = $("#btn-scan");
+if (_btnScan) _btnScan.onclick = async () => {
+    _btnScan.textContent = "…scanne";
     await scanAll();
-    $("#btn-scan").textContent = "Jetzt scannen";
+    _btnScan.textContent = "Jetzt scannen";
 };
 
 $("#btn-reset").onclick = () => {
