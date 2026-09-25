@@ -520,7 +520,7 @@ function confirmPending(p) {
     });
     state.pending = state.pending.filter((x) => x.symbol !== p.symbol);
     state.tradeCount++;
-    announce(`Trade ausgeführt. ${p.symbol} ${p.side === "long" ? "gekauft" : "verkauft"} bei ${p.entry.toFixed(2)}. Stop bei ${p.stop.toFixed(2)}.`, "success");
+    announce(`Trade ausgeführt. ${p.symbol} ${p.side === "long" ? "gekauft" : "verkauft"} bei ${Number.isFinite(p.entry) ? p.entry.toFixed(2) : "?"}. Stop bei ${Number.isFinite(p.stop) ? p.stop.toFixed(2) : "?"}.`, "success");
     renderAll();
 }
 
@@ -840,15 +840,21 @@ async function scanAll() {
         if (state.autoMode && passesStrictFilter(pending)) {
             // Vollautomatik: nur wirklich hochkarätige Setups
             confirmPending(pending);
+            const _e = Number.isFinite(pending.entry) ? pending.entry.toFixed(2) : "?";
+            const _s = Number.isFinite(pending.stop) ? pending.stop.toFixed(2) : "?";
+            const _w = Number.isFinite(pending.forecast?.weighted) ? pending.forecast.weighted.toFixed(0) : "?";
             announce(
-                `Automatisch ausgeführt. ${pending.symbol} ${pending.side === "long" ? "gekauft" : "verkauft"} bei ${pending.entry.toFixed(2)} Dollar. ` +
-                `Stop bei ${pending.stop.toFixed(2)}. Prognose plus ${pending.forecast.weighted.toFixed(0)} Dollar.`,
+                `Automatisch ausgeführt. ${pending.symbol} ${pending.side === "long" ? "gekauft" : "verkauft"} bei ${_e} Dollar. ` +
+                `Stop bei ${_s}. Prognose plus ${_w} Dollar.`,
                 "alert",
             );
         } else {
+            const _e = Number.isFinite(pending.entry) ? pending.entry.toFixed(2) : "?";
+            const _w = Number.isFinite(pending.forecast?.weighted) ? pending.forecast.weighted.toFixed(0) : "?";
+            const _lbl = pending.risk?.label || "unbekannt";
             announce(
-                `Neues ${pending.side === "long" ? "Kauf" : "Verkauf"}signal für ${pending.symbol.replace("/", " gegen ")} bei ${pending.entry.toFixed(2)}. ` +
-                `Risiko ${pending.risk.label}. Prognose plus ${pending.forecast.weighted.toFixed(0)} Dollar.`,
+                `Neues ${pending.side === "long" ? "Kauf" : "Verkauf"}signal für ${pending.symbol.replace("/", " gegen ")} bei ${_e}. ` +
+                `Risiko ${_lbl}. Prognose plus ${_w} Dollar.`,
                 "alert",
             );
         }
@@ -7666,28 +7672,23 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // 2. Dramatically lower ensemble thresholds when Learn Mode is on
-if (typeof scanSymbol === "function" && !scanSymbol._v23aggressive) {
-    const _origScanSymV23 = scanSymbol;
+// v24 FIX: proper wrap (delegating to original) instead of full replace which
+// broke the v10/v15 wrapper chain (regime detection, klinesLastUpdate, tfDir tracking)
+if (typeof scanSymbol === "function" && !scanSymbol._v24wrap) {
+    const _origSSv24 = scanSymbol;
     scanSymbol = async function(symbol) {
-        try {
-            const candles = await window.TB.fetchKlines(symbol, CFG.primaryTf, 500);
-            state.candles[symbol] = candles;
-            state.prices[symbol] = candles[candles.length - 1].close;
-            if (typeof refreshMatrix === "function") refreshMatrix(symbol, candles);
-            const price = state.prices[symbol];
-            const events = broker.onPrice(symbol, price);
-            for (const ev of events) {
-                if (ev.kind === "trail") continue;
-                const verb = ev.kind === "sl" ? "Stop-Loss" : "Take-Profit";
-                announce(`${verb} bei ${symbol.replace("/", " gegen ")}. ${ev.pnl >= 0 ? "+" : ""}${ev.pnl.toFixed(2)}.`, ev.pnl >= 0 ? "success" : "warn");
-            }
-            const minScore = state.learnMode ? 0.8 : CFG.softMinScore;
-            const minAgree = state.learnMode ? 1 : CFG.softAgreement;
-            const result = window.TB.ensemble(candles, minScore, minAgree, state.adaptiveWeights);
-            return { symbol, ...result, price };
-        } catch (e) { return { symbol, error: e.message }; }
+        // Temporarily monkey-patch CFG for learn-mode to make ensemble more permissive.
+        // Restore immediately after so other callers see original values.
+        if (state.learnMode) {
+            const _sms = CFG.softMinScore, _sag = CFG.softAgreement;
+            CFG.softMinScore = 0.8;
+            CFG.softAgreement = 1;
+            try { return await _origSSv24(symbol); }
+            finally { CFG.softMinScore = _sms; CFG.softAgreement = _sag; }
+        }
+        return _origSSv24(symbol);
     };
-    scanSymbol._v23aggressive = true;
+    scanSymbol._v24wrap = true;
 }
 
 // 3. Bot-IQ meter
