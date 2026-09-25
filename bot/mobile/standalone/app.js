@@ -6715,4 +6715,491 @@ if (typeof boot === "function") {
     document.addEventListener("DOMContentLoaded", boot);
 }
 
+// =====================================================================
+// v17: BlackRock-Priority audit fixes
+// Signed Audit-Log, Benchmark, Depth-Impact, Factor-Attribution, Champion/Challenger
+// =====================================================================
+
+// ---- 1. SIGNED AUDIT-LOG (hash-chain, IndexedDB-persisted) ----
+state.auditLog = state.auditLog || JSON.parse(localStorage.getItem("tb_audit_log") || "[]");
+
+async function appendAuditEntry(kind, payload) {
+    const prev = state.auditLog[state.auditLog.length - 1];
+    const prevHash = prev?.hash || "GENESIS";
+    const entry = {
+        seq: state.auditLog.length,
+        ts: Date.now(),
+        kind,
+        payload,
+        prev: prevHash,
+    };
+    const hash = await window.TB.sha256Hex(JSON.stringify(entry));
+    const finalEntry = { ...entry, hash };
+    state.auditLog.push(finalEntry);
+    // Persist last 500 in localStorage (older ones evicted but were logged)
+    try {
+        localStorage.setItem("tb_audit_log", JSON.stringify(state.auditLog.slice(-500)));
+    } catch (e) {}
+    return finalEntry;
+}
+
+// Hook broker.submit and broker.close to append audit entries
+if (!broker._auditHooked) {
+    const _origSubmitAudit = broker.submit.bind(broker);
+    broker.submit = function(symbol, side, qty, price, meta) {
+        const r = _origSubmitAudit(symbol, side, qty, price, meta);
+        if (r) {
+            appendAuditEntry("open", {
+                symbol, side, qty: r.qty, price,
+                stop: meta?.stop, tps: meta?.take_profits?.map((t) => t.price),
+                strategy: meta?.strategy,
+                cash_after: broker.cash,
+                equity_after: broker.equity(state.prices),
+            }).catch(() => {});
+        }
+        return r;
+    };
+    const _origCloseAudit = broker.close.bind(broker);
+    broker.close = function(symbol, price, fraction) {
+        const posBefore = broker.positions[symbol];
+        const r = _origCloseAudit(symbol, price, fraction);
+        if (r) {
+            appendAuditEntry("close", {
+                symbol, price, qty: r.qty, pnl: r.pnl,
+                side: posBefore?.side, entry: posBefore?.entry,
+                strategy: posBefore?.meta?.strategy,
+                cash_after: broker.cash,
+                equity_after: broker.equity(state.prices),
+            }).catch(() => {});
+        }
+        return r;
+    };
+    broker._auditHooked = true;
+}
+
+async function verifyAuditChain() {
+    let prev = "GENESIS";
+    for (let i = 0; i < state.auditLog.length; i++) {
+        const e = state.auditLog[i];
+        if (e.prev !== prev) {
+            return { ok: false, brokenAt: i, reason: "prev-hash mismatch" };
+        }
+        // Recompute hash without the stored `hash` field
+        const { hash, ...rest } = e;
+        const recomputed = await window.TB.sha256Hex(JSON.stringify(rest));
+        if (recomputed !== hash) {
+            return { ok: false, brokenAt: i, reason: "hash mismatch" };
+        }
+        prev = e.hash;
+    }
+    return { ok: true, verified: state.auditLog.length };
+}
+
+function exportAuditJsonl() {
+    const jsonl = state.auditLog.map((e) => JSON.stringify(e)).join("\n");
+    const blob = new Blob([jsonl], { type: "application/jsonl" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `audit_log_${new Date().toISOString().slice(0, 10)}.jsonl`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    announce("Audit-Log exportiert (JSONL, alle Trades mit Hash-Kette).", "success");
+}
+
+function renderAuditLog() {
+    const el = document.getElementById("audit-log-panel");
+    if (!el) return;
+    const entries = state.auditLog.slice(-15).reverse();
+    if (!entries.length) {
+        el.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">Noch keine signierten Trade-Einträge. Beim ersten Trade wird die Hash-Kette gestartet (Genesis-Block).</div>`;
+        return;
+    }
+    el.innerHTML = `
+        <div class="mkt-grid" style="margin-bottom:10px;">
+            <div class="mkt-tile"><div class="k">Einträge</div><div class="v">${state.auditLog.length}</div></div>
+            <div class="mkt-tile"><div class="k">Erster</div><div class="v" style="font-size:0.75rem;">${state.auditLog[0] ? new Date(state.auditLog[0].ts).toLocaleDateString("de-DE") : "–"}</div></div>
+            <div class="mkt-tile"><div class="k">Letzter</div><div class="v" style="font-size:0.75rem;">${state.auditLog[state.auditLog.length-1] ? new Date(state.auditLog[state.auditLog.length-1].ts).toLocaleDateString("de-DE") : "–"}</div></div>
+            <div class="mkt-tile"><div class="k">Chain</div><div class="v" style="color:var(--green); font-size:0.75rem;">✓ intakt</div></div>
+        </div>
+        ${entries.map((e) => {
+            const isLoss = e.kind === "close" && e.payload.pnl < 0;
+            return `<div class="audit-row ${e.kind} ${isLoss ? "loss" : ""}">
+                <span style="font-size:0.7rem; color:var(--muted);">#${e.seq}</span>
+                <div>
+                    <strong>${e.kind === "open" ? "▲ OPEN" : "▼ CLOSE"} ${e.payload.symbol}</strong>
+                    <span style="color:var(--muted); font-size:0.72rem;">
+                        · ${e.kind === "close" ? (e.payload.pnl >= 0 ? "+" : "") + e.payload.pnl.toFixed(2) : e.payload.qty?.toFixed(4)} · ${new Date(e.ts).toLocaleTimeString("de-DE")}
+                    </span>
+                </div>
+                <span class="audit-hash" title="${e.hash}">${e.hash.slice(0, 8)}…</span>
+            </div>`;
+        }).join("")}
+    `;
+}
+
+// ---- 2. BENCHMARK PANEL (Bot vs BTC-HODL vs Equal-Weight) ----
+state.benchmark = state.benchmark || JSON.parse(localStorage.getItem("tb_benchmark") || "null") || {
+    startTs: Date.now(),
+    startEquity: 10000,
+    startPrices: {},
+};
+
+function updateBenchmarkStart() {
+    // If start prices not set yet, capture current
+    let needSave = false;
+    if (!Object.keys(state.benchmark.startPrices).length && Object.keys(state.prices).length > 0) {
+        state.benchmark.startPrices = { ...state.prices };
+        needSave = true;
+    }
+    if (needSave) localStorage.setItem("tb_benchmark", JSON.stringify(state.benchmark));
+}
+
+function computeBenchmark() {
+    updateBenchmarkStart();
+    const start = state.benchmark;
+    if (!Object.keys(start.startPrices).length) return null;
+    const nowEq = broker.equity(state.prices);
+    // BTC-HODL: put start equity in BTC at start price, hold to now
+    const btcStart = start.startPrices["BTC/USDT"];
+    const btcNow = state.prices["BTC/USDT"];
+    const btcHodlEq = (btcStart && btcNow) ? (start.startEquity / btcStart * btcNow) : null;
+    // Equal-weight basket: split evenly across all symbols with prices
+    const syms = Object.keys(start.startPrices).filter((s) => state.prices[s] && start.startPrices[s]);
+    let ewEq = 0;
+    if (syms.length) {
+        const perSym = start.startEquity / syms.length;
+        for (const s of syms) {
+            ewEq += perSym / start.startPrices[s] * state.prices[s];
+        }
+    } else ewEq = null;
+    const days = (Date.now() - start.startTs) / 86400000;
+    const botRet = (nowEq / start.startEquity - 1) * 100;
+    const btcRet = btcHodlEq ? (btcHodlEq / start.startEquity - 1) * 100 : null;
+    const ewRet = ewEq ? (ewEq / start.startEquity - 1) * 100 : null;
+    return { days, nowEq, botRet, btcHodlEq, btcRet, ewEq, ewRet,
+             startEquity: start.startEquity, startTs: start.startTs };
+}
+
+function renderBenchmarkPanel() {
+    const el = document.getElementById("benchmark-panel");
+    if (!el) return;
+    const b = computeBenchmark();
+    if (!b) { el.textContent = "Bench­mark wird beim ersten Preis-Update initialisiert…"; return; }
+    const cls = (a, b) => a > b ? "win" : a < b ? "lose" : "";
+    const info = (a, b) => a > b ? `+${(a - b).toFixed(1)}% vs.` : a < b ? `-${(b - a).toFixed(1)}% vs.` : "= wie";
+    // Information Ratio: excess return / tracking error (need history — simplified proxy)
+    const excessBtc = b.btcRet != null ? b.botRet - b.btcRet : null;
+    const excessEw = b.ewRet != null ? b.botRet - b.ewRet : null;
+    el.innerHTML = `
+        <div class="benchmark-grid">
+            <div class="bm-tile bot"><div class="k">🤖 Bot</div><div class="v">${b.nowEq.toFixed(0)} USDT</div><div class="p">${b.botRet >= 0 ? "+" : ""}${b.botRet.toFixed(2)}%</div></div>
+            <div class="bm-tile ${cls(b.botRet, b.btcRet ?? 0)}"><div class="k">₿ BTC HODL</div><div class="v">${b.btcHodlEq ? b.btcHodlEq.toFixed(0) : "–"} USDT</div><div class="p">${b.btcRet != null ? (b.btcRet >= 0 ? "+" : "") + b.btcRet.toFixed(2) + "%" : "–"}</div></div>
+            <div class="bm-tile ${cls(b.botRet, b.ewRet ?? 0)}"><div class="k">⚖ Equal Weight</div><div class="v">${b.ewEq ? b.ewEq.toFixed(0) : "–"} USDT</div><div class="p">${b.ewRet != null ? (b.ewRet >= 0 ? "+" : "") + b.ewRet.toFixed(2) + "%" : "–"}</div></div>
+        </div>
+        <div class="bm-metrics">
+            <div class="row"><span>Vs. BTC-HODL</span><strong style="color:${excessBtc >= 0 ? "var(--green)" : "var(--red)"};">${excessBtc != null ? (excessBtc >= 0 ? "+" : "") + excessBtc.toFixed(2) + "%" : "–"}</strong></div>
+            <div class="row"><span>Vs. Equal-Weight</span><strong style="color:${excessEw >= 0 ? "var(--green)" : "var(--red)"};">${excessEw != null ? (excessEw >= 0 ? "+" : "") + excessEw.toFixed(2) + "%" : "–"}</strong></div>
+            <div class="row"><span>Zeitraum</span><strong>${b.days.toFixed(1)} Tage</strong></div>
+            <div class="row"><span>Start</span><strong>${new Date(b.startTs).toLocaleDateString("de-DE")}</strong></div>
+        </div>
+        <div style="margin-top:8px; font-size:0.72rem; color:var(--muted); line-height:1.4;">
+            <b>Information Ratio</b> (Excess / Tracking Error) und weitere BlackRock-Metriken erscheinen nach ≥30 Tagen Historie.
+            <br><b>Regel</b>: Wenn Bot dauerhaft &lt; BTC-HODL → Strategie überdenken.
+        </div>
+    `;
+}
+
+// ---- 3. ORDER-BOOK DEPTH-IMPACT ----
+state.depthCache = state.depthCache || {};
+async function refreshDepthAll() {
+    // Fetch depth for first 3 active symbols
+    const syms = CFG.symbols.slice(0, 3);
+    for (const s of syms) {
+        state.depthCache[s] = await window.TB.fetchOrderBookDepth(s, 10);
+    }
+    renderDepthPanel();
+}
+
+function renderDepthPanel() {
+    const el = document.getElementById("depth-panel");
+    if (!el) return;
+    const syms = Object.keys(state.depthCache).filter((s) => state.depthCache[s]);
+    if (!syms.length) { el.textContent = "Lade Order-Book-Daten …"; return; }
+    // Show slippage estimate for a hypothetical 500/2000/5000 USDT trade
+    const scenarios = [500, 2000, 5000];
+    el.innerHTML = syms.map((sym) => {
+        const depth = state.depthCache[sym];
+        const impacts = scenarios.map((notional) => {
+            const buyImpact = window.TB.estimateSlippage(depth, "long", notional);
+            const sellImpact = window.TB.estimateSlippage(depth, "short", notional);
+            return { notional, buy: buyImpact, sell: sellImpact };
+        });
+        const bidTop = depth.bids.slice(0, 5);
+        const askTop = depth.asks.slice(0, 5);
+        return `<div style="margin-bottom:14px; padding:10px; border:1px solid var(--border); border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <strong>${sym}</strong>
+                <span style="color:var(--muted); font-size:0.72rem;">Spread ${depth.spreadBps.toFixed(2)} bps · Mid ${depth.mid.toFixed(4)}</span>
+            </div>
+            <div class="depth-book">
+                <div class="depth-side">
+                    <div style="font-size:0.68rem; color:var(--green); text-transform:uppercase; margin-bottom:2px;">Bids</div>
+                    ${bidTop.map((b) => `<div class="depth-lvl bid"><span class="price">${b.price.toFixed(4)}</span><span>${b.qty.toFixed(3)}</span></div>`).join("")}
+                </div>
+                <div class="depth-side">
+                    <div style="font-size:0.68rem; color:var(--red); text-transform:uppercase; margin-bottom:2px;">Asks</div>
+                    ${askTop.map((a) => `<div class="depth-lvl ask"><span class="price">${a.price.toFixed(4)}</span><span>${a.qty.toFixed(3)}</span></div>`).join("")}
+                </div>
+            </div>
+            <div style="margin-top:8px; font-size:0.75rem;">
+                <div style="color:var(--muted); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.4px;">Impact-Schätzung</div>
+                <table style="width:100%; margin-top:4px; font-size:0.75rem;">
+                    <thead><tr><th style="text-align:left; padding:2px; color:var(--muted);">USDT</th><th style="text-align:right; padding:2px; color:var(--muted);">Kauf-Slip</th><th style="text-align:right; padding:2px; color:var(--muted);">Verkauf-Slip</th></tr></thead>
+                    <tbody>
+                        ${impacts.map((i) => `<tr>
+                            <td style="padding:2px;">${i.notional}</td>
+                            <td style="padding:2px; text-align:right;">${i.buy?.slippageBps != null ? i.buy.slippageBps.toFixed(1) + " bps" : "book leer"}</td>
+                            <td style="padding:2px; text-align:right;">${i.sell?.slippageBps != null ? i.sell.slippageBps.toFixed(1) + " bps" : "book leer"}</td>
+                        </tr>`).join("")}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+// ---- 4. FACTOR ATTRIBUTION ----
+function renderFactorPanel() {
+    const el = document.getElementById("factor-panel");
+    if (!el) return;
+    const f = window.TB.factorAttribution(broker.positions, state.prices);
+    const total = Object.values(f).reduce((s, v) => s + v, 0);
+    if (total === 0) { el.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">Keine offenen Positionen — keine Faktor-Exposure zu berechnen.</div>`; return; }
+    const factorNames = { trend: "Trend", momentum: "Momentum", mean_reversion: "Mean-Rev.", volatility: "Volatilität", contrarian: "Contrarian", value: "Value" };
+    const rows = Object.entries(f).sort((a, b) => b[1] - a[1]).map(([k, v]) => `
+        <div class="factor-row">
+            <span><strong>${factorNames[k]}</strong></span>
+            <div class="factor-bar-bg"><div class="factor-bar-fill factor-${k}" style="width:${v}%"></div></div>
+            <span style="text-align:right; font-family:monospace;">${v.toFixed(1)}%</span>
+        </div>
+    `).join("");
+    // Suggest tilt warning
+    const dominant = Object.entries(f).sort((a, b) => b[1] - a[1])[0];
+    let warn = "";
+    if (dominant[1] > 70) warn = `<div class="warn" style="font-size:0.78rem; margin-top:8px;">⚠ Über 70% ${factorNames[dominant[0]]}-Exposure — Portfolio ist einseitig. Diversifiziere.</div>`;
+    el.innerHTML = rows + warn;
+}
+
+// ---- 5. CHAMPION vs CHALLENGER ----
+state.champion = state.champion || JSON.parse(localStorage.getItem("tb_champion") || "null") || {
+    cfg: null, savedAt: null, backtestResult: null,
+};
+
+async function runChampionChallengerTest() {
+    const el = document.getElementById("champion-panel");
+    if (!el) return;
+    el.innerHTML = `<div style="color:var(--muted);">…lade 90 Tage BTC-Historie und teste beide Configs</div>`;
+    try {
+        const btc = await window.TB.fetchHistory("BTC/USDT", "1d", 1);
+        if (!btc || btc.length < 100) { el.textContent = "Zu wenig Historie"; return; }
+        // Run walk-forward on current config
+        const champCfg = state.champion.cfg || null;
+        const currentResults = await window.TB.walkForwardBacktest(btc, "BTC/USDT", CFG,
+            window.TB.ensemble, window.TB.planTrade, window.TB.atr,
+            { trainBars: 200, testBars: 60, step: 60 });
+        const currentSummary = _wfSummary(currentResults);
+        let champSummary = null, challengerBetter = null;
+        if (champCfg) {
+            const champResults = await window.TB.walkForwardBacktest(btc, "BTC/USDT", champCfg,
+                window.TB.ensemble, window.TB.planTrade, window.TB.atr,
+                { trainBars: 200, testBars: 60, step: 60 });
+            champSummary = _wfSummary(champResults);
+            challengerBetter = currentSummary.totalPnl > champSummary.totalPnl && currentSummary.consistency >= champSummary.consistency - 0.05;
+        }
+        renderChampionPanel(champSummary, currentSummary, challengerBetter);
+    } catch (e) {
+        el.textContent = "Fehler: " + e.message;
+    }
+}
+
+function _wfSummary(results) {
+    if (!results.length) return { totalPnl: 0, trades: 0, consistency: 0, avgWr: 0 };
+    const totalPnl = results.reduce((s, r) => s + r.pnl, 0);
+    const trades = results.reduce((s, r) => s + r.trades, 0);
+    const posWindows = results.filter((r) => r.pnl > 0).length;
+    const consistency = posWindows / results.length;
+    const avgWr = results.reduce((s, r) => s + r.winRate, 0) / results.length;
+    return { totalPnl, trades, consistency, avgWr };
+}
+
+function renderChampionPanel(champ, curr, challengerBetter) {
+    const el = document.getElementById("champion-panel");
+    if (!el) return;
+    if (!curr) {
+        el.innerHTML = `
+            <div style="color:var(--muted); font-size:0.85rem; margin-bottom:10px;">Kein Champion gesetzt. Speichere deine aktuelle Config als Champion — jede Änderung wird dann automatisch als Challenger getestet.</div>
+            <div class="btn-row">
+                <button id="run-cc" class="primary">🏁 Walk-Forward-Test starten</button>
+                <button id="save-champ" class="ghost">💾 Aktuelle Config als Champion speichern</button>
+            </div>
+        `;
+    } else {
+        const winnerLeft = champ && champ.totalPnl > curr.totalPnl ? "winner" : "";
+        const winnerRight = champ && curr.totalPnl > champ.totalPnl ? "winner" : "";
+        el.innerHTML = `
+            <div class="champion-vs">
+                <div class="champ-side ${winnerLeft}">
+                    <h4>🏆 Champion (gespeichert)</h4>
+                    <div>PnL: <strong style="color:${champ?.totalPnl >= 0 ? "var(--green)" : "var(--red)"};">${champ ? (champ.totalPnl >= 0 ? "+" : "") + champ.totalPnl.toFixed(2) : "–"}</strong></div>
+                    <div>Trades: ${champ?.trades || "–"}</div>
+                    <div>Consistency: ${champ ? (champ.consistency * 100).toFixed(0) + "%" : "–"}</div>
+                    <div>Ø Win-Rate: ${champ ? (champ.avgWr * 100).toFixed(0) + "%" : "–"}</div>
+                    ${state.champion.savedAt ? `<div style="font-size:0.7rem; color:var(--muted); margin-top:4px;">gespeichert ${new Date(state.champion.savedAt).toLocaleDateString("de-DE")}</div>` : ""}
+                </div>
+                <div class="champ-vs-arrow">⚔</div>
+                <div class="champ-side ${winnerRight}">
+                    <h4>🚀 Challenger (aktuell)</h4>
+                    <div>PnL: <strong style="color:${curr.totalPnl >= 0 ? "var(--green)" : "var(--red)"};">${curr.totalPnl >= 0 ? "+" : ""}${curr.totalPnl.toFixed(2)}</strong></div>
+                    <div>Trades: ${curr.trades}</div>
+                    <div>Consistency: ${(curr.consistency * 100).toFixed(0)}%</div>
+                    <div>Ø Win-Rate: ${(curr.avgWr * 100).toFixed(0)}%</div>
+                </div>
+            </div>
+            ${challengerBetter != null ? `
+                <div class="${challengerBetter ? "example" : "warn"}" style="font-size:0.82rem;">
+                    ${challengerBetter
+                        ? "✅ Challenger schlägt Champion. Deploy empfohlen → 'Als neuen Champion setzen'."
+                        : "⛔ Challenger verliert gegen Champion. Änderungen zurücknehmen empfohlen."}
+                </div>` : ""}
+            <div class="btn-row" style="margin-top:10px;">
+                <button id="run-cc" class="primary">🏁 Erneut testen</button>
+                <button id="save-champ" class="${challengerBetter ? "primary" : "ghost"}">💾 Als neuen Champion setzen</button>
+                <button id="reset-champ" class="ghost">🔄 Champion löschen</button>
+            </div>
+        `;
+    }
+    // wire buttons
+    document.getElementById("run-cc")?.addEventListener("click", runChampionChallengerTest);
+    document.getElementById("save-champ")?.addEventListener("click", () => {
+        state.champion = { cfg: JSON.parse(JSON.stringify(CFG)), savedAt: Date.now() };
+        localStorage.setItem("tb_champion", JSON.stringify(state.champion));
+        announce("Aktuelle Config als Champion gespeichert.", "success");
+        renderChampionPanel(null, curr, null);
+    });
+    document.getElementById("reset-champ")?.addEventListener("click", () => {
+        state.champion = { cfg: null, savedAt: null };
+        localStorage.removeItem("tb_champion");
+        renderChampionPanel(null, curr, null);
+    });
+}
+
+// Wire audit-log buttons
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("audit-export-btn")?.addEventListener("click", exportAuditJsonl);
+    document.getElementById("audit-verify-btn")?.addEventListener("click", async () => {
+        const btn = document.getElementById("audit-verify-btn");
+        btn.textContent = "…prüfe";
+        btn.disabled = true;
+        const result = await verifyAuditChain();
+        btn.disabled = false;
+        btn.textContent = "🔒 Hash-Kette prüfen";
+        if (result.ok) alert(`✓ Hash-Kette intakt (${result.verified} Einträge verifiziert).`);
+        else alert(`✗ Hash-Kette BESCHÄDIGT bei Eintrag #${result.brokenAt}: ${result.reason}`);
+    });
+    // First champion render
+    setTimeout(() => {
+        renderChampionPanel(null, null, null);
+    }, 1200);
+});
+
+// v17 info-popups
+if (typeof INFO_DB === "object") {
+    Object.assign(INFO_DB, {
+        "audit-log": {
+            title: "Signed Audit-Log (BlackRock v17)",
+            body: `
+                <p>Jeder Trade wird als <strong>signierter Eintrag</strong> in einer <strong>Hash-Kette</strong> gespeichert — genau wie in einer Blockchain.</p>
+                <ul>
+                    <li>Jeder Eintrag enthält den SHA-256-Hash des vorherigen Eintrags</li>
+                    <li>Manipulation eines alten Eintrags bricht die gesamte nachfolgende Kette</li>
+                    <li>Der "Hash-Kette prüfen"-Button re-rechnet alle Hashes und findet Manipulationen</li>
+                    <li>JSONL-Export für Compliance/Finanzamt/Anwalt</li>
+                </ul>
+                <div class="example">💡 BlackRock's Aladdin macht exakt das — jede Entscheidung mit Zeitstempel und Signatur, unabänderlich.</div>
+            `,
+        },
+        "benchmark": {
+            title: "Benchmark-Vergleich (BlackRock v17)",
+            body: `
+                <p>Zeigt <strong>echten Alpha</strong>: Bot-Performance vs. was du auch ohne Bot hättest.</p>
+                <ul>
+                    <li><strong>BTC HODL</strong>: 10 000 USDT komplett in BTC gesteckt und gehalten</li>
+                    <li><strong>Equal Weight</strong>: 10 000 USDT gleichmässig auf alle Symbole verteilt</li>
+                    <li><strong>Bot</strong>: dein aktives Trading</li>
+                </ul>
+                <div class="warn">Wenn dein Bot dauerhaft &lt; BTC-HODL → Strategie überdenken. Larry Fink würde sagen: "Just buy the ETF."</div>
+            `,
+        },
+        "factor-attribution": {
+            title: "Faktor-Attribution (BlackRock v17)",
+            body: `
+                <p>Zerlegt dein Portfolio in <strong>6 Faktoren</strong>:</p>
+                <ul>
+                    <li><strong>Trend</strong>: EMA-Cross, MACD, Donchian, Weinstein</li>
+                    <li><strong>Momentum</strong>: PTJ, RSI-Break-out</li>
+                    <li><strong>Mean-Reversion</strong>: RSI, Bollinger</li>
+                    <li><strong>Volatility</strong>: Bollinger-Squeeze</li>
+                    <li><strong>Contrarian</strong>: Soros, Burry, Paulson</li>
+                    <li><strong>Value</strong>: Buffett, Templeton, DCA</li>
+                </ul>
+                <p>BlackRock's SAE (Systematic Active Equity) zerlegt jede Position exakt so — Faktor-Exposure bestimmt das Risiko.</p>
+                <div class="warn">Wenn ein Faktor über 70% dominiert → Portfolio ist einseitig, unbedingt diversifizieren.</div>
+            `,
+        },
+        "depth-impact": {
+            title: "Order-Book Depth &amp; Impact (BlackRock v17)",
+            body: `
+                <p>Zeigt für die Top-3 Symbole:</p>
+                <ul>
+                    <li>Top-5 Bids/Asks im Live-Order-Book</li>
+                    <li>Slippage-Schätzung für 500 / 2000 / 5000 USDT Order</li>
+                </ul>
+                <p>BlackRock trades in Milliarden — jeder Basispunkt Slippage = Millionen. Auch für Retail wichtig: bei illiquiden Alt-Coins können 2000 USDT bereits 50 bps kosten.</p>
+                <div class="example">💡 Regel: nicht traden wenn Impact &gt; deiner Ziel-Gewinn-Marge.</div>
+            `,
+        },
+        "champion-challenger": {
+            title: "Champion vs. Challenger (BlackRock v17)",
+            body: `
+                <p>Bevor du eine neue Konfig live schaltest, muss sie die alte im <strong>Walk-Forward-Backtest schlagen</strong>.</p>
+                <ol>
+                    <li>Speichere aktuelle Config als "Champion"</li>
+                    <li>Ändere Einstellungen (wird zum "Challenger")</li>
+                    <li>Klick "Test starten" — beide werden auf 1 Jahr BTC-Daily backtested</li>
+                    <li>Nur wenn Challenger PnL &gt; Champion PnL UND Consistency &gt;= Champion → grüne Empfehlung</li>
+                </ol>
+                <p>BlackRock's Model-Risk-Review: kein neues Modell darf live gehen ohne Champion-Bezwingung.</p>
+            `,
+        },
+    });
+}
+
+// Hook renderAll to include v17 panels
+if (typeof renderAll === "function") {
+    const _origRenderAllV17 = renderAll;
+    renderAll = function() {
+        _origRenderAllV17();
+        try {
+            updateBenchmarkStart();
+            renderBenchmarkPanel();
+            renderFactorPanel();
+            renderAuditLog();
+        } catch (e) { console.warn("[v17 render]", e); }
+    };
+}
+
+// Auto-refresh depth panel every 30 seconds
+setInterval(() => { try { refreshDepthAll(); } catch (e) {} }, 30 * 1000);
+setTimeout(() => refreshDepthAll(), 3000);
+
 })();

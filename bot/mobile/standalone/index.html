@@ -377,6 +377,24 @@
     </div>
 
     <div class="card">
+        <h2>Benchmark-Vergleich <span class="badge">BlackRock v17</span> <span class="info" data-info="benchmark">ⓘ</span></h2>
+        <div class="perf-hint">Bot-Performance vs BTC-HODL vs Equal-Weight-Basket. Zeigt echten Alpha.</div>
+        <div id="benchmark-panel"></div>
+    </div>
+
+    <div class="card">
+        <h2>Faktor-Attribution <span class="badge">BlackRock v17</span> <span class="info" data-info="factor-attribution">ⓘ</span></h2>
+        <div class="perf-hint">Welche Faktoren treiben dein Portfolio? Momentum, Value, Mean-Reversion etc.</div>
+        <div id="factor-panel"></div>
+    </div>
+
+    <div class="card">
+        <h2>Order-Book Depth &amp; Impact <span class="badge">BlackRock v17</span> <span class="info" data-info="depth-impact">ⓘ</span></h2>
+        <div class="perf-hint">Wie viel Slippage kostet eine bestimmte Trade-Grösse an den Top-Symbolen?</div>
+        <div id="depth-panel"></div>
+    </div>
+
+    <div class="card">
         <h2>Konfluenz-Panel <span class="badge">Live</span> <span class="info" data-info="confluence">ⓘ</span></h2>
         <div class="perf-hint">Wie viele Indikatoren stimmen bei jedem Symbol überein? Hohe Werte = sichere Signale.</div>
         <div id="confluence-panel"></div>
@@ -551,6 +569,16 @@
     </div>
 
     <div class="card">
+        <h2>Signed Audit-Log <span class="badge">BlackRock v17</span> <span class="info" data-info="audit-log">ⓘ</span></h2>
+        <div class="perf-hint">Immutable Trade-Log mit SHA-256-Hash-Kette. Jeder Trade signiert, exportierbar für Compliance.</div>
+        <div id="audit-log-panel"></div>
+        <div class="btn-row" style="margin-top:8px;">
+            <button id="audit-export-btn" class="ghost" style="font-size:0.75rem; padding:6px 12px;">📤 JSONL exportieren</button>
+            <button id="audit-verify-btn" class="ghost" style="font-size:0.75rem; padding:6px 12px;">🔒 Hash-Kette prüfen</button>
+        </div>
+    </div>
+
+    <div class="card">
         <h2>Letzte Fehler <span class="info" data-info="error-log">ⓘ</span></h2>
         <div class="perf-hint">Chronologisch aufgezeichnete Fetch-Fehler der letzten Stunde.</div>
         <div id="error-log"></div>
@@ -582,6 +610,12 @@
     <div class="card">
         <h2>Handelspaare <span class="badge"><span id="sym-count">–</span>/<span id="sym-total">–</span></span> <span class="info" data-info="symbols">ⓘ</span></h2>
         <div id="symbol-picker"></div>
+    </div>
+
+    <div class="card">
+        <h2>Champion vs. Challenger <span class="badge">BlackRock v17</span> <span class="info" data-info="champion-challenger">ⓘ</span></h2>
+        <div class="perf-hint">Neue Konfig-Änderung wird gegen aktuelle Config walk-forward getestet. Nur wenn Challenger besser → Deploy.</div>
+        <div id="champion-panel"></div>
     </div>
 
     <div class="card">
