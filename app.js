@@ -7855,4 +7855,212 @@ setTimeout(() => {
     if (typeof feedEvent === "function") feedEvent("info", "v25 aktiv: Bot fängt Fehler ab und läuft weiter — kein Total-Ausfall mehr möglich");
 }, 2000);
 
+// =====================================================================
+// v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
+// =====================================================================
+
+const APP_VERSION = "26.0";
+const APP_BUILD = "2026-09-25";
+
+// ---- 1. First-launch splash screen ----
+function showSplashIfFirstLaunch() {
+    if (localStorage.getItem("tb_splash_seen") === "1") return;
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.id = "splash-modal";
+    modal.innerHTML = `
+        <div class="modal-card" style="max-width:520px;">
+            <div style="text-align:center; margin-bottom:20px;">
+                <div style="font-size:2.5rem; margin-bottom:8px;">⌁</div>
+                <h2 style="margin:0 0 4px; color:var(--accent); font-size:1.3rem; text-transform:none; letter-spacing:0;">Willkommen zum Trading Bot</h2>
+                <div style="color:var(--muted); font-size:0.85rem;">v${APP_VERSION} · Demo-Modus · Kein Echtgeld</div>
+            </div>
+            <div style="font-size:0.92rem; line-height:1.6; margin-bottom:20px;">
+                <p style="margin:0 0 12px;"><strong style="color:var(--accent);">So funktioniert's:</strong></p>
+                <div style="padding:10px 14px; background:rgba(139,92,246,0.06); border-left:3px solid var(--accent); border-radius:6px; margin-bottom:8px;">
+                    <strong>1️⃣ Live-Daten</strong><br><span style="color:var(--text-2); font-size:0.85rem;">Echte Preise von Binance — sekundengenau via WebSocket</span>
+                </div>
+                <div style="padding:10px 14px; background:rgba(139,92,246,0.06); border-left:3px solid var(--accent); border-radius:6px; margin-bottom:8px;">
+                    <strong>2️⃣ 16 Trader-Strategien</strong><br><span style="color:var(--text-2); font-size:0.85rem;">Buffett, Soros, Simons, PTJ &amp; Co. — automatisch angewandt</span>
+                </div>
+                <div style="padding:10px 14px; background:rgba(139,92,246,0.06); border-left:3px solid var(--accent); border-radius:6px;">
+                    <strong>3️⃣ Bot handelt selbst</strong><br><span style="color:var(--text-2); font-size:0.85rem;">Vollautomatisch mit 10 000 USDT Spielgeld — du beobachtest und lernst</span>
+                </div>
+            </div>
+            <div style="padding:10px 14px; background:rgba(245,158,11,0.06); border-left:3px solid var(--amber); border-radius:6px; margin-bottom:16px; font-size:0.82rem;">
+                <strong style="color:var(--amber);">Wichtig:</strong> Alles ist Papier-Handel. Der Bot läuft nur, solange dieser Tab offen ist.
+            </div>
+            <div class="btn-row">
+                <button id="splash-tour" class="ghost">Tour starten</button>
+                <button id="splash-start" class="primary" style="flex:2;">Los geht's →</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("splash-start").onclick = () => {
+        localStorage.setItem("tb_splash_seen", "1");
+        modal.remove();
+        if (typeof feedEvent === "function") feedEvent("info", "Willkommen! Bot startet den ersten Scan.");
+    };
+    document.getElementById("splash-tour").onclick = () => {
+        localStorage.setItem("tb_splash_seen", "1");
+        modal.remove();
+        if (typeof startOnboarding === "function") startOnboarding();
+    };
+}
+
+// ---- 2. Achievement system ----
+state.achievements = JSON.parse(localStorage.getItem("tb_achievements") || "[]");
+const ACHIEVEMENTS = [
+    { id: "first_scan", name: "Erster Scan", icon: "🔍", desc: "Bot hat das erste Mal Live-Daten geholt.", check: () => (state.scanCount || 0) >= 1 },
+    { id: "first_trade", name: "Erster Trade", icon: "🎯", desc: "Bot hat die erste Position eröffnet.", check: () => Object.keys(broker.positions).length > 0 || broker.journal.some((j) => j.kind === "open") },
+    { id: "first_win", name: "Erster Gewinn", icon: "💰", desc: "Ein Trade wurde mit Gewinn geschlossen.", check: () => broker.journal.some((j) => j.kind === "close" && (j.pnl || 0) > 0) },
+    { id: "ten_trades", name: "10 Trades", icon: "📊", desc: "10 geschlossene Trades erreicht.", check: () => broker.journal.filter((j) => j.kind === "close").length >= 10 },
+    { id: "iq_up", name: "Level Up", icon: "⚡", desc: "Bot-IQ auf 150+ gebracht.", check: () => (state.botIQ || 0) >= 150 },
+    { id: "profit_100", name: "+100 USDT", icon: "🚀", desc: "Realisierter Gesamt-Gewinn von 100+ USDT.", check: () => broker.realizedPnl() >= 100 },
+    { id: "streak_3", name: "3 in Folge", icon: "🔥", desc: "3 Gewinner-Trades in Folge.", check: () => {
+        const trades = broker.journal.filter((j) => j.kind === "close").slice(-3);
+        return trades.length === 3 && trades.every((t) => (t.pnl || 0) > 0);
+    }},
+    { id: "learn_confirmed", name: "Lernwillig", icon: "🎓", desc: "Warum-Modal 5x geöffnet.", check: () => (state.whyModalOpened || 0) >= 5 },
+];
+
+function checkAchievements() {
+    for (const a of ACHIEVEMENTS) {
+        if (state.achievements.includes(a.id)) continue;
+        try {
+            if (a.check()) {
+                state.achievements.push(a.id);
+                localStorage.setItem("tb_achievements", JSON.stringify(state.achievements));
+                showAchievement(a);
+            }
+        } catch (e) {}
+    }
+}
+
+function showAchievement(a) {
+    if (typeof feedEvent === "function") feedEvent("win", `🏆 Erfolg freigeschaltet: ${a.icon} ${a.name} — ${a.desc}`);
+    // Toast
+    const toast = document.createElement("div");
+    toast.style.cssText = `
+        position:fixed; top:20px; right:20px; z-index:2000;
+        background:var(--bg-2); border:1px solid var(--accent);
+        border-left:4px solid var(--accent);
+        padding:12px 16px; border-radius:8px; box-shadow:var(--shadow-lg);
+        display:flex; align-items:center; gap:12px; max-width:340px;
+        animation:slideIn 0.4s ease-out;
+    `;
+    toast.innerHTML = `
+        <div style="font-size:1.8rem;">${a.icon}</div>
+        <div>
+            <div style="font-weight:600; color:var(--accent); font-size:0.9rem;">Erfolg freigeschaltet</div>
+            <div style="font-size:0.82rem;">${a.name}</div>
+            <div style="font-size:0.72rem; color:var(--muted);">${a.desc}</div>
+        </div>
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.style.transition = "all 0.4s"; toast.style.opacity = "0"; toast.style.transform = "translateX(20px)";
+        setTimeout(() => toast.remove(), 400);
+    }, 5000);
+}
+
+setInterval(checkAchievements, 8000);
+
+// ---- 3. Über-die-App section in Einstellungen ----
+function ensureAboutCard() {
+    if (document.getElementById("about-app-card")) return;
+    const einstellungen = document.querySelector('[data-pane="einstellungen"]');
+    if (!einstellungen) return;
+    const achieved = state.achievements.length;
+    const total = ACHIEVEMENTS.length;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.id = "about-app-card";
+    card.innerHTML = `
+        <h2>Über die App</h2>
+        <div style="font-size:0.85rem; line-height:1.6;">
+            <div class="row"><span>Version</span><strong>v${APP_VERSION}</strong></div>
+            <div class="row"><span>Build-Datum</span><strong>${APP_BUILD}</strong></div>
+            <div class="row"><span>Daten-Anbieter</span><strong>Binance Public API</strong></div>
+            <div class="row"><span>Lizenz</span><strong>MIT (Open Source)</strong></div>
+            <div class="row"><span>Erfolge</span><strong>${achieved} / ${total}</strong></div>
+            <div class="row"><span>Bot-IQ</span><strong>${Math.round(state.botIQ || 100)}</strong></div>
+            <div class="row" style="border-bottom:none;"><span>Kategorie</span><strong>Lern- &amp; Demo-Werkzeug</strong></div>
+        </div>
+        <div style="margin-top:14px; padding:12px; background:rgba(139,92,246,0.05); border-radius:8px; font-size:0.78rem; line-height:1.5;">
+            <strong style="color:var(--accent);">Hinweis:</strong> Diese App ist ein <strong>Lern-Werkzeug</strong> für Krypto-Trading-Konzepte. Alle Trades sind simuliert (Paper-Broker). Live-Kurse stammen von Binance's öffentlicher API — es findet <strong>keine echte Order-Ausführung</strong> statt.
+        </div>
+        <div style="margin-top:10px; padding:12px; background:rgba(245,158,11,0.05); border-radius:8px; font-size:0.78rem; line-height:1.5;">
+            <strong style="color:var(--amber);">Rechtlicher Hinweis:</strong> Keine Anlageberatung. Handel mit Kryptowährungen birgt hohes Risiko. Vergangene Performance ist kein Indikator für zukünftige Ergebnisse.
+        </div>
+    `;
+    einstellungen.appendChild(card);
+}
+setInterval(ensureAboutCard, 5000);
+
+// ---- 4. Achievement panel on Übersicht ----
+function ensureAchievementsCard() {
+    if (document.getElementById("achievements-card")) return;
+    const iqCard = document.getElementById("bot-iq-card");
+    if (!iqCard) return;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.id = "achievements-card";
+    card.innerHTML = `
+        <h2>Erfolge <span class="badge" id="ach-count">0/${ACHIEVEMENTS.length}</span></h2>
+        <div id="ach-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;"></div>
+    `;
+    iqCard.after(card);
+    renderAchievements();
+}
+function renderAchievements() {
+    const grid = document.getElementById("ach-grid");
+    const count = document.getElementById("ach-count");
+    if (!grid || !count) return;
+    count.textContent = `${state.achievements.length}/${ACHIEVEMENTS.length}`;
+    grid.innerHTML = ACHIEVEMENTS.map((a) => {
+        const done = state.achievements.includes(a.id);
+        return `<div title="${a.name}: ${a.desc}" style="text-align:center; padding:10px 6px; background:${done ? "rgba(139,92,246,0.08)" : "rgba(255,255,255,0.02)"}; border:1px solid ${done ? "rgba(139,92,246,0.3)" : "var(--border)"}; border-radius:8px; opacity:${done ? "1" : "0.4"};">
+            <div style="font-size:1.4rem; ${done ? "" : "filter:grayscale(1);"}">${a.icon}</div>
+            <div style="font-size:0.62rem; margin-top:4px; color:${done ? "var(--accent)" : "var(--muted)"}; line-height:1.2;">${a.name}</div>
+        </div>`;
+    }).join("");
+}
+setInterval(() => { ensureAchievementsCard(); renderAchievements(); }, 5000);
+
+// ---- 5. Track why-modal opens for the achievement ----
+if (typeof showWhy === "function" && !showWhy._v26tracked) {
+    const _origSW = showWhy;
+    showWhy = function(source) {
+        state.whyModalOpened = (state.whyModalOpened || 0) + 1;
+        localStorage.setItem("tb_why_opened", String(state.whyModalOpened));
+        return _origSW(source);
+    };
+    showWhy._v26tracked = true;
+    state.whyModalOpened = parseInt(localStorage.getItem("tb_why_opened") || "0");
+}
+
+// ---- 6. Splash on first launch + slide-in animation ----
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(showSplashIfFirstLaunch, 1000);
+});
+
+// Inject animation
+const style = document.createElement("style");
+style.textContent = `
+    @keyframes slideIn { from { opacity:0; transform:translateX(30px);} to {opacity:1; transform:translateX(0);} }
+`;
+document.head.appendChild(style);
+
+// ---- 7. Footer version stamp ----
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => {
+        const footer = document.querySelector("footer");
+        if (footer && !footer.querySelector(".version-stamp")) {
+            footer.insertAdjacentHTML("beforeend", `<div class="version-stamp" style="margin-top:6px; font-size:0.68rem; color:var(--muted);">v${APP_VERSION} · Build ${APP_BUILD} · Powered by Binance API</div>`);
+        }
+    }, 2000);
+});
+
 })();
