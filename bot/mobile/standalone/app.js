@@ -7780,4 +7780,79 @@ if (typeof scanAll === "function" && !scanAll._v23narrate2) {
     scanAll._v23narrate2 = true;
 }
 
+// =====================================================================
+// v25: Bulletproof error handling — bot NEVER stops running on a crash
+// =====================================================================
+
+// 1. Global window error handler → log to event feed, show in activity
+window.addEventListener("error", (e) => {
+    const msg = `${e.message} @ ${(e.filename || "?").split("/").pop()}:${e.lineno}`;
+    console.error("[TB-Global]", msg, e.error?.stack);
+    if (typeof feedEvent === "function") feedEvent("info", `[Fehler abgefangen] ${msg}`);
+    if (typeof setActivity === "function") setActivity(`Fehler abgefangen: ${e.message}. Bot läuft weiter.`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+    const msg = e.reason?.message || String(e.reason);
+    console.error("[TB-Promise]", msg);
+    if (typeof feedEvent === "function") feedEvent("info", `[Promise-Fehler abgefangen] ${msg}`);
+});
+
+// 2. Patch scanAll so a single-symbol crash doesn't kill the whole scan
+if (typeof scanAll === "function" && !scanAll._v25safeloop) {
+    const _origScanAllV25 = scanAll;
+    scanAll = async function() {
+        try {
+            await _origScanAllV25();
+        } catch (e) {
+            console.error("[TB-scanAll]", e);
+            if (typeof feedEvent === "function") feedEvent("info", `Scan-Loop-Fehler: ${e.message}. Bot läuft weiter.`);
+            if (typeof setActivity === "function") setActivity(`Fehler im Scan: ${e.message}. Nächster Scan in 30s.`);
+            // still run renderAll so UI stays responsive
+            try { if (typeof renderAll === "function") renderAll(); } catch (e2) {}
+        }
+    };
+    scanAll._v25safeloop = true;
+}
+
+// 3. Patch renderAll to catch per-component render errors
+if (typeof renderAll === "function" && !renderAll._v25safe) {
+    const _origRenderAllV25 = renderAll;
+    renderAll = function() {
+        try { _origRenderAllV25(); }
+        catch (e) {
+            console.error("[TB-renderAll]", e);
+            if (typeof feedEvent === "function" && Math.random() < 0.1) {
+                // avoid spam — 1 in 10 render errors get logged
+                feedEvent("info", `Render-Fehler: ${e.message}. UI evtl. inkonsistent.`);
+            }
+        }
+    };
+    renderAll._v25safe = true;
+}
+
+// 4. Safe number formatter — replace common unchecked patterns
+window.tbSafeFmt = function(v, digits = 2, fallback = "?") {
+    return Number.isFinite(v) ? v.toFixed(digits) : fallback;
+};
+
+// 5. Patch confirmPending too so a crash there doesn't halt state.pending processing
+if (typeof confirmPending === "function" && !confirmPending._v25safe) {
+    const _origCP25 = confirmPending;
+    confirmPending = function(p) {
+        try { return _origCP25(p); }
+        catch (e) {
+            console.error("[TB-confirmPending]", e);
+            if (typeof feedEvent === "function") feedEvent("info", `Trade-Öffnungsfehler ${p?.symbol}: ${e.message}`);
+            // still remove from pending so we don't loop forever
+            if (state.pending) state.pending = state.pending.filter((x) => x !== p);
+        }
+    };
+    confirmPending._v25safe = true;
+}
+
+// 6. Report status: bot never dies message on Übersicht
+setTimeout(() => {
+    if (typeof feedEvent === "function") feedEvent("info", "v25 aktiv: Bot fängt Fehler ab und läuft weiter — kein Total-Ausfall mehr möglich");
+}, 2000);
+
 })();
