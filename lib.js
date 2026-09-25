@@ -2090,6 +2090,97 @@ async function walkForwardBacktest(candles, symbol, cfg, ensembleFn, planFn, atr
     return results;
 }
 
+// =========================================================================
+// v17: BlackRock-Priority helpers — audit-log, depth, factors, benchmark
+// =========================================================================
+
+async function sha256Hex(text) {
+    const buf = new TextEncoder().encode(text);
+    const h = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function fetchOrderBookDepth(symbol, limit = 20) {
+    try {
+        const sym = symbol.replace("/", "");
+        const raw = await fetch(`https://api.binance.com/api/v3/depth?symbol=${sym}&limit=${limit}`).then((r) => r.json());
+        if (!raw?.bids || !raw?.asks) return null;
+        const bids = raw.bids.map(([p, q]) => ({ price: +p, qty: +q }));
+        const asks = raw.asks.map(([p, q]) => ({ price: +p, qty: +q }));
+        let cumB = 0, cumA = 0;
+        for (const b of bids) { cumB += b.qty; b.cum = cumB; }
+        for (const a of asks) { cumA += a.qty; a.cum = cumA; }
+        const bid = bids[0].price, ask = asks[0].price;
+        const mid = (bid + ask) / 2;
+        return { bid, ask, mid, spreadBps: (ask - bid) / mid * 10000, bids, asks };
+    } catch { return null; }
+}
+
+function estimateSlippage(depth, side, notionalUSD) {
+    if (!depth) return null;
+    const book = side === "long" ? depth.asks : depth.bids;
+    let remaining = notionalUSD, filled = 0, cost = 0;
+    for (const lvl of book) {
+        const lvlNotional = lvl.price * lvl.qty;
+        const take = Math.min(remaining, lvlNotional);
+        filled += take / lvl.price;
+        cost += take;
+        remaining -= take;
+        if (remaining <= 0) break;
+    }
+    if (remaining > 0) return { partial: true, filled, cost, avgPrice: filled > 0 ? cost / filled : 0, slippageBps: null };
+    const avgPrice = cost / filled;
+    const impact = side === "long" ? (avgPrice - depth.mid) / depth.mid : (depth.mid - avgPrice) / depth.mid;
+    return { partial: false, filled, cost, avgPrice, slippageBps: impact * 10000 };
+}
+
+const STRATEGY_FACTORS = {
+    ema_cross:            { trend: 1.0, momentum: 0.5 },
+    macd_trend:           { trend: 0.8, momentum: 0.7 },
+    donchian_breakout:    { trend: 0.9, momentum: 0.6 },
+    ptj_momentum:         { momentum: 1.0, trend: 0.5 },
+    livermore_pivot:      { trend: 0.7, momentum: 0.6 },
+    weinstein_stage:      { trend: 1.0 },
+    rsi_meanrev:          { mean_reversion: 1.0 },
+    bollinger_squeeze:    { volatility: 0.7, mean_reversion: 0.4 },
+    mmcrypto_style:       { mean_reversion: 0.6, momentum: 0.4 },
+    soros_reflexive:      { contrarian: 0.7, momentum: 0.5 },
+    burry_contrarian:     { contrarian: 1.0, value: 0.5 },
+    paulson_short:        { contrarian: 0.9, volatility: 0.4 },
+    buffett_value:        { value: 1.0, mean_reversion: 0.3 },
+    templeton_deep:       { value: 1.0, contrarian: 0.5 },
+    ackman_concentrated:  { value: 0.7, momentum: 0.3 },
+    dalio_allweather:     { value: 0.4, trend: 0.3 },
+    mega_confluence:      { trend: 0.4, momentum: 0.4, mean_reversion: 0.2 },
+    dca_buffett:          { value: 1.0 },
+    limit_order:          { mean_reversion: 0.5 },
+    manual:               {},
+    rebalance:            { mean_reversion: 0.5 },
+    pair_trade:           { mean_reversion: 0.7 },
+};
+
+function factorAttribution(positions, prices) {
+    const factors = { trend: 0, momentum: 0, mean_reversion: 0, volatility: 0, contrarian: 0, value: 0 };
+    let totalWeight = 0;
+    for (const sym in positions) {
+        const p = positions[sym];
+        const price = prices[sym] || p.entry;
+        const notional = Math.abs(p.qty * price);
+        const strats = (p.meta?.strategy || "").split(",").filter(Boolean);
+        for (const s of strats) {
+            const f = STRATEGY_FACTORS[s.trim()] || {};
+            for (const [factor, weight] of Object.entries(f)) {
+                factors[factor] += notional * weight;
+                totalWeight += notional * weight;
+            }
+        }
+    }
+    if (totalWeight === 0) return factors;
+    const out = {};
+    for (const [f, v] of Object.entries(factors)) out[f] = v / totalWeight * 100;
+    return out;
+}
+
 // ---------- exports ----------
 return {
     sma, ema, rsi, macd, bollinger, atr, adx, donchian, obv, stoch, williamsR, cci, mfi,
@@ -2099,6 +2190,9 @@ return {
     attributeTradeLoss, walkForwardBacktest,
     fetchOrderBookSnapshot, bayesianWinRate, computePortfolioVol,
     crossSymbolConfluence, sessionAttention,
+    // v17: BlackRock additions
+    sha256Hex, fetchOrderBookDepth, estimateSlippage,
+    factorAttribution, STRATEGY_FACTORS,
     closes, highs, lows, vols,
     STRATEGIES, ensemble,
     planTrade, forecast, assessRisk,
