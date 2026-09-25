@@ -2181,6 +2181,74 @@ function factorAttribution(positions, prices) {
     return out;
 }
 
+// =========================================================================
+// v21: Binance WebSocket manager — sub-second live prices + kline updates
+// Auto-reconnect on disconnect. Falls back gracefully if WS unreachable.
+// =========================================================================
+class BinanceStreamManager {
+    constructor() {
+        this.ws = null;
+        this.symbols = [];
+        this.timeframe = "15m";
+        this.onTicker = null;
+        this.onKline = null;
+        this.onError = null;
+        this.reconnectDelay = 1000;
+        this.maxReconnectDelay = 30000;
+        this.destroyed = false;
+    }
+    subscribe(symbols, timeframe = "15m") {
+        this.symbols = symbols.map((s) => s.replace("/", "").toLowerCase());
+        this.timeframe = timeframe;
+        this._connect();
+    }
+    _connect() {
+        if (this.destroyed) return;
+        const streams = this.symbols.flatMap((s) => [`${s}@ticker`, `${s}@kline_${this.timeframe}`]).join("/");
+        const url = `wss://stream.binance.com:9443/stream?streams=${streams}`;
+        try {
+            this.ws = new WebSocket(url);
+            this.ws.onopen = () => { this.reconnectDelay = 1000; };
+            this.ws.onmessage = (ev) => this._onMessage(ev);
+            this.ws.onerror = (e) => { if (this.onError) this.onError(e); };
+            this.ws.onclose = () => {
+                if (this.destroyed) return;
+                setTimeout(() => this._connect(), this.reconnectDelay);
+                this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
+            };
+        } catch (e) { if (this.onError) this.onError(e); }
+    }
+    _onMessage(ev) {
+        try {
+            const msg = JSON.parse(ev.data);
+            if (!msg?.data) return;
+            const d = msg.data;
+            if (d.e === "24hrTicker" && this.onTicker) {
+                // Symbol like BTCUSDT → BTC/USDT
+                const sym = d.s.replace(/USDT$/, "/USDT");
+                this.onTicker(sym, {
+                    price: parseFloat(d.c),
+                    change24h: parseFloat(d.P),
+                    volume: parseFloat(d.v),
+                    ts: d.E,
+                });
+            } else if (d.e === "kline" && this.onKline) {
+                const sym = d.s.replace(/USDT$/, "/USDT");
+                const k = d.k;
+                this.onKline(sym, {
+                    ts: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v,
+                    closed: k.x,           // true when candle just closed
+                });
+            }
+        } catch (e) { /* silent parse error */ }
+    }
+    close() {
+        this.destroyed = true;
+        if (this.ws) try { this.ws.close(); } catch (e) {}
+    }
+    isConnected() { return this.ws && this.ws.readyState === WebSocket.OPEN; }
+}
+
 // ---------- exports ----------
 return {
     sma, ema, rsi, macd, bollinger, atr, adx, donchian, obv, stoch, williamsR, cci, mfi,
@@ -2193,6 +2261,8 @@ return {
     // v17: BlackRock additions
     sha256Hex, fetchOrderBookDepth, estimateSlippage,
     factorAttribution, STRATEGY_FACTORS,
+    // v21: WebSocket streaming
+    BinanceStreamManager,
     closes, highs, lows, vols,
     STRATEGIES, ensemble,
     planTrade, forecast, assessRisk,
