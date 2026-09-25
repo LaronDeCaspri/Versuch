@@ -806,14 +806,23 @@ async function scanAll() {
     state.scanCount++;
     pushEquityPoint();
     if (state.halted) {
-        // still refresh prices to keep charts alive
         const results = await Promise.all(CFG.symbols.map(scanSymbol));
         state.lastScan = results;
+        // v19: mark klines fresh if at least one fetch succeeded
+        if (results.some((r) => !r.error)) {
+            state.klinesLastUpdate = Date.now();
+            state.pricesLastUpdate = Date.now();     // scanSymbol also updates prices
+        }
         renderAll();
         return;
     }
     const results = await Promise.all(CFG.symbols.map(scanSymbol));
     state.lastScan = results;
+    // v19: mark klines + prices fresh if at least one fetch succeeded
+    if (results.some((r) => !r.error)) {
+        state.klinesLastUpdate = Date.now();
+        state.pricesLastUpdate = Date.now();
+    }
 
     // consider signals
     for (const r of results) {
@@ -5273,70 +5282,88 @@ function collectSourceStatus() {
     const now = Date.now();
     const sources = [];
 
-    // Binance klines (main scan) — inferred from candle timestamps
+    // v19: use LAST FETCH TIMESTAMP, not candle timestamp — a 15m candle
+    // naturally is up to 15 min old; that doesn't mean the fetch failed.
+    // Fresh thresholds are generous (2x expected interval).
+
+    // Binance klines — bot rescans every 30s, so fresh <= 90s, stale <= 5min
     const btcCandles = state.candles["BTC/USDT"];
-    const lastBtcTs = btcCandles ? btcCandles[btcCandles.length - 1].ts : null;
+    const klinesAge = state.klinesLastUpdate ? now - state.klinesLastUpdate : null;
     sources.push({
         name: "Binance Kerzen (Kern)", url: "api.binance.com/klines",
-        lastOk: lastBtcTs ? lastBtcTs : null,
-        age: lastBtcTs ? now - lastBtcTs : null,
-        status: _statusFromAge(lastBtcTs ? now - lastBtcTs : null, 60000, 300000),
-        detail: btcCandles ? `${btcCandles.length} Kerzen · aktuellste ${new Date(lastBtcTs).toLocaleTimeString("de-DE")}` : "keine Daten",
+        lastOk: state.klinesLastUpdate,
+        age: klinesAge,
+        status: state.klinesLastUpdate
+            ? _statusFromAge(klinesAge, 90 * 1000, 5 * 60 * 1000)
+            : (btcCandles && btcCandles.length ? "warn" : "pending"),
+        detail: btcCandles
+            ? `${btcCandles.length} Kerzen · Letzter Scan ${state.klinesLastUpdate ? _fmtAge(klinesAge) + " her" : "beim Start"}`
+            : "warte auf Erst-Scan",
     });
 
-    // Live prices
+    // Live prices — refreshPrices runs every 5s, fresh <= 30s, stale <= 2min
     const priceCount = Object.keys(state.prices || {}).length;
     sources.push({
         name: "Binance Live-Preise", url: "api.binance.com/ticker/price",
         lastOk: state.pricesLastUpdate,
         age: state.pricesLastUpdate ? now - state.pricesLastUpdate : null,
-        status: priceCount > 0 ? _statusFromAge(state.pricesLastUpdate ? now - state.pricesLastUpdate : null, 20000, 60000) : "pending",
+        status: priceCount > 0
+            ? _statusFromAge(state.pricesLastUpdate ? now - state.pricesLastUpdate : null, 30 * 1000, 2 * 60 * 1000)
+            : "pending",
         detail: `${priceCount} Preise geladen`,
     });
 
-    // 24h tickers
+    // 24h tickers — refreshes every 30s, fresh <= 60s, stale <= 5min
     const tickerCount = Object.keys(state.tickers || {}).length;
     sources.push({
         name: "Binance 24h Ticker", url: "api.binance.com/ticker/24hr",
         lastOk: state.tickersLastUpdate,
         age: state.tickersLastUpdate ? now - state.tickersLastUpdate : null,
-        status: tickerCount > 0 ? _statusFromAge(state.tickersLastUpdate ? now - state.tickersLastUpdate : null, 90000, 300000) : "pending",
+        status: tickerCount > 0
+            ? _statusFromAge(state.tickersLastUpdate ? now - state.tickersLastUpdate : null, 60 * 1000, 5 * 60 * 1000)
+            : "pending",
         detail: `${tickerCount} Symbole`,
     });
 
-    // Futures data
+    // Futures — refreshes every 60s, fresh <= 2min, stale <= 10min
     const futuresCount = (state.futuresData || []).length;
     sources.push({
         name: "Binance Futures (Funding/OI)", url: "fapi.binance.com",
         lastOk: state.futuresLastUpdate,
         age: state.futuresLastUpdate ? now - state.futuresLastUpdate : null,
-        status: futuresCount > 0 ? _statusFromAge(state.futuresLastUpdate ? now - state.futuresLastUpdate : null, 200000, 600000) : "pending",
+        status: futuresCount > 0
+            ? _statusFromAge(state.futuresLastUpdate ? now - state.futuresLastUpdate : null, 2 * 60 * 1000, 10 * 60 * 1000)
+            : "pending",
         detail: `${futuresCount} Symbole mit Funding-Daten`,
     });
 
-    // Fear & Greed (alternative.me)
+    // Fear & Greed — refreshes every 60s, fresh <= 5min, stale <= 30min
     sources.push({
         name: "Fear & Greed (alternative.me)", url: "api.alternative.me/fng",
         lastOk: state.fng?.ts,
         age: state.fng?.ts ? now - state.fng.ts : null,
         status: state.fng
-            ? (state.fng.fallback ? "warn" : _statusFromAge(now - state.fng.ts, 6 * 3600 * 1000, 24 * 3600 * 1000))
+            ? (state.fng.fallback
+                ? "warn"
+                : _statusFromAge(now - state.fng.ts, 5 * 60 * 1000, 30 * 60 * 1000))
             : "err",
         detail: state.fng
             ? (state.fng.fallback ? "Fallback: Binance-Composite" : `Wert ${state.fng.value} · ${state.fng.label}`)
             : (state.fngError || "keine Daten"),
     });
 
-    // CoinGecko Global (market context)
+    // CoinGecko Global — refreshes every 90s, fresh <= 3min, stale <= 15min
     sources.push({
         name: "CoinGecko Global (BTC-Dom, Mcap)", url: "api.coingecko.com/global",
         lastOk: state.marketCtxLastUpdate,
         age: state.marketCtxLastUpdate ? now - state.marketCtxLastUpdate : null,
-        status: state.marketGlobal ? _statusFromAge(state.marketCtxLastUpdate ? now - state.marketCtxLastUpdate : null, 6 * 60 * 1000, 30 * 60 * 1000) : "err",
+        status: state.marketGlobal
+            ? _statusFromAge(state.marketCtxLastUpdate ? now - state.marketCtxLastUpdate : null, 3 * 60 * 1000, 15 * 60 * 1000)
+            : "err",
         detail: state.marketGlobal ? `BTC-Dom ${state.marketGlobal.btcDominance?.toFixed(1)}%` : (state.marketCtxError || "keine Daten"),
     });
 
-    // CoinGecko Trending
+    // CoinGecko Trending — same source
     sources.push({
         name: "CoinGecko Trending", url: "api.coingecko.com/search/trending",
         lastOk: state.marketCtxLastUpdate,
@@ -5345,30 +5372,36 @@ function collectSourceStatus() {
         detail: state.trending?.length ? `${state.trending.length} Coins` : "keine Daten",
     });
 
-    // On-Chain (mempool.space)
+    // On-Chain — refreshes every 60s, fresh <= 3min, stale <= 15min
     sources.push({
         name: "On-Chain (mempool.space)", url: "mempool.space/api",
         lastOk: state.onchainLastUpdate,
         age: state.onchainLastUpdate ? now - state.onchainLastUpdate : null,
-        status: state.onchain ? _statusFromAge(state.onchainLastUpdate ? now - state.onchainLastUpdate : null, 6 * 60 * 1000, 30 * 60 * 1000) : "err",
+        status: state.onchain
+            ? _statusFromAge(state.onchainLastUpdate ? now - state.onchainLastUpdate : null, 3 * 60 * 1000, 15 * 60 * 1000)
+            : "err",
         detail: state.onchain ? `Fees ${state.onchain.fastFee ?? "?"} sat/vB · ${state.onchain.mempoolSize ?? "?"} TX` : (state.onchainError || "keine Daten"),
     });
 
-    // Whale transfers
+    // Whales — refreshes every 60s, fresh <= 3min, stale <= 15min
     sources.push({
         name: "Whale-Transfers", url: "mempool.space/api/mempool/recent",
         lastOk: state.whalesLastUpdate,
         age: state.whalesLastUpdate ? now - state.whalesLastUpdate : null,
-        status: state.whales ? "ok" : "pending",
+        status: state.whales
+            ? _statusFromAge(state.whalesLastUpdate ? now - state.whalesLastUpdate : null, 3 * 60 * 1000, 15 * 60 * 1000)
+            : "pending",
         detail: state.whales ? `${state.whales.length} Transfers > 10 BTC` : "warten",
     });
 
-    // EUR rate
+    // EUR rate — refreshes every 60s, fresh <= 5min, stale <= 30min
     sources.push({
         name: "EUR-Rate (Frankfurter)", url: "api.frankfurter.app",
         lastOk: state.eurRateLastUpdate,
         age: state.eurRateLastUpdate ? now - state.eurRateLastUpdate : null,
-        status: state.eurRate ? "ok" : "err",
+        status: state.eurRate
+            ? _statusFromAge(state.eurRateLastUpdate ? now - state.eurRateLastUpdate : null, 5 * 60 * 1000, 30 * 60 * 1000)
+            : "err",
         detail: state.eurRate ? `1 USD = ${state.eurRate.toFixed(4)} EUR` : "keine Daten",
     });
 
@@ -5459,12 +5492,13 @@ function renderSymbolDataStatus() {
     const el = $("#symbol-data-status");
     if (!el) return;
     const now = Date.now();
+    // v19: freshness by last scan time, not candle timestamp
+    const scanAge = state.klinesLastUpdate ? now - state.klinesLastUpdate : null;
     const rows = CFG.symbols.map((sym) => {
         const c = state.candles[sym];
         const p = state.prices[sym];
-        const lastCandleTs = c ? c[c.length - 1].ts : null;
-        const ageStr = lastCandleTs ? _fmtAge(now - lastCandleTs) : "–";
-        const status = c && c.length >= 100 && (now - lastCandleTs) < 5 * 60 * 1000 ? "ok"
+        // Fresh = have >=100 candles AND last scan < 90s ago
+        const status = c && c.length >= 100 && scanAge && scanAge < 90 * 1000 ? "ok"
                      : c && c.length >= 20 ? "warn"
                      : "err";
         const patterns = state.livePatterns?.[sym] ? Object.keys(state.livePatterns[sym]).length : 0;
@@ -5479,8 +5513,8 @@ function renderSymbolDataStatus() {
             </div>
             <span class="status-badge ${status === "ok" ? "live" : status === "warn" ? "stale" : "off"}">${status === "ok" ? "frisch" : status === "warn" ? "wenige" : "leer"}</span>
             <div class="status-details">
-                <div><strong>${ageStr}</strong></div>
-                <div style="font-size:0.66rem;">seit letzter Kerze</div>
+                <div><strong>${scanAge ? _fmtAge(scanAge) : "–"}</strong></div>
+                <div style="font-size:0.66rem;">seit letztem Scan</div>
             </div>
         </div>`;
     }).join("");
@@ -5580,8 +5614,13 @@ function _installFetchTracking() {
 // Hook price/ticker/etc updates directly since they aren't on window
 const _origRefreshPrices = refreshPrices;
 refreshPrices = async function() {
-    try { await _origRefreshPrices(); state.pricesLastUpdate = Date.now(); }
-    catch (e) { logError("Binance Preise", e.message); throw e; }
+    try {
+        await _origRefreshPrices();
+        // v19: mark fresh whenever we have SOME price data — even partial success is progress
+        if (Object.keys(state.prices || {}).length > 0) {
+            state.pricesLastUpdate = Date.now();
+        }
+    } catch (e) { logError("Binance Preise", e.message); }
 };
 
 const _origRefresh24 = refresh24hTickers;
@@ -6469,15 +6508,18 @@ function computeHealthStatus() {
     const halted = state.halted;
     const cbActive = state.v11?.circuitBreakerActive;
 
+    // v19: use last-scan-time, not candle timestamp
+    const scanAge = state.klinesLastUpdate ? Date.now() - state.klinesLastUpdate : null;
+
     // CRITICAL problems (red pulse)
     if (!btcCandles || btcCandles.length < 100) {
         return { level: "err", title: "Bot startet noch",
             detail: "Kurs-Daten laden. Warte 30-60 Sekunden.",
             action: null };
     }
-    if (btcAge > 10 * 60 * 1000) {
-        return { level: "err", title: "Kurs-Daten zu alt",
-            detail: `Letzte BTC-Kerze vor ${Math.round(btcAge/60000)} min. Binance evtl. blockiert.`,
+    if (scanAge != null && scanAge > 5 * 60 * 1000) {
+        return { level: "err", title: "Scan-Loop hängt",
+            detail: `Letzter Scan vor ${Math.round(scanAge/60000)} min. Binance evtl. blockiert oder Tab war lange inaktiv.`,
             action: { label: "Neu laden", fn: () => location.reload() } };
     }
     if (halted) {
@@ -6491,10 +6533,11 @@ function computeHealthStatus() {
             action: { label: "Details", fn: () => document.querySelector('[data-tab="status"]')?.click() } };
     }
     // WARNING problems (yellow pulse)
-    const priceStale = state.pricesLastUpdate && (now - state.pricesLastUpdate) > 60 * 1000;
+    // v19: 3min tolerance for prices (refreshPrices every 5s, Binance latency + browser throttle possible)
+    const priceStale = state.pricesLastUpdate && (Date.now() - state.pricesLastUpdate) > 3 * 60 * 1000;
     if (priceStale) {
         return { level: "warn", title: "Live-Preise etwas veraltet",
-            detail: `Letzter Update vor ${Math.round((now - state.pricesLastUpdate)/1000)}s. Bot funktioniert, aber Preise stocken.`,
+            detail: `Letzter Update vor ${Math.round((Date.now() - state.pricesLastUpdate)/1000)}s.`,
             action: { label: "Status", fn: () => document.querySelector('[data-tab="status"]')?.click() } };
     }
     if (state.v10?.lossStreak >= 3) {
