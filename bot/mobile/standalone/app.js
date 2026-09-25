@@ -7651,4 +7651,132 @@ if (typeof INFO_DB === "object") {
     };
 }
 
+// =====================================================================
+// v23: AGGRESSIVE LEARN MODE — force trades to happen so user can learn
+// =====================================================================
+
+// 1. Force immediate scan on load
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => {
+        if (typeof scanAll === "function") {
+            if (typeof feedEvent === "function") feedEvent("info", "Erst-Scan wird sofort ausgeführt (v23)");
+            scanAll().catch(() => {});
+        }
+    }, 3500);
+});
+
+// 2. Dramatically lower ensemble thresholds when Learn Mode is on
+if (typeof scanSymbol === "function" && !scanSymbol._v23aggressive) {
+    const _origScanSymV23 = scanSymbol;
+    scanSymbol = async function(symbol) {
+        try {
+            const candles = await window.TB.fetchKlines(symbol, CFG.primaryTf, 500);
+            state.candles[symbol] = candles;
+            state.prices[symbol] = candles[candles.length - 1].close;
+            if (typeof refreshMatrix === "function") refreshMatrix(symbol, candles);
+            const price = state.prices[symbol];
+            const events = broker.onPrice(symbol, price);
+            for (const ev of events) {
+                if (ev.kind === "trail") continue;
+                const verb = ev.kind === "sl" ? "Stop-Loss" : "Take-Profit";
+                announce(`${verb} bei ${symbol.replace("/", " gegen ")}. ${ev.pnl >= 0 ? "+" : ""}${ev.pnl.toFixed(2)}.`, ev.pnl >= 0 ? "success" : "warn");
+            }
+            const minScore = state.learnMode ? 0.8 : CFG.softMinScore;
+            const minAgree = state.learnMode ? 1 : CFG.softAgreement;
+            const result = window.TB.ensemble(candles, minScore, minAgree, state.adaptiveWeights);
+            return { symbol, ...result, price };
+        } catch (e) { return { symbol, error: e.message }; }
+    };
+    scanSymbol._v23aggressive = true;
+}
+
+// 3. Bot-IQ meter
+state.botIQ = state.botIQ || parseInt(localStorage.getItem("tb_bot_iq") || "100");
+function updateBotIQ(pnl) {
+    if (pnl > 0) state.botIQ = Math.min(500, state.botIQ + Math.min(20, Math.log10(pnl + 1) * 15));
+    else if (pnl < 0) state.botIQ = Math.max(0, state.botIQ - Math.min(15, Math.log10(Math.abs(pnl) + 1) * 10));
+    localStorage.setItem("tb_bot_iq", String(Math.round(state.botIQ)));
+}
+if (broker && !broker._v23iq) {
+    const _ocV23 = broker.close.bind(broker);
+    broker.close = function(symbol, price, fraction) {
+        const r = _ocV23(symbol, price, fraction);
+        if (r && r.pnl !== undefined) updateBotIQ(r.pnl);
+        return r;
+    };
+    broker._v23iq = true;
+}
+
+function ensureBotIqCard() {
+    if (document.getElementById("bot-iq-card")) return;
+    const activityCard = document.getElementById("learn-mode-card");
+    if (!activityCard) return;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.id = "bot-iq-card";
+    card.innerHTML = `
+        <h2>Bot-Lernfortschritt <span class="badge" id="iq-level">IQ 100</span></h2>
+        <div id="iq-bar-wrap" style="height:16px; background:rgba(255,255,255,0.05); border-radius:8px; overflow:hidden;">
+            <div id="iq-bar" style="height:100%; width:20%; background:linear-gradient(90deg, var(--accent), var(--accent-2)); transition:width 0.6s;"></div>
+        </div>
+        <div style="margin-top:10px; font-size:0.82rem; color:var(--text-2);">
+            <div id="iq-status">Beginner — Bot muss noch lernen</div>
+            <div style="color:var(--muted); font-size:0.72rem; margin-top:4px;">
+                Basiert auf Trade-Historie: Gewinne erhöhen den IQ, Verluste reduzieren ihn.
+            </div>
+        </div>
+    `;
+    activityCard.after(card);
+    renderBotIQ();
+}
+function renderBotIQ() {
+    const badge = document.getElementById("iq-level");
+    const bar = document.getElementById("iq-bar");
+    const stat = document.getElementById("iq-status");
+    if (!badge || !bar || !stat) return;
+    const iq = Math.round(state.botIQ);
+    badge.textContent = `IQ ${iq}`;
+    bar.style.width = `${Math.min(100, iq / 5)}%`;
+    let label;
+    if (iq < 50) label = "🍼 Beginner — sammelt Erfahrung";
+    else if (iq < 100) label = "🎓 Anfänger — beobachtet Muster";
+    else if (iq < 200) label = "📈 Fortgeschritten — findet Setups";
+    else if (iq < 300) label = "🧠 Erfahren — trifft gute Entscheidungen";
+    else if (iq < 400) label = "⚡ Experte — konsistente Gewinne";
+    else label = "🏆 Meister — Institutional-Level";
+    stat.textContent = label;
+}
+setInterval(renderBotIQ, 3000);
+setInterval(ensureBotIqCard, 3000);
+
+// Bigger activity display
+setTimeout(() => {
+    const act = document.getElementById("current-activity");
+    if (act) {
+        act.style.fontSize = "1rem";
+        act.style.padding = "14px 16px";
+        act.style.fontWeight = "500";
+        act.style.borderLeftWidth = "4px";
+    }
+}, 3000);
+
+// Richer scan narration
+if (typeof scanAll === "function" && !scanAll._v23narrate2) {
+    const _origSAV23 = scanAll;
+    scanAll = async function() {
+        await _origSAV23();
+        try {
+            const signals = (state.lastScan || []).filter((r) => r.side);
+            if (signals.length) {
+                const first = signals[0];
+                if (typeof feedEvent === "function") feedEvent("info",
+                    `Scan #${state.scanCount}: ${first.symbol} zeigt ${first.side === "long" ? "KAUFEN" : "VERKAUFEN"}-Signal · Score ${first.score?.toFixed(2)} · ${first.signals?.length || 0} Strategien einig`);
+            } else if (state.scanCount % 3 === 0) {
+                if (typeof feedEvent === "function") feedEvent("info", `Scan #${state.scanCount}: alle Symbole ruhig — Bot wartet`);
+            }
+        } catch (e) {}
+    };
+    scanAll._v23narrate2 = true;
+}
+
 })();
