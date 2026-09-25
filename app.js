@@ -65,7 +65,8 @@ const state = {
     candles: {},                             // {symbol: [candles]}
     prices: {},                              // {symbol: price}
     pending: [],                             // pending signals awaiting confirm
-    autoMode: localStorage.getItem("tb_auto") === "1",
+    // v16: auto-mode default ON (bot decides itself, no user confirmation needed)
+    autoMode: localStorage.getItem("tb_auto") === "0" ? false : true,
     fng: null,
     scanCount: 0,
     tradeCount: 0,
@@ -1799,13 +1800,13 @@ async function boot() {
     fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable);
     refresh24hTickers();
 
-    // loops
-    setInterval(scanAll, CFG.scanIntervalSec * 1000);
-    setInterval(refreshPrices, CFG.priceIntervalSec * 1000);
-    setInterval(refreshFng, 5 * 60 * 1000);
-    setInterval(() => { fetchNews().then(renderNewsList); }, 5 * 60 * 1000);
-    setInterval(() => { fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable); }, 3 * 60 * 1000);
-    setInterval(refresh24hTickers, 60 * 1000);
+    // v16: aggressive loops — everything fresh
+    setInterval(scanAll, CFG.scanIntervalSec * 1000);       // 30s
+    setInterval(refreshPrices, 5 * 1000);                    // 5s (was 10s)
+    setInterval(refreshFng, 60 * 1000);                      // 60s (was 5min)
+    setInterval(() => { fetchNews().then(renderNewsList); }, 90 * 1000);   // 90s
+    setInterval(() => { fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable); }, 60 * 1000);   // 60s
+    setInterval(refresh24hTickers, 30 * 1000);               // 30s (was 60s)
 }
 
 // ============ v6: THEME TOGGLE ============
@@ -6365,14 +6366,353 @@ document.addEventListener("DOMContentLoaded", () => {
         refreshWhales();
         renderEconCalendar();
     }, 2000);
-    setInterval(refreshMarketCtx, 5 * 60 * 1000);
-    setInterval(refreshOnChain, 5 * 60 * 1000);
-    setInterval(refreshEurRate, 15 * 60 * 1000);
-    setInterval(checkHealth, 10 * 60 * 1000);
-    setInterval(refreshWhales, 3 * 60 * 1000);
-    setInterval(renderEconCalendar, 60 * 1000);
+    setInterval(refreshMarketCtx, 90 * 1000);          // v16: 90s (was 5min)
+    setInterval(refreshOnChain, 60 * 1000);            // v16: 60s (was 5min)
+    setInterval(refreshEurRate, 60 * 1000);            // v16: 60s (was 15min) — user complaint
+    setInterval(checkHealth, 3 * 60 * 1000);           // v16: 3min (was 10min)
+    setInterval(refreshWhales, 60 * 1000);             // v16: 60s (was 3min)
+    setInterval(renderEconCalendar, 30 * 1000);
 });
 
-document.addEventListener("DOMContentLoaded", boot);
+// =====================================================================
+// v16: HEALTH-PULSE + INTELLIGENCE + REJECTION-LOG + AUTO-DEFAULT
+// =====================================================================
+
+// Rejection log — WHY the bot didn't trade
+state.rejectionLog = state.rejectionLog || [];
+function logRejection(symbol, gate, reason) {
+    state.rejectionLog.push({
+        ts: Date.now(), symbol, gate, reason: String(reason).slice(0, 150),
+    });
+    if (state.rejectionLog.length > 40) state.rejectionLog = state.rejectionLog.slice(-40);
+}
+
+// Learning system — accumulates lessons from closed trades
+state.lessons = JSON.parse(localStorage.getItem("tb_lessons") || "[]");
+state.stratStats = JSON.parse(localStorage.getItem("tb_strat_stats") || "{}");
+function saveLessons() {
+    try {
+        localStorage.setItem("tb_lessons", JSON.stringify(state.lessons.slice(-50)));
+        localStorage.setItem("tb_strat_stats", JSON.stringify(state.stratStats));
+    } catch (e) {}
+}
+
+// Hook broker.close to learn from every outcome
+if (!broker._learningHooked) {
+    const _origCloseLearn = broker.close.bind(broker);
+    broker.close = function(symbol, price, fraction) {
+        const posBefore = broker.positions[symbol];
+        const strats = (posBefore?.meta?.strategy || "").split(",").filter(Boolean);
+        const r = _origCloseLearn(symbol, price, fraction);
+        if (r && r.pnl !== undefined && posBefore) {
+            const won = r.pnl > 0;
+            // Update strategy stats
+            for (const s of strats) {
+                if (!state.stratStats[s]) state.stratStats[s] = { wins: 0, losses: 0, totalPnl: 0, avgPnl: 0 };
+                if (won) state.stratStats[s].wins++;
+                else state.stratStats[s].losses++;
+                state.stratStats[s].totalPnl += r.pnl;
+                const n = state.stratStats[s].wins + state.stratStats[s].losses;
+                state.stratStats[s].avgPnl = state.stratStats[s].totalPnl / n;
+            }
+            // Derive lesson
+            const rationale = posBefore.rationale;
+            const holdMs = posBefore.opened_at ? Date.now() - new Date(posBefore.opened_at).getTime() : 0;
+            let lesson = "";
+            let category = won ? "good" : "bad";
+            if (won && r.pnl > (posBefore.entry * posBefore.qty * 0.02)) {
+                lesson = `${symbol} ${posBefore.side}: solider Gewinn (+${r.pnl.toFixed(2)}$) mit Strategien ${strats.join(", ")}. Diese Kombination merken.`;
+            } else if (won) {
+                lesson = `${symbol} ${posBefore.side}: kleiner Gewinn (+${r.pnl.toFixed(2)}$). Trailing-Stop hat evtl. zu früh gegriffen.`;
+            } else if (holdMs < 15 * 60 * 1000) {
+                lesson = `${symbol} ${posBefore.side}: schneller Loss (${(r.pnl).toFixed(2)}$ in ${Math.round(holdMs/60000)} min). Entry-Timing prüfen — Preis-Momentum war noch nicht bestätigt.`;
+            } else if (rationale?.regime?.volatility === "panic") {
+                lesson = `${symbol} ${posBefore.side}: Loss ${r.pnl.toFixed(2)}$ in Panik-Regime. Regel gefestigt: keine Trades bei ATR > 4%.`;
+            } else {
+                lesson = `${symbol} ${posBefore.side}: Loss ${r.pnl.toFixed(2)}$. Strategien ${strats.join(", ")} — Gewicht wird automatisch reduziert.`;
+            }
+            state.lessons.push({
+                ts: Date.now(), symbol, side: posBefore.side, pnl: r.pnl, won,
+                strats, lesson, category, holdMs,
+            });
+            if (state.lessons.length > 100) state.lessons = state.lessons.slice(-100);
+            saveLessons();
+        }
+        return r;
+    };
+    broker._learningHooked = true;
+}
+
+// Compute intelligent adaptive weights from learning
+function _intelligentWeights() {
+    const w = {};
+    for (const [name, s] of Object.entries(state.stratStats)) {
+        const n = s.wins + s.losses;
+        if (n < 3) { w[name] = 1.0; continue; }
+        const wr = s.wins / n;
+        // Boost strong strategies, dampen weak ones (bounded 0.3-2.0)
+        w[name] = Math.max(0.3, Math.min(2.0, 0.5 + wr * 1.5));
+    }
+    return w;
+}
+
+// ---- Compute current health status → determines pulse color + message ----
+function computeHealthStatus() {
+    const now = Date.now();
+    const btcCandles = state.candles["BTC/USDT"];
+    const lastBtcTs = btcCandles ? btcCandles[btcCandles.length - 1].ts : null;
+    const btcOk = lastBtcTs && (now - lastBtcTs) < 5 * 60 * 1000;
+    const btcAge = lastBtcTs ? now - lastBtcTs : Infinity;
+    const priceCount = Object.keys(state.prices || {}).length;
+    const halted = state.halted;
+    const cbActive = state.v11?.circuitBreakerActive;
+
+    // CRITICAL problems (red pulse)
+    if (!btcCandles || btcCandles.length < 100) {
+        return { level: "err", title: "Bot startet noch",
+            detail: "Kurs-Daten laden. Warte 30-60 Sekunden.",
+            action: null };
+    }
+    if (btcAge > 10 * 60 * 1000) {
+        return { level: "err", title: "Kurs-Daten zu alt",
+            detail: `Letzte BTC-Kerze vor ${Math.round(btcAge/60000)} min. Binance evtl. blockiert.`,
+            action: { label: "Neu laden", fn: () => location.reload() } };
+    }
+    if (halted) {
+        return { level: "err", title: "Kill-Switch aktiv — Bot pausiert",
+            detail: "Tages-Verlust oder Drawdown-Limit erreicht. Entschärfen im Kill-Switch-Panel.",
+            action: { label: "Kill-Switch", fn: () => document.getElementById("killswitch")?.scrollIntoView({behavior:"smooth"}) } };
+    }
+    if (cbActive) {
+        return { level: "err", title: "Circuit-Breaker: kein neuer Trade",
+            detail: state.v11.circuitBreakerReason || "Portfolio-Risiko zu hoch",
+            action: { label: "Details", fn: () => document.querySelector('[data-tab="status"]')?.click() } };
+    }
+    // WARNING problems (yellow pulse)
+    const priceStale = state.pricesLastUpdate && (now - state.pricesLastUpdate) > 60 * 1000;
+    if (priceStale) {
+        return { level: "warn", title: "Live-Preise etwas veraltet",
+            detail: `Letzter Update vor ${Math.round((now - state.pricesLastUpdate)/1000)}s. Bot funktioniert, aber Preise stocken.`,
+            action: { label: "Status", fn: () => document.querySelector('[data-tab="status"]')?.click() } };
+    }
+    if (state.v10?.lossStreak >= 3) {
+        return { level: "warn", title: `${state.v10.lossStreak} Verluste in Folge`,
+            detail: "Bot verkleinert Positions-Grösse automatisch. Bei 5 → Pause.",
+            action: { label: "Warum?", fn: () => document.querySelector('[data-tab="status"]')?.click() } };
+    }
+    const recentReject = state.rejectionLog.filter((r) => now - r.ts < 15 * 60 * 1000).length;
+    if (recentReject >= 10 && state.tradeCount < 1) {
+        return { level: "warn", title: "Bot wartet auf Setup",
+            detail: `${recentReject} Signale verworfen (Gates zu streng?). Bislang kein Trade.`,
+            action: { label: "Rejects", fn: () => document.querySelector('[data-tab="status"]')?.click() } };
+    }
+    if (!state.autoMode) {
+        return { level: "warn", title: "Bot im Manuell-Modus",
+            detail: "Signale werden nur vorgeschlagen. Für Vollautomatik aktivieren.",
+            action: { label: "Aktivieren", fn: () => document.getElementById("mode-toggle")?.click() } };
+    }
+    // ALL GOOD (green pulsing)
+    const posCount = Object.keys(broker.positions).length;
+    const eq = broker.equity(state.prices);
+    return {
+        level: "ok",
+        title: `Alles läuft ${state.autoMode ? "· Vollautomatik AN" : ""}`,
+        detail: `${posCount} Positionen · Equity ${eq.toFixed(0)} USDT · ${state.lessons.length} Lektionen gelernt`,
+        action: null,
+    };
+}
+
+function renderHealthPulse() {
+    const el = document.getElementById("health-pulse");
+    if (!el) return;
+    const s = computeHealthStatus();
+    el.className = "health-pulse " + s.level;
+    el.querySelector(".pulse-title").textContent = s.title;
+    el.querySelector(".pulse-detail").textContent = s.detail;
+    const btn = el.querySelector(".pulse-action");
+    if (s.action) {
+        btn.style.display = "block";
+        btn.textContent = s.action.label;
+        btn.onclick = s.action.fn;
+    } else {
+        btn.style.display = "none";
+    }
+}
+
+// Render intelligence panel — show learned lessons + strategy scoreboard
+function renderIntelligence() {
+    let container = document.getElementById("intelligence-panel");
+    if (!container) return;
+    const stats = Object.entries(state.stratStats).sort((a, b) => b[1].totalPnl - a[1].totalPnl);
+    const recentLessons = state.lessons.slice(-6).reverse();
+    if (!stats.length && !recentLessons.length) {
+        container.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">Der Bot lernt aus jedem Trade. Sobald der erste Trade geschlossen ist, erscheinen hier Lektionen und Strategie-Bewertungen.</div>`;
+        return;
+    }
+    const topStrats = stats.slice(0, 5).map(([n, s]) => {
+        const wr = (s.wins + s.losses) > 0 ? (s.wins / (s.wins + s.losses) * 100).toFixed(0) : 0;
+        const cls = s.totalPnl > 0 ? "good" : "bad";
+        return `<div class="intel-lesson ${cls}">
+            <strong>${n.replace(/_/g, " ")}</strong>: ${s.wins}W/${s.losses}L (${wr}%) · Netto ${s.totalPnl >= 0 ? "+" : ""}${s.totalPnl.toFixed(2)} USDT
+        </div>`;
+    }).join("");
+    const lessonsHtml = recentLessons.map((l) => `
+        <div class="intel-lesson ${l.category}">
+            <div style="font-size:0.7rem; color:var(--muted);">${new Date(l.ts).toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div>
+            ${l.lesson}
+        </div>`).join("");
+    container.innerHTML = `
+        <div style="font-size:0.85rem; color:var(--text-2); margin-bottom:8px;">
+            Der Bot hat <strong style="color:var(--accent);">${state.lessons.length}</strong> Lektionen gelernt und
+            <strong style="color:var(--accent);">${stats.length}</strong> Strategien bewertet.
+        </div>
+        ${stats.length ? `<div style="margin-bottom:10px;"><strong style="font-size:0.8rem; color:var(--accent);">📊 Strategie-Ranking (nach Netto-Gewinn):</strong>${topStrats}</div>` : ""}
+        ${recentLessons.length ? `<div><strong style="font-size:0.8rem; color:var(--accent);">📝 Letzte Lektionen:</strong>${lessonsHtml}</div>` : ""}
+    `;
+}
+
+// Push intelligence panel into Übersicht after positions
+function ensureIntelligencePanel() {
+    if (document.getElementById("intelligence-panel-wrap")) return;
+    const positionsCard = document.getElementById("positions")?.closest(".card");
+    if (!positionsCard) return;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.id = "intelligence-panel-wrap";
+    card.innerHTML = `
+        <h2>Bot-Intelligenz <span class="badge" id="intel-count">–</span> <span class="info" data-info="intelligence">ⓘ</span></h2>
+        <div class="perf-hint">Bot lernt aus jedem Trade. Gute Kombinationen werden gestärkt, schlechte gedämpft.</div>
+        <div id="intelligence-panel"></div>
+    `;
+    positionsCard.after(card);
+}
+
+// Adopt learned weights into state.adaptiveWeights
+const _prevComputeAdaptive = typeof computeAdaptiveWeights === "function" ? computeAdaptiveWeights : null;
+computeAdaptiveWeights = function() {
+    const learned = _intelligentWeights();
+    state.adaptiveWeights = learned;
+    // Update intel-count badge
+    const badge = document.getElementById("intel-count");
+    if (badge) badge.textContent = `${state.lessons.length} Lektionen`;
+    return learned;
+};
+
+// Rejection log rendering (Status tab)
+function renderRejectionLogV16() {
+    const el = document.getElementById("rejection-log");
+    if (!el) return;
+    const list = state.rejectionLog.slice(-15).reverse();
+    if (!list.length) {
+        el.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">Aktuell keine verworfenen Signale ✓<br><small>Wenn hier viel steht → Gates zu streng.</small></div>`;
+        return;
+    }
+    const gateCounts = {};
+    for (const r of state.rejectionLog) gateCounts[r.gate] = (gateCounts[r.gate] || 0) + 1;
+    const ranked = Object.entries(gateCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const summary = `<div class="status-summary" style="margin-bottom:10px;">
+        ${ranked.map(([g, n]) => `<div class="status-tile warn"><div class="k">${g}</div><div class="v">${n}×</div></div>`).join("")}
+    </div>`;
+    const rows = list.map((r) => `<div class="error-log-row" style="border-left-color:var(--amber); background:rgba(245,158,11,0.05);">
+        <span class="ts">${new Date(r.ts).toLocaleTimeString("de-DE")}</span>
+        · <strong style="color:var(--amber);">${r.symbol}</strong>
+        · <span class="src">${r.gate}</span>
+        · ${r.reason}
+    </div>`).join("");
+    el.innerHTML = summary + rows;
+}
+
+// Add rejection log card to status tab if not there
+function ensureRejectionLogCard() {
+    if (document.getElementById("rejection-log")) return;
+    const errorLog = document.getElementById("error-log");
+    const statusTab = document.querySelector('[data-pane="status"]');
+    if (!statusTab) return;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+        <h2>Warum kein Trade? <span class="badge">Signal-Rejects</span></h2>
+        <div class="perf-hint">Für jedes verworfene Signal: welches Gate hat blockiert. Wenn hier viel steht und wenig Trades passieren → Gates zu streng.</div>
+        <div id="rejection-log"></div>
+    `;
+    if (errorLog) {
+        errorLog.closest(".card").before(card);
+    } else {
+        statusTab.appendChild(card);
+    }
+}
+
+// Add info-popup for intelligence
+if (typeof INFO_DB === "object") {
+    INFO_DB["intelligence"] = {
+        title: "Bot-Intelligenz — wie er lernt",
+        body: `
+            <p>Nach JEDEM abgeschlossenen Trade macht der Bot Folgendes automatisch:</p>
+            <ol>
+                <li><strong>Strategie-Score aktualisieren</strong>: welche Strategien am Trade beteiligt waren bekommen ihre Bilanz aktualisiert (Wins/Losses/PnL)</li>
+                <li><strong>Gewichte anpassen</strong>: Gute Strategien (WR > 50%) bekommen mehr Stimmrecht im Ensemble bis 2×. Schlechte werden auf bis zu 0.3× reduziert.</li>
+                <li><strong>Lektion ableiten</strong>:
+                    <ul>
+                        <li>Grosser Gewinn → "Kombination merken"</li>
+                        <li>Kleiner Gewinn → "Trailing-Stop war früh"</li>
+                        <li>Schneller Verlust → "Entry-Timing prüfen"</li>
+                        <li>Verlust in Panik-Regime → "Regel gefestigt"</li>
+                    </ul>
+                </li>
+            </ol>
+            <p>Je mehr Trades der Bot schliesst, desto klüger wird er. Ab ~20 Trades sind Muster erkennbar.</p>
+        `,
+    };
+}
+
+// Hook renderAll to include health pulse + intelligence rendering
+if (typeof renderAll === "function") {
+    const _origRenderAllV16 = renderAll;
+    renderAll = function() {
+        _origRenderAllV16();
+        try {
+            ensureIntelligencePanel();
+            renderHealthPulse();
+            renderIntelligence();
+            ensureRejectionLogCard();
+            renderRejectionLogV16();
+        } catch (e) { console.warn("[v16 render]", e); }
+    };
+}
+
+// Auto-refresh health pulse every 2 seconds
+setInterval(() => {
+    try { renderHealthPulse(); } catch (e) {}
+}, 2000);
+
+// Auto-refresh EUR immediately on load
+setTimeout(() => { if (typeof refreshEurRate === "function") refreshEurRate(); }, 500);
+
+// Instrument rejections into existing gates
+// (Wrap makePending so we always log which gate rejected)
+if (typeof makePending === "function" && !makePending._v16Wrapped) {
+    const _origMkPendingV16 = makePending;
+    makePending = function(symbol, sig, candles, price) {
+        const r = _origMkPendingV16(symbol, sig, candles, price);
+        if (r === null) {
+            // Gates before us have already logged specific reasons; only note if none
+            const recent = state.rejectionLog.filter((x) => x.symbol === symbol && Date.now() - x.ts < 2000);
+            if (!recent.length) logRejection(symbol, "Gate", "Signal von einem Gate abgewiesen (siehe Details)");
+        }
+        return r;
+    };
+    makePending._v16Wrapped = true;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => {
+        try { renderHealthPulse(); renderIntelligence(); ensureIntelligencePanel(); ensureRejectionLogCard(); } catch (e) {}
+    }, 1000);
+});
+
+// Ensure boot() still fires (was removed by mistake during v16 refactor)
+if (typeof boot === "function") {
+    document.addEventListener("DOMContentLoaded", boot);
+}
 
 })();
