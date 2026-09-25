@@ -148,7 +148,7 @@
     </div>
 
     <div id="signal-tile" class="signal grey">
-        <div class="signal-badge">Handelsentscheidung <span class="info" data-info="signal">ⓘ</span></div>
+        <div class="signal-badge"><span class="live-dot"></span>Live-Handelsentscheidung <span class="info" data-info="signal">ⓘ</span></div>
         <div class="signal-label">HALTEN</div>
         <div class="signal-symbol">–</div>
         <div class="signal-price num">Lade Live-Daten von Binance ...</div>
@@ -166,11 +166,10 @@
         </div>
         <div id="equity-chart-wrap"><svg id="equity-chart" viewBox="0 0 400 100" preserveAspectRatio="none"></svg></div>
         <div class="btn-row" style="margin-top:12px;">
-            <button id="btn-scan" class="primary">Jetzt scannen</button>
             <button id="btn-manual-trade" class="primary">+ Manueller Trade</button>
         </div>
         <div class="toggle-row" style="margin-top:10px;">
-            <div class="lbl"><strong id="mode-label">Manuell (Demo)</strong></div>
+            <div class="lbl"><strong id="mode-label">Vollautomatik</strong> · Bot scannt alle 30s</div>
             <div id="mode-toggle" class="toggle"></div>
         </div>
     </div>
@@ -278,7 +277,7 @@
 <section class="tab-pane" data-pane="markt">
 
     <div class="card">
-        <h2>Fear &amp; Greed <span class="info" data-info="fng">ⓘ</span></h2>
+        <h2><span class="live-dot"></span>Fear &amp; Greed <span class="info" data-info="fng">ⓘ</span></h2>
         <div class="fng">
             <div class="fng-dial"><div class="fng-inner num" id="fng-value">–<div class="fng-needle" id="fng-needle"></div></div></div>
             <div>
@@ -286,9 +285,6 @@
                 <div id="fng-class" class="fng-class">lade …</div>
                 <div class="fng-hint">&lt; 20 = extreme Angst · &gt; 80 = extreme Gier</div>
             </div>
-        </div>
-        <div class="btn-row" style="margin-top:8px;">
-            <button id="fng-refresh" class="ghost" style="font-size:0.75rem; padding:6px 12px;">↻ Aktualisieren</button>
         </div>
         <div class="fng-composite">
             <div class="fng-comp-head">
@@ -313,7 +309,7 @@
     </div>
 
     <div class="card">
-        <h2>24h Marktübersicht <span class="badge">Binance</span> <span class="info" data-info="ticker24">ⓘ</span></h2>
+        <h2><span class="live-dot"></span>24h Marktübersicht <span class="badge">Binance</span> <span class="info" data-info="ticker24">ⓘ</span></h2>
         <div style="overflow-x:auto;"><table id="ticker24" class="perf-table"></table></div>
     </div>
 
@@ -348,7 +344,7 @@
     </div>
 
     <div class="card">
-        <h2>Live-News <span class="badge" id="news-count">–</span> <span class="info" data-info="news">ⓘ</span></h2>
+        <h2><span class="live-dot"></span>Live-News <span class="badge" id="news-count">–</span> <span class="info" data-info="news">ⓘ</span></h2>
         <div id="news-list"></div>
     </div>
 
