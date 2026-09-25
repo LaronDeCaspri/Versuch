@@ -7326,4 +7326,117 @@ if (typeof INFO_DB === "object") {
     };
 }
 
+// =====================================================================
+// v21: WebSocket streams + 1s UI tick + Auto-Confirm pending
+// =====================================================================
+
+// ---- 1. Binance WebSocket for sub-second live prices ----
+let _binanceStream = null;
+function startBinanceStream() {
+    if (_binanceStream) _binanceStream.close();
+    _binanceStream = new window.TB.BinanceStreamManager();
+    _binanceStream.onTicker = (symbol, data) => {
+        state.prices[symbol] = data.price;
+        state.pricesLastUpdate = Date.now();
+        if (!state.tickers) state.tickers = {};
+        state.tickers[symbol] = {
+            ...(state.tickers[symbol] || {}),
+            lastPrice: data.price,
+            priceChangePct: data.change24h,
+            volumeUSD: data.volume * data.price,
+        };
+        state.tickersLastUpdate = Date.now();
+        try {
+            const events = broker.onPrice(symbol, data.price);
+            for (const ev of events) {
+                if (ev.kind === "trail") continue;
+                const verb = ev.kind === "sl" ? "Stop-Loss ausgelöst" : "Take-Profit erreicht";
+                announce(`${verb} bei ${symbol.replace("/", " gegen ")}. ${ev.pnl >= 0 ? "Gewinn" : "Verlust"} ${Math.abs(ev.pnl).toFixed(2)}.`, ev.pnl >= 0 ? "success" : "warn");
+            }
+        } catch (e) {}
+    };
+    _binanceStream.onKline = (symbol, candle) => {
+        if (!state.candles[symbol]) state.candles[symbol] = [];
+        const arr = state.candles[symbol];
+        const last = arr[arr.length - 1];
+        if (last && last.ts === candle.ts) {
+            last.high = candle.high; last.low = candle.low;
+            last.close = candle.close; last.volume = candle.volume;
+        } else {
+            arr.push({ ts: candle.ts, open: candle.open, high: candle.high,
+                       low: candle.low, close: candle.close, volume: candle.volume });
+            if (arr.length > 500) arr.shift();
+        }
+        state.klinesLastUpdate = Date.now();
+    };
+    _binanceStream.onError = (e) => {
+        if (typeof logError === "function") logError("Binance WebSocket", e.message || "connect error");
+    };
+    _binanceStream.subscribe(CFG.symbols, CFG.primaryTf || "15m");
+    console.log("[v21] Binance WebSocket started for", CFG.symbols.length, "symbols");
+}
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => { try { startBinanceStream(); } catch (e) { console.warn("[v21 WS]", e); } }, 4000);
+});
+// Restart WS when symbol list changes
+if (typeof renderSymbolPicker === "function") {
+    const _origRSP = renderSymbolPicker;
+    renderSymbolPicker = function() {
+        _origRSP();
+        setTimeout(() => { if (_binanceStream) startBinanceStream(); }, 1000);
+    };
+}
+
+// ---- 2. 1-second UI tick ----
+setInterval(() => {
+    try {
+        if (typeof renderHealthPulse === "function") renderHealthPulse();
+        const active = document.querySelector('.tab-pane.active');
+        const pane = active?.dataset?.pane;
+        if (pane === "status") {
+            if (typeof renderStatusOverview === "function") renderStatusOverview();
+            if (typeof renderBotActivity === "function") renderBotActivity();
+            if (typeof renderSymbolDataStatus === "function") renderSymbolDataStatus();
+        } else if (pane === "dashboard") {
+            if (typeof renderPortfolio === "function") renderPortfolio();
+            if (typeof renderPositions === "function") renderPositions();
+        }
+    } catch (e) {}
+}, 1000);
+
+// ---- 3. Auto-confirm pending signals after 30s (full autonomy) ----
+let _autoConfirmTimer = null;
+function startAutoConfirmWatcher() {
+    if (_autoConfirmTimer) clearInterval(_autoConfirmTimer);
+    _autoConfirmTimer = setInterval(() => {
+        if (!state.autoMode) return;
+        if (!state.pending || !state.pending.length) return;
+        const p = state.pending[0];
+        if (!p.created_ts) p.created_ts = Date.now();
+        const age = Date.now() - p.created_ts;
+        if (age > 30 * 1000) {
+            if (typeof passesStrictFilter === "function" && passesStrictFilter(p)) {
+                console.log("[v21] auto-confirm after 30s:", p.symbol);
+                confirmPending(p);
+            } else {
+                console.log("[v21] auto-drop stale signal:", p.symbol);
+                state.pending = state.pending.filter((x) => x !== p);
+                renderAll();
+            }
+        }
+    }, 5000);
+}
+document.addEventListener("DOMContentLoaded", () => setTimeout(startAutoConfirmWatcher, 5000));
+
+// Tag every new pending with created_ts
+if (typeof makePending === "function" && !makePending._v21tag) {
+    const _mkp = makePending;
+    makePending = function(symbol, sig, candles, price) {
+        const r = _mkp(symbol, sig, candles, price);
+        if (r) r.created_ts = Date.now();
+        return r;
+    };
+    makePending._v21tag = true;
+}
+
 })();
