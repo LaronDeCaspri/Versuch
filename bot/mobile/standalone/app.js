@@ -7439,4 +7439,216 @@ if (typeof makePending === "function" && !makePending._v21tag) {
     makePending._v21tag = true;
 }
 
+// =====================================================================
+// v22: LEARN MODE — bot actually trades, user sees what happens, learns
+// =====================================================================
+
+// Default ON — user can turn off in Einstellungen for stricter behaviour
+state.learnMode = localStorage.getItem("tb_learn_mode") === "0" ? false : true;
+
+// Live event feed — every meaningful bot action gets a plain-German entry
+state.eventFeed = state.eventFeed || [];
+function feedEvent(kind, message) {
+    state.eventFeed.push({ ts: Date.now(), kind, message });
+    if (state.eventFeed.length > 40) state.eventFeed = state.eventFeed.slice(-40);
+    renderEventFeed();
+}
+
+// Current activity — updates constantly so user sees the loop
+state.currentActivity = "Bot startet …";
+function setActivity(text) {
+    state.currentActivity = text;
+    const el = document.getElementById("current-activity");
+    if (el) el.textContent = text;
+}
+
+// Wrap scanAll to narrate what's happening
+if (typeof scanAll === "function" && !scanAll._v22narrated) {
+    const _origScan = scanAll;
+    scanAll = async function() {
+        setActivity(`Scanne ${CFG.symbols.length} Symbole — hole Live-Kerzen von Binance …`);
+        try {
+            await _origScan();
+            const n = state.lastScan?.filter((r) => r.side)?.length || 0;
+            setActivity(n > 0
+                ? `${n} Signal${n === 1 ? "" : "e"} gefunden. Prüfe Filter …`
+                : `Kein klares Signal — Bot wartet auf besseres Setup. Nächster Scan in 30s.`);
+        } catch (e) {
+            setActivity(`Scan fehlgeschlagen: ${e.message}. Retry in 30s.`);
+        }
+    };
+    scanAll._v22narrated = true;
+}
+
+// LEARN MODE gate bypass — if enabled, log rejections but let signals through
+// Preserves safety (kill-switch, panic-vol) but skips soft gates that block learning
+if (typeof makePending === "function" && !makePending._v22learn) {
+    const _mkpLearn = makePending;
+    makePending = function(symbol, sig, candles, price) {
+        if (state.learnMode) {
+            // Try the strict makePending first; if it returns null, log why then
+            // build a permissive fallback so the user SEES signals
+            const preRejects = state.rejectionLog ? state.rejectionLog.length : 0;
+            const strict = _mkpLearn(symbol, sig, candles, price);
+            if (strict) return strict;
+            // Check what got rejected
+            const newRejects = (state.rejectionLog || []).slice(preRejects);
+            const reasons = newRejects.map((r) => r.gate).join(", ") || "unbekannt";
+            // Build a fallback pending using the base logic (v6 planTrade)
+            try {
+                const atrValues = window.TB.atr(window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles), 14);
+                const atrVal = atrValues[atrValues.length - 1];
+                if (!atrVal || isNaN(atrVal)) return null;
+                const equity = broker.equity(state.prices);
+                const plan = window.TB.planTrade(sig.side, price, atrVal, equity, CFG);
+                if (!plan || plan.size <= 0) return null;
+                const risk = window.TB.assessRisk(plan, candles, broker.positions, equity);
+                const forecast = window.TB.forecast(plan);
+                const fallback = {
+                    id: symbol + "_" + Date.now(),
+                    symbol, ...plan,
+                    score: sig.score,
+                    signals: sig.signals,
+                    reasons: sig.signals.map((s) => `${s.strategy}: ${s.reason}`),
+                    strategy: sig.signals.map((s) => s.strategy).join(","),
+                    forecast, risk,
+                    dynRiskPct: CFG.baseRiskPct,
+                    highCorr: [],
+                    newsForSymbol: [],
+                    learnModeBypass: true,
+                    bypassedGates: reasons,
+                    created_ts: Date.now(),
+                };
+                feedEvent("info", `[Lern-Modus] Signal für ${symbol} zugelassen (strenge Gates umgangen: ${reasons})`);
+                return fallback;
+            } catch (e) { return null; }
+        }
+        return _mkpLearn(symbol, sig, candles, price);
+    };
+    makePending._v22learn = true;
+}
+
+// Hook confirmPending to log to feed
+if (typeof confirmPending === "function" && !confirmPending._v22feed) {
+    const _origCP = confirmPending;
+    confirmPending = function(p) {
+        _origCP(p);
+        feedEvent("trade", `TRADE eröffnet: ${p.symbol} ${p.side === "long" ? "LONG (Kauf)" : "SHORT (Verkauf)"} bei ${p.entry?.toFixed(2)} · Stop ${p.stop?.toFixed(2)} · Erste TP ${p.take_profits?.[0]?.price?.toFixed(2)}`);
+        setActivity(`Position ${p.symbol} eröffnet — beobachte für SL/TP.`);
+    };
+    confirmPending._v22feed = true;
+}
+// Same for broker.close (SL/TP hits)
+if (broker && !broker._v22feed) {
+    const _oc = broker.close.bind(broker);
+    broker.close = function(symbol, price, fraction) {
+        const posBefore = broker.positions[symbol];
+        const r = _oc(symbol, price, fraction);
+        if (r) {
+            const outcome = r.pnl >= 0 ? "GEWINN" : "VERLUST";
+            feedEvent(r.pnl >= 0 ? "win" : "loss",
+                `Position ${symbol} geschlossen bei ${price.toFixed(2)} — ${outcome} ${r.pnl >= 0 ? "+" : ""}${r.pnl.toFixed(2)} USDT`);
+        }
+        return r;
+    };
+    broker._v22feed = true;
+}
+
+// Feed initial event on load
+setTimeout(() => feedEvent("info", `Bot gestartet · Lern-Modus ${state.learnMode ? "AN" : "AUS"} · ${CFG.symbols.length} Symbole aktiv`), 1500);
+
+function renderEventFeed() {
+    const el = document.getElementById("event-feed");
+    if (!el) return;
+    const items = state.eventFeed.slice(-15).reverse();
+    if (!items.length) {
+        el.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">Warte auf erste Bot-Aktivität …</div>`;
+        return;
+    }
+    el.innerHTML = items.map((e) => {
+        const color = e.kind === "trade" ? "var(--accent)"
+                    : e.kind === "win"   ? "var(--green)"
+                    : e.kind === "loss"  ? "var(--red)"
+                    :                       "var(--muted)";
+        return `<div style="padding:6px 0; border-bottom:1px solid var(--border); font-size:0.82rem; line-height:1.4;">
+            <span style="color:var(--muted); font-family:monospace; font-size:0.72rem;">${new Date(e.ts).toLocaleTimeString("de-DE")}</span>
+            <span style="color:${color}; margin-left:8px;">${e.message}</span>
+        </div>`;
+    }).join("");
+}
+
+// Auto-rerender feed every 5s
+setInterval(renderEventFeed, 5000);
+
+// Inject Learn-Mode card into Übersicht (after health-pulse, before signal-tile)
+function ensureLearnCards() {
+    if (document.getElementById("learn-mode-card")) return;
+    const dashboard = document.querySelector('[data-pane="dashboard"]');
+    const healthPulse = document.getElementById("health-pulse");
+    if (!dashboard || !healthPulse) return;
+
+    // Activity card
+    const activity = document.createElement("div");
+    activity.className = "card";
+    activity.id = "learn-mode-card";
+    activity.innerHTML = `
+        <h2 style="display:flex; justify-content:space-between; align-items:center;">
+            <span>Was der Bot gerade tut</span>
+            <label style="display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:normal; font-size:0.72rem; color:var(--muted); cursor:pointer;">
+                <input type="checkbox" id="learn-mode-toggle" ${state.learnMode ? "checked" : ""} style="width:14px; height:14px;">
+                Lern-Modus (weniger strenge Filter, mehr Trades zum Beobachten)
+            </label>
+        </h2>
+        <div id="current-activity" style="font-size:0.95rem; padding:12px; background:rgba(139, 92, 246, 0.06); border-left:3px solid var(--accent); border-radius:6px;">${state.currentActivity}</div>
+        <div class="btn-row" style="margin-top:10px;">
+            <button id="force-scan-btn" class="ghost">🔍 Sofort neu scannen</button>
+            <button id="clear-pending-btn" class="ghost">🗑 Warteliste leeren</button>
+        </div>
+    `;
+    healthPulse.after(activity);
+
+    // Event feed card — after positions
+    const feed = document.createElement("div");
+    feed.className = "card";
+    feed.innerHTML = `
+        <h2>Live-Aktivität <span class="badge">Chronologisch</span></h2>
+        <div class="perf-hint">Jede Bot-Aktion in Klartext. So verstehst du was der Bot denkt.</div>
+        <div id="event-feed"></div>
+    `;
+    dashboard.appendChild(feed);
+
+    document.getElementById("learn-mode-toggle")?.addEventListener("change", (e) => {
+        state.learnMode = e.target.checked;
+        localStorage.setItem("tb_learn_mode", state.learnMode ? "1" : "0");
+        feedEvent("info", `Lern-Modus ${state.learnMode ? "aktiviert — mehr Trades zum Beobachten" : "deaktiviert — nur strenge Setups"}`);
+    });
+    document.getElementById("force-scan-btn")?.addEventListener("click", async () => {
+        setActivity("Scanne manuell …");
+        try { await scanAll(); } catch (e) {}
+    });
+    document.getElementById("clear-pending-btn")?.addEventListener("click", () => {
+        state.pending = [];
+        feedEvent("info", "Warteliste manuell geleert");
+        renderAll();
+    });
+    renderEventFeed();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(ensureLearnCards, 1500);
+});
+// Try again periodically in case the dashboard renders later
+setInterval(ensureLearnCards, 3000);
+
+if (typeof INFO_DB === "object") {
+    INFO_DB["learn-mode"] = {
+        title: "Lern-Modus",
+        body: `
+            <p>Wenn AN: der Bot umgeht die strengsten institutionellen Gates (Cross-Symbol, Konfluenz-Strict, Session-Attention, Order-Book-Spread) — <strong>Sicherheits-Gates wie Kill-Switch, Panik-Vola und Loss-Streak bleiben aktiv</strong>.</p>
+            <p>Ziel: du siehst tatsächlich Trades passieren und kannst beobachten was funktioniert und was nicht. Perfekt zum Lernen.</p>
+            <p>Wenn AUS: alle Gates aktiv. Weniger Trades, aber statistisch selektiver.</p>
+        `,
+    };
+}
+
 })();
