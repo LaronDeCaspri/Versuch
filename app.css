@@ -55,6 +55,35 @@ html, body {
     letter-spacing: -0.2px;
 }
 
+/* -------- v20: Honest reality-check banner -------- */
+.reality-banner {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 16px; border-radius: 10px;
+    background: rgba(245, 158, 11, 0.06);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    margin-bottom: 12px;
+}
+.rb-icon { font-size: 1.5rem; flex-shrink: 0; }
+.rb-content { flex: 1; }
+.rb-title { font-size: 0.88rem; font-weight: 600; color: var(--amber); }
+.rb-detail { font-size: 0.72rem; color: var(--text-2); margin-top: 3px; line-height: 1.4; }
+.rb-detail a { color: var(--accent-2); text-decoration: none; font-weight: 500; }
+.rb-detail a:hover { text-decoration: underline; }
+
+.limit-row {
+    padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem;
+}
+.limit-row:last-child { border-bottom: none; }
+.limit-row .verdict {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 0.65rem; font-weight: 600; margin-right: 6px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+}
+.limit-row .verdict.no { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+.limit-row .verdict.limited { background: rgba(245, 158, 11, 0.15); color: var(--amber); }
+.limit-row .verdict.yes { background: rgba(16, 185, 129, 0.15); color: var(--green); }
+.limit-row .detail { color: var(--muted); font-size: 0.75rem; margin-top: 2px; }
+
 /* -------------------- v18: refined card + typography -------------------- */
 .card {
     background: var(--surface) !important;

@@ -7247,4 +7247,83 @@ if (typeof renderAll === "function") {
 setInterval(() => { try { refreshDepthAll(); } catch (e) {} }, 30 * 1000);
 setTimeout(() => refreshDepthAll(), 3000);
 
+// =====================================================================
+// v20: RETAIL REALITY CHECK — honest limits panel + banner link
+// =====================================================================
+
+const HONEST_LIMITS = [
+    { verdict: "no", title: "Handelt echtes Geld?",
+      answer: "Nein. Paper-Broker mit 10 000 USDT Spielgeld. Kein Broker-Konto angebunden." },
+    { verdict: "no", title: "Läuft 24/7?",
+      answer: "Nein. Nur solange der Browser-Tab offen ist. Handy sperren → Bot pausiert nach ~30s durch OS-Throttle." },
+    { verdict: "limited", title: "Wie aktuell sind die Preise?",
+      answer: "REST-Polling alle 5s (Preise) / 30s (Kerzen). Institutional: WebSocket-Tick-Stream — 100-1000× schneller." },
+    { verdict: "limited", title: "Ist das Learning-System 'echtes' ML?",
+      answer: "Nein. Beta-Distribution + Weight-Updates. Renaissance nutzt XGBoost/LSTM auf 100k+ Features. Meins ist naive Bayesian." },
+    { verdict: "limited", title: "Sind die Strategien optimiert?",
+      answer: "Nein. Handverlesen mit Standard-Parametern (EMA 20/50, RSI 14). Institutional: Grid-Search über 10k+ Kombinationen mit Bonferroni-Korrektur." },
+    { verdict: "no", title: "Ist der Audit-Log wirklich manipulations­sicher?",
+      answer: "Nein. SHA-256-Kette in localStorage — mit F12 in 10 Sekunden weggewischt. Echt: Hardware-Security-Module + Off-Site Timestamp Authority." },
+    { verdict: "limited", title: "Ist der Backtest zuverlässig?",
+      answer: "Basic Walk-Forward auf ~1000 Kerzen im Browser. Institutional: Tick-Level-Replay mit realistischer Order-Book-Slippage über Jahre Historie." },
+    { verdict: "limited", title: "Ist das Risk-Modell BlackRock-tauglich?",
+      answer: "Nein. Historische VaR aus 96 Bars, keine Fat-Tail-Anpassung, keine Stress-Szenarien (COVID/LUNA/FTX)." },
+    { verdict: "no", title: "Ist es rechtlich zulassungsfähig (BaFin)?",
+      answer: "Nein. Kein Broker, keine Aufsicht, keine Compliance-Framework. Reine Simulation." },
+    { verdict: "yes", title: "Kann ich damit LERNEN wie Trading funktioniert?",
+      answer: "Ja, ausgezeichnet. Der Bot zeigt Kelly, VaR, Regime, Konfluenz, Rationale-Tracking — Konzepte die 95% der Retail-Trader nie sehen." },
+    { verdict: "yes", title: "Kann ich Strategien testen bevor ich echt handle?",
+      answer: "Ja. Papier-Trading auf echten Live-Preisen. Perfekt für Setup-Tests, nicht für Live-Ausführung." },
+    { verdict: "yes", title: "Ist die Analyse-Statistik ehrlich?",
+      answer: "Ja. Alle Zahlen (PnL, Sharpe, VaR) sind korrekt berechnet — nur die Datenbasis (Sample-Grösse, iid-Annahmen) ist retail-eingeschränkt." },
+];
+
+function renderLimitsPanel() {
+    const el = document.getElementById("limits-panel");
+    if (!el) return;
+    el.innerHTML = `
+        <p style="font-size:0.85rem; color:var(--text-2); margin:0 0 12px; line-height:1.5;">
+            Radikale Transparenz. Diese App ist ein <strong style="color:var(--amber);">Lern-Werkzeug</strong>,
+            keine institutional-grade Trading-Plattform. Hier sind die Grenzen — ehrlich:
+        </p>
+        ${HONEST_LIMITS.map((l) => `<div class="limit-row">
+            <span class="verdict ${l.verdict}">${l.verdict === "yes" ? "Ja" : l.verdict === "no" ? "Nein" : "Teilweise"}</span>
+            <strong>${l.title}</strong>
+            <div class="detail">${l.answer}</div>
+        </div>`).join("")}
+        <p style="font-size:0.8rem; color:var(--muted); margin:14px 0 0; line-height:1.5;">
+            <strong style="color:var(--text-2);">Empfehlung:</strong> Nutze den Bot um zu <strong>verstehen</strong> wie
+            institutionelle Trader denken (Ken Kroner, Ray Dalio, Jim Simons, Paul Tudor Jones — echte Konzepte, richtig implementiert).
+            Für Echtgeld-Trading brauchst du: 24/7-Server, Broker-API mit Trade-Rechten, BaFin-Zulassung falls du für andere handelst,
+            und ein Team von 3-5 Quants für 2-3 Jahre Aufbau.
+        </p>
+    `;
+}
+
+// Wire reality banner link + info popup
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("rb-more")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.querySelector('[data-tab="einstellungen"]')?.click();
+        setTimeout(() => {
+            document.getElementById("limits-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 200);
+    });
+    setTimeout(renderLimitsPanel, 1500);
+});
+
+// Info popup for limits topic
+if (typeof INFO_DB === "object") {
+    INFO_DB["limits"] = {
+        title: "Ehrliche Grenzen der App",
+        body: `
+            <p>Diese Sektion listet radikal transparent auf, was der Bot <strong>kann</strong> und was <strong>nicht</strong>.</p>
+            <p>Grün = wirklich verlässlich · Gelb = eingeschränkt/toy-grade · Rot = nicht vorhanden.</p>
+            <div class="example">
+                <strong>Warum ich das explizit zeige</strong>: Zu viele Retail-Trading-Apps versprechen "Institutional-Grade AI!!" und liefern JavaScript im Browser. Ehrlichkeit vor Marketing — sonst verlierst du echtes Geld an falschem Vertrauen.
+            </div>
+        `,
+    };
+}
+
 })();

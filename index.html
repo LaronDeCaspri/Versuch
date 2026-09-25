@@ -137,6 +137,18 @@
 <!-- =============================================================== -->
 <section class="tab-pane active" data-pane="dashboard">
 
+    <!-- v20: honest reality-check banner — permanent, unmissable -->
+    <div id="reality-banner" class="reality-banner">
+        <div class="rb-icon">🎓</div>
+        <div class="rb-content">
+            <div class="rb-title">Lern-Demo · Kein Echtgeld-System</div>
+            <div class="rb-detail">
+                Live-Preise sind echt · Trades sind Papier · läuft nur bei offenem Tab
+                &nbsp;·&nbsp;<a href="#" id="rb-more">Grenzen anzeigen →</a>
+            </div>
+        </div>
+    </div>
+
     <!-- v16: pulsing health banner at top of overview -->
     <div id="health-pulse" class="health-pulse ok">
         <div class="pulse-dot"></div>
@@ -373,19 +385,19 @@
     </div>
 
     <div class="card">
-        <h2>Benchmark-Vergleich <span class="badge">BlackRock v17</span> <span class="info" data-info="benchmark">ⓘ</span></h2>
+        <h2>Benchmark-Vergleich <span class="badge">Demo-Zusatz</span> <span class="info" data-info="benchmark">ⓘ</span></h2>
         <div class="perf-hint">Bot-Performance vs BTC-HODL vs Equal-Weight-Basket. Zeigt echten Alpha.</div>
         <div id="benchmark-panel"></div>
     </div>
 
     <div class="card">
-        <h2>Faktor-Attribution <span class="badge">BlackRock v17</span> <span class="info" data-info="factor-attribution">ⓘ</span></h2>
+        <h2>Faktor-Attribution <span class="badge">Demo-Zusatz</span> <span class="info" data-info="factor-attribution">ⓘ</span></h2>
         <div class="perf-hint">Welche Faktoren treiben dein Portfolio? Momentum, Value, Mean-Reversion etc.</div>
         <div id="factor-panel"></div>
     </div>
 
     <div class="card">
-        <h2>Order-Book Depth &amp; Impact <span class="badge">BlackRock v17</span> <span class="info" data-info="depth-impact">ⓘ</span></h2>
+        <h2>Order-Book Depth &amp; Impact <span class="badge">Demo-Zusatz</span> <span class="info" data-info="depth-impact">ⓘ</span></h2>
         <div class="perf-hint">Wie viel Slippage kostet eine bestimmte Trade-Grösse an den Top-Symbolen?</div>
         <div id="depth-panel"></div>
     </div>
@@ -413,7 +425,7 @@
     </div>
 
     <div class="card">
-        <h2>Institutional-Schutz v11 <span class="badge">10-Trader Audit</span> <span class="info" data-info="v11-audit">ⓘ</span></h2>
+        <h2>Sicherheits-Regeln <span class="badge">Demo</span> <span class="info" data-info="v11-audit">ⓘ</span></h2>
         <div class="perf-hint">
             <strong>Circuit-Breaker · Portfolio-Vol-Target · Cross-Symbol-Gate · Bayesian-Weights · Session-Attention</strong>
         </div>
@@ -433,7 +445,7 @@
     </div>
 
     <div class="card">
-        <h2>Institutional-Schutz <span class="badge">v10</span> <span class="info" data-info="v10-status">ⓘ</span></h2>
+        <h2>Erweiterte Regeln <span class="badge">Demo</span> <span class="info" data-info="v10-status">ⓘ</span></h2>
         <div class="perf-hint">
             Der Bot verwendet 8 Institutional-Grade Regeln um Verluste zu minimieren:
             Multi-TF-Gate, Loss-Streak-Sizing, Regime-Weights, Orthogonalität, Fat-Tail-VaR,
@@ -565,7 +577,7 @@
     </div>
 
     <div class="card">
-        <h2>Signed Audit-Log <span class="badge">BlackRock v17</span> <span class="info" data-info="audit-log">ⓘ</span></h2>
+        <h2>Trade-Historie (Hash-Signiert) <span class="badge">Demo-Zusatz</span> <span class="info" data-info="audit-log">ⓘ</span></h2>
         <div class="perf-hint">Immutable Trade-Log mit SHA-256-Hash-Kette. Jeder Trade signiert, exportierbar für Compliance.</div>
         <div id="audit-log-panel"></div>
         <div class="btn-row" style="margin-top:8px;">
@@ -586,6 +598,12 @@
 <!-- TAB 7: EINSTELLUNGEN                                             -->
 <!-- =============================================================== -->
 <section class="tab-pane" data-pane="einstellungen">
+
+    <!-- v20: Honest limits panel — first thing in settings -->
+    <div class="card" style="border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.04);">
+        <h2 style="color: var(--amber) !important;">Ehrliche Grenzen der App <span class="info" data-info="limits">ⓘ</span></h2>
+        <div id="limits-panel"></div>
+    </div>
 
     <div class="card">
         <h2>Erscheinungsbild <span class="info" data-info="appearance">ⓘ</span></h2>
@@ -609,7 +627,7 @@
     </div>
 
     <div class="card">
-        <h2>Champion vs. Challenger <span class="badge">BlackRock v17</span> <span class="info" data-info="champion-challenger">ⓘ</span></h2>
+        <h2>Champion vs. Challenger <span class="badge">Demo-Zusatz</span> <span class="info" data-info="champion-challenger">ⓘ</span></h2>
         <div class="perf-hint">Neue Konfig-Änderung wird gegen aktuelle Config walk-forward getestet. Nur wenn Challenger besser → Deploy.</div>
         <div id="champion-panel"></div>
     </div>
