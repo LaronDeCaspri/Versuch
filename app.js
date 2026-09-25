@@ -8063,4 +8063,158 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 2000);
 });
 
+// =====================================================================
+// v27: QUALITY-FIRST FILTER — stop the loss bleed
+// =====================================================================
+
+// User: "fast alle Trades machen Verluste"
+// Root cause: v23 set Learn-Mode threshold to score=0.8, agreement=1
+// → essentially trading noise. Base rate of noise wins 50%, but with
+//   ATR×2 stop and 2.5R first TP, needed win rate is ~50%+ AND
+//   trades must run long enough. Most don't. Bleeds losses.
+
+// FIX 1: RAISE Learn-Mode thresholds — quality over quantity
+// Override the v24 wrapper's inner values
+if (typeof scanSymbol === "function") {
+    const _v27ss = scanSymbol;
+    scanSymbol = async function(symbol) {
+        if (state.learnMode) {
+            const _sms = CFG.softMinScore, _sag = CFG.softAgreement;
+            CFG.softMinScore = 1.5;                       // was 0.8 (v23)
+            CFG.softAgreement = 2;                        // was 1 (v23)
+            try {
+                const result = await _v27ss(symbol);
+                // FIX 2: ADX filter — no trade in flat/ranging market
+                if (result && result.side) {
+                    const candles = state.candles[symbol];
+                    if (candles && candles.length >= 30) {
+                        const adxVals = window.TB.adx(
+                            window.TB.highs(candles),
+                            window.TB.lows(candles),
+                            window.TB.closes(candles), 14);
+                        const adxNow = adxVals[adxVals.length - 1];
+                        if (Number.isFinite(adxNow) && adxNow < 18) {
+                            // Ranging market — kill signal, log to feed
+                            if (typeof feedEvent === "function") {
+                                feedEvent("info", `${symbol} Signal verworfen: ADX ${adxNow.toFixed(1)} < 18 (Seitwärts-Markt, Trend-Strategien versagen hier)`);
+                            }
+                            return { symbol, side: null, score: 0, price: result.price, filtered: "ADX-low" };
+                        }
+                    }
+                }
+                return result;
+            } finally { CFG.softMinScore = _sms; CFG.softAgreement = _sag; }
+        }
+        return _v27ss(symbol);
+    };
+}
+
+// FIX 3: Tighter first TP for faster hits
+// Original tpMultiples: [2.5, 4.0, 6.0] — need 2.5R to make ANY profit
+// v27:                  [1.2, 2.5, 4.5] — first TP hits in ~30% of trades
+CFG.tpMultiples = [1.2, 2.5, 4.5];
+
+// FIX 4: Loss-analysis dashboard on Übersicht
+function analyzeRecentLosses() {
+    const trades = broker.journal.filter((j) => j.kind === "close").slice(-10);
+    const losses = trades.filter((t) => (t.pnl || 0) < 0);
+    if (!losses.length) return { count: 0, insights: [] };
+    // Categorize losses
+    const cats = {
+        fast_stop: 0,       // hit stop very quickly (< 15 min)
+        slow_bleed: 0,      // slowly trended against
+        near_top: 0,        // reversed near max
+    };
+    const insights = [];
+    for (const l of losses) {
+        // Find matching open
+        const opens = broker.journal.filter((j) => j.kind === "open" && j.symbol === l.symbol);
+        if (!opens.length) continue;
+        const open = opens[opens.length - 1];
+        const holdMs = new Date(l.ts) - new Date(open.ts);
+        if (holdMs < 15 * 60 * 1000) cats.fast_stop++;
+        else if (holdMs > 2 * 60 * 60 * 1000) cats.slow_bleed++;
+    }
+    if (cats.fast_stop >= 3) insights.push("Viele schnelle Stops → Signal-Quality zu niedrig oder Entry-Timing schlecht. Empfehlung: strengere Filter.");
+    if (cats.slow_bleed >= 2) insights.push("Trades bluten langsam → falsche Richtung oder überdehnter Trend. Empfehlung: MTF-Analyse.");
+    if (losses.length >= 7 && trades.length >= 8) insights.push(`⚠ ${losses.length}/${trades.length} Trades verloren — Learn-Mode zu locker oder Marktphase ungünstig. Erwäge Learn-Mode aus für strengere Filter.`);
+    return { count: losses.length, totalLoss: losses.reduce((s, t) => s + (t.pnl || 0), 0), cats, insights };
+}
+
+function ensureLossAnalysisCard() {
+    if (document.getElementById("loss-analysis-card")) return;
+    const iqCard = document.getElementById("bot-iq-card");
+    if (!iqCard) return;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.id = "loss-analysis-card";
+    card.innerHTML = `<h2>Verlust-Analyse <span class="badge" id="la-badge">–</span></h2><div id="loss-analysis-content"></div>`;
+    iqCard.after(card);
+}
+
+function renderLossAnalysis() {
+    const el = document.getElementById("loss-analysis-content");
+    const badge = document.getElementById("la-badge");
+    if (!el || !badge) return;
+    const a = analyzeRecentLosses();
+    const wins = broker.journal.filter((j) => j.kind === "close" && (j.pnl || 0) > 0).length;
+    const total = broker.journal.filter((j) => j.kind === "close").length;
+    const wr = total > 0 ? (wins / total * 100).toFixed(0) : 0;
+    badge.textContent = `${wr}% Win`;
+    badge.style.color = wr >= 55 ? "var(--green)" : wr >= 45 ? "var(--amber)" : "var(--red)";
+    if (a.count === 0) {
+        el.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">Noch keine Verluste zum Analysieren. ${total} Trades gesamt.</div>`;
+        return;
+    }
+    el.innerHTML = `
+        <div class="row"><span>Verluste (letzte 10)</span><strong style="color:var(--red);">${a.count}</strong></div>
+        <div class="row"><span>Summe Verluste</span><strong style="color:var(--red);">${a.totalLoss.toFixed(2)} USDT</strong></div>
+        <div class="row"><span>Schnelle Stops (&lt;15min)</span><strong>${a.cats.fast_stop}</strong></div>
+        <div class="row" style="border-bottom:none;"><span>Langsame Bleeds (&gt;2h)</span><strong>${a.cats.slow_bleed}</strong></div>
+        ${a.insights.length ? `<div style="margin-top:12px;">${a.insights.map((i) => `<div style="padding:10px 12px; margin:6px 0; background:rgba(245,158,11,0.06); border-left:3px solid var(--amber); border-radius:4px; font-size:0.82rem;">${i}</div>`).join("")}</div>` : ""}
+    `;
+}
+setInterval(() => { ensureLossAnalysisCard(); renderLossAnalysis(); }, 5000);
+
+// FIX 5: Auto-shrink losing strategies faster
+// Hook broker.close to reduce weight of the losing strategy
+if (broker && !broker._v27weightshrink) {
+    const _ocSh = broker.close.bind(broker);
+    broker.close = function(symbol, price, fraction) {
+        const posBefore = broker.positions[symbol];
+        const r = _ocSh(symbol, price, fraction);
+        if (r && r.pnl < 0 && posBefore && state.adaptiveWeights) {
+            const strats = (posBefore.meta?.strategy || "").split(",").filter(Boolean);
+            for (const s of strats) {
+                if (state.adaptiveWeights[s]) {
+                    state.adaptiveWeights[s] = Math.max(0.3, state.adaptiveWeights[s] * 0.85);
+                }
+            }
+        }
+        return r;
+    };
+    broker._v27weightshrink = true;
+}
+
+// Log v27 activation
+setTimeout(() => {
+    if (typeof feedEvent === "function") feedEvent("info",
+        "v27 aktiv: Learn-Mode Schwelle auf Score≥1.5, ADX-Filter (kein Trade bei <18), erste TP schon bei 1.2R statt 2.5R");
+}, 3000);
+
+// v27 info popup
+if (typeof INFO_DB === "object") {
+    INFO_DB["loss-analysis"] = {
+        title: "Verlust-Analyse",
+        body: `
+            <p>Analysiert deine letzten 10 Trades auf Verlust-Muster:</p>
+            <ul>
+                <li><strong>Schnelle Stops</strong> (&lt;15min): Signal war zu schwach oder Timing falsch</li>
+                <li><strong>Langsame Bleeds</strong> (&gt;2h): falsche Richtung, Trend gedreht</li>
+            </ul>
+            <p>Bei 70%+ Verlustquote wird empfohlen den Learn-Modus zu deaktivieren (strengere Filter). Der Bot lernt zwar aus Verlusten, aber wenn die Signal-Qualität zu niedrig ist, ist Selbstschutz besser als Draufhalten.</p>
+        `,
+    };
+}
+
 })();
