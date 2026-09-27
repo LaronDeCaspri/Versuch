@@ -8473,4 +8473,118 @@ setTimeout(() => {
         "v28 verfügbar: 🏛 Buffett-Modus aktivieren für garantierte Marktbeteiligung (60% HODL + 30% DCA + 10% aktiv)");
 }, 3000);
 
+// =====================================================================
+// v29: VIX BAROMETER — equity fear gauge integrated into bot risk
+// =====================================================================
+
+state.vix = state.vix || null;
+state.vixLastUpdate = state.vixLastUpdate || null;
+
+async function refreshVix() {
+    try {
+        const v = await window.TB.fetchVix();
+        if (v) {
+            state.vix = v;
+            state.vixLastUpdate = Date.now();
+            renderVix();
+        }
+    } catch (e) {
+        if (typeof logError === "function") logError("VIX", e.message);
+    }
+}
+
+function _vixInterpretation(v) {
+    if (v < 13) return { level: "extreme_calm", label: "Extreme Ruhe", color: "var(--red)",
+        note: "Aktien-Euphorie. Historisch oft Top-Warnung. Krypto könnte bald korrigieren." };
+    if (v < 18) return { level: "calm", label: "Ruhig", color: "var(--green)",
+        note: "Normale Marktphase. Trend-Strategien funktionieren gut." };
+    if (v < 25) return { level: "elevated", label: "Erhöht", color: "var(--amber)",
+        note: "Zunehmende Unsicherheit. Kleinere Positionen, engere Stops." };
+    if (v < 35) return { level: "fear", label: "Angst", color: "var(--red)",
+        note: "Aktien-Angst. Krypto folgt oft mit 1-3 Tagen Verzögerung nach unten." };
+    return { level: "panic", label: "Panik", color: "var(--red)",
+        note: "Extreme Angst wie 2020-COVID oder LUNA. Bot pausiert neue Trades. HODL-Positionen halten." };
+}
+
+function renderVix() {
+    const el = document.getElementById("vix-panel");
+    if (!el) return;
+    if (!state.vix) {
+        el.innerHTML = `<div style="color:var(--muted); font-size:0.82rem;">Lade VIX-Daten...</div>`;
+        return;
+    }
+    const v = state.vix.value;
+    const chg = state.vix.change;
+    const chgPct = state.vix.changePct;
+    const interp = _vixInterpretation(v);
+    const chgColor = chg >= 0 ? "var(--red)" : "var(--green)";   // VIX up = market fear = bad for risk
+    const chgArrow = chg >= 0 ? "▲" : "▼";
+    // Gauge scale 0-50 mapped to 0-100% width
+    const gaugePct = Math.min(100, (v / 50) * 100);
+    el.innerHTML = `
+        <div style="display:flex; align-items:baseline; gap:14px; margin-bottom:10px;">
+            <div style="font-size:2.4rem; font-weight:700; color:${interp.color}; font-family:'JetBrains Mono', monospace;">${v.toFixed(2)}</div>
+            <div>
+                <div style="font-weight:600; color:${interp.color}; text-transform:uppercase; letter-spacing:0.05em; font-size:0.85rem;">${interp.label}</div>
+                <div style="color:${chgColor}; font-size:0.78rem;">${chgArrow} ${Math.abs(chg).toFixed(2)} (${chgPct >= 0 ? "+" : ""}${chgPct.toFixed(2)}%)</div>
+            </div>
+        </div>
+        <div style="position:relative; height:14px; background:linear-gradient(to right, var(--red) 0%, var(--red) 20%, var(--green) 25%, var(--green) 40%, var(--amber) 50%, var(--red) 70%, var(--red) 100%); border-radius:7px; margin:10px 0;">
+            <div style="position:absolute; left:${gaugePct}%; top:-4px; width:3px; height:22px; background:#fff; border-radius:2px; transform:translateX(-50%); box-shadow:0 0 6px rgba(255,255,255,0.6);"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:0.65rem; color:var(--muted); margin-top:-2px;">
+            <span>0</span><span>13 Extreme Ruhe</span><span>20 Normal</span><span>30 Angst</span><span>50 Panik</span>
+        </div>
+        <div style="margin-top:12px; padding:10px 14px; background:${interp.color === "var(--red)" ? "rgba(239,68,68,0.06)" : interp.color === "var(--amber)" ? "rgba(245,158,11,0.06)" : "rgba(16,185,129,0.06)"}; border-left:3px solid ${interp.color}; border-radius:6px; font-size:0.82rem; line-height:1.5;">
+            ${interp.note}
+        </div>
+        <div style="margin-top:8px; font-size:0.7rem; color:var(--muted);">
+            Quelle: ${state.vix.source || "?"} · Update ${state.vixLastUpdate ? _fmtAge(Date.now() - state.vixLastUpdate) + " her" : "?"}
+        </div>
+    `;
+}
+
+// Integrate VIX into bot risk: reject new trades if VIX > 35 (panic)
+if (typeof makePending === "function" && !makePending._v29vix) {
+    const _mkpVix = makePending;
+    makePending = function(symbol, sig, candles, price) {
+        // VIX safety gate — no new trades in equity-panic
+        if (state.vix && state.vix.value > 35) {
+            if (typeof logRejection === "function") logRejection(symbol, "VIX-Panik", `VIX ${state.vix.value.toFixed(1)} > 35 (extreme Angst am Aktienmarkt)`);
+            if (typeof feedEvent === "function") feedEvent("info", `${symbol} Signal verworfen: VIX ${state.vix.value.toFixed(1)} zeigt Aktien-Panik — Krypto-Risiko erhöht`);
+            return null;
+        }
+        return _mkpVix(symbol, sig, candles, price);
+    };
+    makePending._v29vix = true;
+}
+
+// Auto-refresh VIX every 5 minutes (it updates only during US market hours)
+setInterval(refreshVix, 5 * 60 * 1000);
+document.addEventListener("DOMContentLoaded", () => setTimeout(refreshVix, 5000));
+
+// VIX info popup
+if (typeof INFO_DB === "object") {
+    INFO_DB["vix"] = {
+        title: "VIX — Der Angst-Index",
+        body: `
+            <p>Der <strong>VIX</strong> (CBOE Volatility Index) misst die <strong>erwartete Volatilität des S&amp;P 500</strong> in den nächsten 30 Tagen. Er wird aus Optionspreisen berechnet.</p>
+            <p><strong>Warum wichtig für Krypto:</strong> Krypto und Aktien sind mittlerweile <strong>hoch korreliert</strong> (BTC-S&amp;P500-Korrelation ~0,6). Wenn VIX spikt, folgen crypto-Verkäufe fast immer.</p>
+            <ul>
+                <li><strong>&lt; 13 · Extreme Ruhe</strong>: euphorische Aktien, potentielle Top-Warnung</li>
+                <li><strong>13-18 · Ruhig</strong>: Normalzustand, Trend-Strategien laufen</li>
+                <li><strong>18-25 · Erhöht</strong>: Unsicherheit steigt, konservativer werden</li>
+                <li><strong>25-35 · Angst</strong>: Aktien-Ausverkauf beginnt, Krypto folgt meist</li>
+                <li><strong>&gt; 35 · Panik</strong>: Bot pausiert neue Trades (COVID/LUNA-Level)</li>
+            </ul>
+            <div class="example">💡 Historisch: VIX-Spikes von 15 auf 40+ (COVID 2020, LUNA 2022) → BTC verlor jeweils 30-50% binnen Wochen.</div>
+            <p>Quellen: Yahoo Finance / Stooq / FMP (mit Fallback).</p>
+        `,
+    };
+}
+
+setTimeout(() => {
+    if (typeof feedEvent === "function") feedEvent("info", "v29 aktiv: VIX-Barometer integriert · Bot pausiert neue Trades bei VIX &gt; 35");
+}, 4000);
+
 })();
