@@ -1540,6 +1540,68 @@ async function fetchTrending() {
 }
 
 // EUR/USD rate — chained fallbacks (Frankfurter → exchangerate.host → open.er-api → Binance BTCEUR/USDT)
+// v29: VIX (CBOE Volatility Index) — equity fear gauge. Crypto reacts.
+async function fetchVix() {
+    // Try 1: Yahoo Finance via allorigins proxy (CORS)
+    try {
+        const raw = await fetch("https://api.allorigins.win/raw?url=" +
+            encodeURIComponent("https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d")
+        ).then((r) => r.json());
+        const q = raw?.chart?.result?.[0];
+        if (q) {
+            const closes = q.indicators?.quote?.[0]?.close || [];
+            const timestamps = q.timestamp || [];
+            const latest = closes[closes.length - 1] ?? q.meta?.regularMarketPrice;
+            const prev = closes[closes.length - 2];
+            if (Number.isFinite(latest)) {
+                return {
+                    value: latest,
+                    change: Number.isFinite(prev) ? latest - prev : 0,
+                    changePct: Number.isFinite(prev) && prev > 0 ? ((latest - prev) / prev * 100) : 0,
+                    ts: timestamps[timestamps.length - 1] * 1000,
+                    source: "Yahoo Finance",
+                };
+            }
+        }
+    } catch {}
+    // Try 2: Stooq CSV via allorigins
+    try {
+        const csv = await fetch("https://api.allorigins.win/raw?url=" +
+            encodeURIComponent("https://stooq.com/q/l/?s=%5Evix&f=sd2t2ohlcv&h&e=csv")
+        ).then((r) => r.text());
+        const rows = csv.trim().split("\n");
+        if (rows.length >= 2) {
+            const fields = rows[1].split(",");
+            // Fields: Symbol, Date, Time, Open, High, Low, Close, Volume
+            const close = parseFloat(fields[6]);
+            const open = parseFloat(fields[3]);
+            if (Number.isFinite(close)) {
+                return {
+                    value: close,
+                    change: close - open,
+                    changePct: open > 0 ? ((close - open) / open * 100) : 0,
+                    ts: Date.now(),
+                    source: "Stooq",
+                };
+            }
+        }
+    } catch {}
+    // Try 3: Financial Modeling Prep (free tier, no key for VIX quote)
+    try {
+        const raw = await fetch("https://financialmodelingprep.com/api/v3/quote/%5EVIX?apikey=demo").then((r) => r.json());
+        if (Array.isArray(raw) && raw[0]?.price) {
+            return {
+                value: raw[0].price,
+                change: raw[0].change || 0,
+                changePct: raw[0].changesPercentage || 0,
+                ts: Date.now(),
+                source: "FMP",
+            };
+        }
+    } catch {}
+    return null;
+}
+
 async function fetchEurRate() {
     // Try 1: Frankfurter (ECB rates)
     try {
@@ -2263,6 +2325,8 @@ return {
     factorAttribution, STRATEGY_FACTORS,
     // v21: WebSocket streaming
     BinanceStreamManager,
+    // v29: VIX barometer
+    fetchVix,
     closes, highs, lows, vols,
     STRATEGIES, ensemble,
     planTrade, forecast, assessRisk,
