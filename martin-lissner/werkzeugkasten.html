@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Lissner Werkzeugkasten</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,600;112,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: engineering handbook. Fixed index rail on the left (like a binder tab strip), content as numbered chapters of cards. Search filters every card. */
+:root {
+  --paper: #F3F5F2;
+  --sheet: #FFFFFF;
+  --ink: #15202A;
+  --muted: #56646F;
+  --line: #D5DBD8;
+  --signal: #0B6E6C;
+  --signal-soft: #DCEDEA;
+  --alarm: #C2562B;
+  --alarm-soft: #F7E3D9;
+  --warn: #9A6B00;
+  --warn-soft: #F6EDD3;
+  --display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0F161C; --sheet: #151F27; --ink: #E6ECEA; --muted: #97A6AE; --line: #2A3842;
+    --signal: #4CC2B8; --signal-soft: #173A3A; --alarm: #EE8A5C; --alarm-soft: #3A2318;
+    --warn: #E2B64A; --warn-soft: #362C12; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0F161C; --sheet: #151F27; --ink: #E6ECEA; --muted: #97A6AE; --line: #2A3842;
+  --signal: #4CC2B8; --signal-soft: #173A3A; --alarm: #EE8A5C; --alarm-soft: #3A2318;
+  --warn: #E2B64A; --warn-soft: #362C12; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 0.95rem/1.55 var(--body); -webkit-font-smoothing: antialiased; }
+a { color: var(--signal); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* Top bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--ink); color: var(--paper); }
+.bar__in { max-width: 1400px; margin: 0 auto; padding: 10px clamp(16px, 3vw, 28px); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.bar__name { font: 800 1rem/1 var(--display); font-stretch: 112%; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+.bar__name span { font: 500 0.7rem/1 var(--mono); opacity: 0.65; margin-left: 8px; letter-spacing: 0.06em; }
+.search { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--paper) 12%, transparent); border-radius: 3px; padding: 0 10px; min-width: 0; }
+.search input { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--paper); font: 400 0.95rem/1 var(--body); padding: 10px 0; outline: none; }
+.search input::placeholder { color: color-mix(in srgb, var(--paper) 55%, transparent); }
+.search kbd { font: 500 0.7rem/1 var(--mono); opacity: 0.6; }
+.count { font: 500 0.75rem/1 var(--mono); opacity: 0.7; white-space: nowrap; }
+@media (max-width: 600px) { .bar__name span, .count, .search kbd { display: none; } }
+
+/* Shell */
+.shell { max-width: 1400px; margin: 0 auto; padding-inline: clamp(16px, 3vw, 28px); display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; }
+@media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); gap: 0; } }
+.index { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 64px); align-self: start; padding-block: 24px; max-height: calc(100vh - 70px); overflow-y: auto; }
+.index ol { list-style: none; margin: 0; padding: 0; counter-reset: ch; }
+.index li a { display: grid; grid-template-columns: 28px 1fr; gap: 6px; padding: 7px 8px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; font-size: 0.9rem; }
+.index li a b { font: 500 0.75rem/1.6 var(--mono); color: var(--muted); font-weight: 500; }
+.index li a:hover, .index li a.on { color: var(--ink); border-left-color: var(--signal); background: var(--sheet); }
+.index li a.on b { color: var(--signal); }
+.legend { margin-top: 20px; padding: 12px 8px 0; border-top: 1px solid var(--line); font-size: 0.78rem; color: var(--muted); display: grid; gap: 6px; }
+@media (max-width: 900px) {
+  .index { position: static; max-height: none; padding-block: 12px 0; overflow: visible; }
+  .index ol { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; }
+  .index li a { display: block; white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; padding: 6px 8px; }
+  .index li a b { display: none; }
+  .legend { display: none; }
+}
+main { padding-block: 24px 80px; min-width: 0; }
+
+/* Chapters */
+.ch { padding-block: 18px 28px; }
+.ch + .ch { border-top: 1px solid var(--line); }
+.ch__head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; flex-wrap: wrap; }
+.ch__no { font: 500 0.8rem/1 var(--mono); color: var(--signal); }
+h2 { font: 800 clamp(1.4rem, 2.6vw, 1.9rem)/1.1 var(--display); font-stretch: 112%; margin: 0; text-wrap: balance; }
+.ch__sub { color: var(--muted); margin: 0 0 18px; max-width: 75ch; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; align-items: start; }
+@media (max-width: 420px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.grid--wide { grid-template-columns: minmax(0, 1fr); }
+.card { background: var(--sheet); border: 1px solid var(--line); border-radius: 4px; padding: 16px 18px 18px; min-width: 0; }
+.card--span { grid-column: 1 / -1; }
+.card h3 { font: 600 1rem/1.3 var(--body); margin: 0 0 4px; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.card h3 small { font: 500 0.68rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.card > p { margin: 0 0 10px; color: var(--muted); font-size: 0.88rem; }
+.card ul, .card ol { margin: 6px 0 0; padding-left: 20px; }
+.card li { margin: 3px 0; }
+.card li b { font-weight: 600; }
+
+/* Tags for certainty */
+.t { display: inline-block; font: 500 0.66rem/1 var(--mono); letter-spacing: 0.04em; padding: 3px 5px; border-radius: 2px; vertical-align: 1px; margin-left: 4px; white-space: nowrap; }
+.t--s { background: var(--signal-soft); color: var(--signal); }
+.t--w { background: var(--warn-soft); color: var(--warn); }
+.t--v { background: var(--alarm-soft); color: var(--alarm); }
+
+/* Formula */
+.f { font: 400 0.86rem/1.6 var(--mono); background: var(--paper); border-radius: 3px; padding: 8px 10px; margin: 8px 0; overflow-x: auto; white-space: nowrap; }
+
+/* Tables */
+.tw { overflow-x: auto; margin-top: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 500 0.7rem/1.3 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--paper); position: sticky; top: 0; }
+td.n, th.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.hl td { background: var(--signal-soft); }
+
+/* Calculators */
+.calc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-top: 8px; }
+.calc label { display: grid; gap: 3px; font-size: 0.76rem; color: var(--muted); min-width: 0; }
+.calc input, .calc select, textarea {
+  width: 100%; min-width: 0; font: 400 0.92rem/1.2 var(--mono); padding: 7px 8px; border: 1px solid var(--line);
+  border-radius: 3px; background: var(--paper); color: var(--ink);
+}
+.calc input:focus, .calc select:focus, textarea:focus { border-color: var(--signal); outline: none; }
+textarea { resize: vertical; min-height: 64px; margin-top: 8px; }
+.out { margin-top: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.out div { background: var(--sheet); padding: 8px 10px; min-width: 0; }
+.out span { display: block; font: 500 0.66rem/1.3 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.out output { font: 600 1.05rem/1.3 var(--mono); font-variant-numeric: tabular-nums; word-break: break-all; }
+.verdict { margin-top: 8px; font-size: 0.84rem; padding: 6px 9px; border-radius: 3px; }
+.v-ok { background: var(--signal-soft); color: var(--signal); }
+.v-warn { background: var(--warn-soft); color: var(--warn); }
+.v-bad { background: var(--alarm-soft); color: var(--alarm); }
+
+/* Checklist */
+.check { list-style: none; padding: 0 !important; }
+.check li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); margin: 0 !important; }
+.check input { margin-top: 3px; accent-color: var(--signal); width: 16px; height: 16px; }
+.check li.done span { color: var(--muted); text-decoration: line-through; }
+.progress { height: 6px; background: var(--paper); border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
+.progress i { display: block; height: 100%; background: var(--signal); width: 0; transition: width .2s; }
+
+/* Glossary */
+.az { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.az a { font: 500 0.78rem/1 var(--mono); padding: 6px 7px; border: 1px solid var(--line); border-radius: 2px; text-decoration: none; color: var(--ink); background: var(--sheet); }
+.az a:hover { border-color: var(--signal); color: var(--signal); }
+.gl { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 24px; }
+.gl dl { margin: 0; }
+.gl .letter { font: 800 1.3rem/1 var(--display); font-stretch: 112%; color: var(--signal); margin: 14px 0 4px; grid-column: 1 / -1; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.term { padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.term dt { font-weight: 600; }
+.term dt em { font-style: normal; font-weight: 400; color: var(--muted); font-size: 0.84rem; }
+.term dd { margin: 2px 0 0; color: var(--muted); font-size: 0.87rem; }
+
+.links { list-style: none; padding: 0 !important; }
+.links li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); margin: 0 !important; flex-wrap: wrap; }
+.links li span { color: var(--muted); font-size: 0.82rem; }
+.empty { padding: 40px 0; color: var(--muted); text-align: center; }
+.foot { font: 400 0.76rem/1.6 var(--mono); color: var(--muted); padding-top: 24px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="bar__in">
+    <div class="bar__name">Werkzeugkasten<span>M. LISSNER · LEAN · SIX SIGMA · KSA</span></div>
+    <label class="search" for="q">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Suchen: Cpk, SMED, Iqama, Nelson, OEE …" autocomplete="off">
+      <kbd>/</kbd>
+    </label>
+    <span class="count" id="count"></span>
+  </div>
+</div>
+
+<div class="shell">
+  <nav class="index" aria-label="Kapitel">
+    <ol id="toc">
+      <li><a href="#rechner"><b>01</b>Rechner</a></li>
+      <li><a href="#tabellen"><b>02</b>Tabellen &amp; Konstanten</a></li>
+      <li><a href="#dmaic"><b>03</b>DMAIC &amp; Statistik</a></li>
+      <li><a href="#lean"><b>04</b>Lean-Methoden</a></li>
+      <li><a href="#qualitaet"><b>05</b>Qualität &amp; Problemlösung</a></li>
+      <li><a href="#refa"><b>06</b>REFA &amp; Arbeitsstudium</a></li>
+      <li><a href="#pm"><b>07</b>Projektmanagement</a></li>
+      <li><a href="#vorlagen"><b>08</b>Vorlagen &amp; Checklisten</a></li>
+      <li><a href="#ksa"><b>09</b>Saudi-Arabien Praxis</a></li>
+      <li><a href="#umzug"><b>10</b>Bewerbung &amp; Umzug</a></li>
+      <li><a href="#quellen"><b>11</b>Software &amp; Quellen</a></li>
+      <li><a href="#glossar"><b>12</b>Glossar A–Z</a></li>
+    </ol>
+    <div class="legend">
+      <div><span class="t t--s">SICHER</span> Standardwissen</div>
+      <div><span class="t t--w">WAHRSCH.</span> vor Nutzung prüfen</div>
+      <div><span class="t t--v">VERMUTUNG</span> unbedingt prüfen</div>
+    </div>
+  </nav>
+
+  <main id="main">
+
+  <!-- 01 RECHNER -->
+  <section class="ch" id="rechner">
+    <div class="ch__head"><span class="ch__no">01</span><h2>Rechner</h2></div>
+    <p class="ch__sub">Alle Rechner sind mit Beispielwerten vorbelegt. Werte überschreiben, Ergebnis aktualisiert sich sofort.</p>
+    <div class="grid">
+
+      <div class="card" data-k="sigma dpmo yield ausbeute sigma-niveau fehler">
+        <h3>Sigma-Niveau / DPMO <small>Six Sigma</small></h3>
+        <p>Mit 1,5σ-Shift (Kurzzeit-Sigma, Konvention nach Motorola).</p>
+        <div class="calc">
+          <label>Fehler (Defects)<input id="s_d" type="number" value="38" min="0"></label>
+          <label>Einheiten (Units)<input id="s_u" type="number" value="1500" min="1"></label>
+          <label>Fehlermöglichkeiten je Einheit<input id="s_o" type="number" value="4" min="1"></label>
+          <label>Shift [σ]<input id="s_sh" type="number" value="1.5" step="0.1"></label>
+        </div>
+        <div class="out"><div><span>DPMO</span><output id="s_dpmo"></output></div><div><span>Yield</span><output id="s_y"></output></div><div><span>Sigma (ST)</span><output id="s_z"></output></div></div>
+        <div class="f">DPMO = D / (U · O) · 10⁶ &nbsp;·&nbsp; σ<sub>ST</sub> = z(1 − DPMO/10⁶) + 1,5</div>
+      </div>
+
+      <div class="card" data-k="cp cpk pp ppk prozessfähigkeit capability usl lsl ppm">
+        <h3>Prozessfähigkeit Cp / Cpk <small>Measure</small></h3>
+        <p>Mit Kurzzeit-σ (innerhalb) ergibt sich Cp/Cpk, mit Gesamt-σ Pp/Ppk.</p>
+        <div class="calc">
+          <label>USL<input id="c_usl" type="number" value="10.05" step="any"></label>
+          <label>LSL<input id="c_lsl" type="number" value="9.95" step="any"></label>
+          <label>Mittelwert x̄<input id="c_m" type="number" value="10.012" step="any"></label>
+          <label>Standardabw. σ<input id="c_s" type="number" value="0.011" step="any"></label>
+        </div>
+        <div class="out"><div><span>Cp</span><output id="c_cp"></output></div><div><span>Cpk</span><output id="c_cpk"></output></div><div><span>ppm außerhalb</span><output id="c_ppm"></output></div><div><span>σ-Niveau (ST)</span><output id="c_z"></output></div></div>
+        <div id="c_v" class="verdict"></div>
+        <div class="f">Cp = (USL − LSL) / 6σ &nbsp;·&nbsp; Cpk = min(USL − x̄, x̄ − LSL) / 3σ</div>
+      </div>
+
+      <div class="card" data-k="oee gesamtanlageneffektivität verfügbarkeit leistung qualität tpm">
+        <h3>OEE <small>TPM</small></h3>
+        <p>Verfügbarkeit × Leistung × Qualität.</p>
+        <div class="calc">
+          <label>Geplante Produktionszeit [min]<input id="o_pt" type="number" value="450"></label>
+          <label>Stillstand [min]<input id="o_dt" type="number" value="47"></label>
+          <label>Ideale Taktzeit [s/Stk]<input id="o_ct" type="number" value="20" step="any"></label>
+          <label>Gesamtmenge [Stk]<input id="o_tc" type="number" value="1080"></label>
+          <label>Gutteile [Stk]<input id="o_gc" type="number" value="1052"></label>
+        </div>
+        <div class="out"><div><span>Verfügb.</span><output id="o_a"></output></div><div><span>Leistung</span><output id="o_p"></output></div><div><span>Qualität</span><output id="o_q"></output></div><div><span>OEE</span><output id="o_oee"></output></div></div>
+        <div id="o_v" class="verdict"></div>
+      </div>
+
+      <div class="card" data-k="takt taktzeit linienabtaktung werker kundenbedarf line balancing">
+        <h3>Taktzeit &amp; Linienabtaktung <small>Lean</small></h3>
+        <div class="calc">
+          <label>Schichtdauer [min]<input id="t_sh" type="number" value="480"></label>
+          <label>Pausen je Schicht [min]<input id="t_br" type="number" value="60"></label>
+          <label>Schichten / Tag<input id="t_n" type="number" value="2"></label>
+          <label>Kundenbedarf / Tag [Stk]<input id="t_d" type="number" value="1200"></label>
+          <label>Arbeitsinhalt gesamt [s/Stk]<input id="t_wc" type="number" value="210"></label>
+        </div>
+        <div class="out"><div><span>Taktzeit</span><output id="t_tt"></output></div><div><span>Werker (theor.)</span><output id="t_op"></output></div><div><span>Werker (gerundet)</span><output id="t_opr"></output></div></div>
+        <div class="f">Takt = verfügbare Zeit / Kundenbedarf &nbsp;·&nbsp; Werker = Σ Arbeitsinhalt / Takt</div>
+      </div>
+
+      <div class="card" data-k="stichprobe stichprobenumfang sample size konfidenz fehlermarge anteil">
+        <h3>Stichprobenumfang <small>Measure</small></h3>
+        <div class="calc">
+          <label>Typ<select id="n_t"><option value="m">Mittelwert (stetig)</option><option value="p">Anteil (diskret)</option></select></label>
+          <label>Konfidenz<select id="n_c"><option value="1.645">90 %</option><option value="1.96" selected>95 %</option><option value="2.576">99 %</option></select></label>
+          <label>σ bzw. erwarteter Anteil p<input id="n_s" type="number" value="2.5" step="any"></label>
+          <label>Fehlermarge E (±)<input id="n_e" type="number" value="0.5" step="any"></label>
+        </div>
+        <div class="out"><div><span>n (mind.)</span><output id="n_n"></output></div></div>
+        <div class="f">Mittelwert: n = (z·σ / E)² &nbsp;·&nbsp; Anteil: n = z²·p(1−p) / E²</div>
+      </div>
+
+      <div class="card" data-k="i-mr regelkarte eingriffsgrenzen ucl lcl einzelwert spc control chart">
+        <h3>I-MR-Regelkarte aus Daten <small>Control</small></h3>
+        <p>Einzelwerte einfügen (Komma, Leerzeichen oder Zeilenumbruch).</p>
+        <textarea id="i_d" aria-label="Messwerte">10.02 10.05 9.98 10.01 10.04 9.97 10.03 10.00 10.06 9.99 10.02 10.08 10.01 9.96 10.03</textarea>
+        <div class="out"><div><span>n</span><output id="i_n"></output></div><div><span>x̄</span><output id="i_m"></output></div><div><span>UCL</span><output id="i_u"></output></div><div><span>LCL</span><output id="i_l"></output></div><div><span>MR̄</span><output id="i_mr"></output></div><div><span>UCL MR</span><output id="i_umr"></output></div></div>
+        <div id="i_v" class="verdict"></div>
+        <div class="f">UCL/LCL = x̄ ± 2,66·MR̄ &nbsp;·&nbsp; UCL<sub>MR</sub> = 3,267·MR̄ &nbsp;·&nbsp; σ̂ = MR̄ / 1,128</div>
+      </div>
+
+      <div class="card" data-k="little law durchlaufzeit wip bestand durchsatz">
+        <h3>Little's Law <small>Flow</small></h3>
+        <p>Zwei Werte eingeben, das leere Feld wird berechnet.</p>
+        <div class="calc">
+          <label>WIP (Bestand) [Stk]<input id="l_w" type="number" value="" placeholder="?"></label>
+          <label>Durchsatz [Stk/Tag]<input id="l_th" type="number" value="120"></label>
+          <label>Durchlaufzeit [Tage]<input id="l_lt" type="number" value="4.5" step="any"></label>
+        </div>
+        <div class="out"><div><span>Ergebnis</span><output id="l_r"></output></div></div>
+        <div class="f">WIP = Durchsatz × Durchlaufzeit</div>
+      </div>
+
+      <div class="card" data-k="kanban anzahl karten wiederbeschaffungszeit sicherheit behälter">
+        <h3>Kanban-Anzahl <small>Pull</small></h3>
+        <div class="calc">
+          <label>Bedarf / Tag [Stk]<input id="k_d" type="number" value="800"></label>
+          <label>Wiederbeschaffungszeit [Tage]<input id="k_l" type="number" value="1.5" step="any"></label>
+          <label>Sicherheitsfaktor α [%]<input id="k_a" type="number" value="15"></label>
+          <label>Behältermenge [Stk]<input id="k_c" type="number" value="50"></label>
+        </div>
+        <div class="out"><div><span>Kanbans</span><output id="k_n"></output></div></div>
+        <div class="f">N = D · L · (1 + α) / C &nbsp;(aufrunden)</div>
+      </div>
+
+      <div class="card" data-k="einheiten umrechnung zoll inch psi bar fahrenheit barrel pfund lbf drehmoment">
+        <h3>Einheiten-Umrechner <small>Aramco &amp; US-Normen</small></h3>
+        <p>Viele Spezifikationen in KSA nutzen US-Einheiten.</p>
+        <div class="calc">
+          <label>Wert<input id="u_v" type="number" value="150" step="any"></label>
+          <label>Umrechnung<select id="u_t">
+            <option value="psi">psi → bar</option><option value="bar">bar → psi</option>
+            <option value="in">inch → mm</option><option value="mm">mm → inch</option>
+            <option value="f">°F → °C</option><option value="c">°C → °F</option>
+            <option value="lb">lb → kg</option><option value="kg">kg → lb</option>
+            <option value="bbl">bbl (Öl) → m³</option><option value="m3">m³ → bbl</option>
+            <option value="lbft">lbf·ft → N·m</option><option value="nm">N·m → lbf·ft</option>
+            <option value="gpm">US gpm → m³/h</option><option value="hp">hp → kW</option>
+          </select></label>
+        </div>
+        <div class="out"><div><span>Ergebnis</span><output id="u_r"></output></div></div>
+      </div>
+
+      <div class="card" data-k="60 hz frequenz motor drehzahl netz 50hz">
+        <h3>Motordrehzahl 50 Hz → 60 Hz <small>KSA-Netz</small></h3>
+        <p>Das Netz in Saudi-Arabien hat 60 Hz <span class="t t--s">SICHER</span>, Deutschland 50 Hz. Deutsche Maschinen laufen dort mit anderer Drehzahl.</p>
+        <div class="calc">
+          <label>Polpaare p<input id="h_p" type="number" value="2" min="1"></label>
+          <label>Schlupf [%]<input id="h_s" type="number" value="3" step="any"></label>
+        </div>
+        <div class="out"><div><span>n bei 50 Hz</span><output id="h_50"></output></div><div><span>n bei 60 Hz</span><output id="h_60"></output></div></div>
+        <div class="f">n = 60 · f / p · (1 − s)</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 02 TABELLEN -->
+  <section class="ch" id="tabellen">
+    <div class="ch__head"><span class="ch__no">02</span><h2>Tabellen &amp; Konstanten</h2></div>
+    <p class="ch__sub">Referenzwerte für Regelkarten, Sigma-Niveaus und Prüfgrößen.</p>
+    <div class="grid">
+
+      <div class="card" data-k="sigma tabelle dpmo yield 3.4 ppm">
+        <h3>Sigma-Niveau ↔ DPMO <small>1,5σ-Shift</small></h3>
+        <div class="tw"><table><thead><tr><th class="n">σ (ST)</th><th class="n">DPMO</th><th class="n">Yield</th><th class="n">Cpk ≈</th></tr></thead><tbody id="sigTab"></tbody></table></div>
+      </div>
+
+      <div class="card" data-k="regelkarten konstanten a2 d3 d4 d2 a3 b3 b4 c4 xbar r s">
+        <h3>Regelkarten-Konstanten <small>n = 2–10</small></h3>
+        <div class="tw"><table><thead><tr><th class="n">n</th><th class="n">A₂</th><th class="n">D₃</th><th class="n">D₄</th><th class="n">d₂</th><th class="n">A₃</th><th class="n">B₃</th><th class="n">B₄</th><th class="n">c₄</th></tr></thead><tbody id="ccTab"></tbody></table></div>
+        <div class="f">x̄-R: x̿ ± A₂·R̄; UCL<sub>R</sub> = D₄·R̄ · x̄-s: x̿ ± A₃·s̄; UCL<sub>s</sub> = B₄·s̄ · σ̂ = R̄/d₂ = s̄/c₄</div>
+      </div>
+
+      <div class="card" data-k="regelkarte auswahl i-mr xbar p np c u attributiv">
+        <h3>Auswahl der Regelkarte</h3>
+        <div class="tw"><table><thead><tr><th>Datentyp</th><th>Situation</th><th>Karte</th></tr></thead><tbody>
+          <tr><td>stetig</td><td>Einzelwerte, n = 1</td><td><b>I-MR</b></td></tr>
+          <tr><td>stetig</td><td>Teilgruppen n = 2–9</td><td><b>x̄-R</b></td></tr>
+          <tr><td>stetig</td><td>Teilgruppen n ≥ 10</td><td><b>x̄-s</b></td></tr>
+          <tr><td>diskret: fehlerhafte Einheiten</td><td>n konstant</td><td><b>np</b></td></tr>
+          <tr><td>diskret: fehlerhafte Einheiten</td><td>n variabel</td><td><b>p</b></td></tr>
+          <tr><td>diskret: Fehler je Einheit</td><td>Bezugsgröße konstant</td><td><b>c</b></td></tr>
+          <tr><td>diskret: Fehler je Einheit</td><td>Bezugsgröße variabel</td><td><b>u</b></td></tr>
+          <tr><td>kleine Verschiebungen</td><td>Trend früh erkennen</td><td><b>CUSUM, EWMA</b></td></tr>
+        </tbody></table></div>
+      </div>
+
+      <div class="card" data-k="nelson regeln western electric außer kontrolle muster">
+        <h3>Nelson-Regeln <small>Außer Kontrolle</small></h3>
+        <ol>
+          <li>1 Punkt außerhalb ±3σ</li>
+          <li>9 Punkte in Folge auf einer Seite der Mittellinie</li>
+          <li>6 Punkte in Folge steigend oder fallend</li>
+          <li>14 Punkte in Folge abwechselnd auf und ab</li>
+          <li>2 von 3 Punkten außerhalb ±2σ (gleiche Seite)</li>
+          <li>4 von 5 Punkten außerhalb ±1σ (gleiche Seite)</li>
+          <li>15 Punkte in Folge innerhalb ±1σ (Schichtung)</li>
+          <li>8 Punkte in Folge außerhalb ±1σ (beide Seiten)</li>
+        </ol>
+      </div>
+
+      <div class="card" data-k="z-werte quantile normalverteilung konfidenz t-verteilung">
+        <h3>z-Werte der Normalverteilung</h3>
+        <div class="tw"><table><thead><tr><th>Konfidenz</th><th class="n">α</th><th class="n">z (zweiseitig)</th><th class="n">z (einseitig)</th></tr></thead><tbody>
+          <tr><td>90 %</td><td class="n">0,10</td><td class="n">1,645</td><td class="n">1,282</td></tr>
+          <tr class="hl"><td>95 %</td><td class="n">0,05</td><td class="n">1,960</td><td class="n">1,645</td></tr>
+          <tr><td>99 %</td><td class="n">0,01</td><td class="n">2,576</td><td class="n">2,326</td></tr>
+          <tr><td>99,73 %</td><td class="n">0,0027</td><td class="n">3,000</td><td class="n">2,782</td></tr>
+        </tbody></table></div>
+        <p style="margin-top:8px">Faustregel: ±1σ = 68,27 %, ±2σ = 95,45 %, ±3σ = 99,73 %.</p>
+      </div>
+
+      <div class="card" data-k="cpk grenzwerte bewertung fähig automotive 1.33 1.67">
+        <h3>Bewertung Cpk / Ppk</h3>
+        <div class="tw"><table><thead><tr><th class="n">Cpk</th><th class="n">ppm (beidseitig, zentriert)</th><th>Bewertung</th></tr></thead><tbody>
+          <tr><td class="n">&lt; 1,00</td><td class="n">&gt; 2 700</td><td>nicht fähig</td></tr>
+          <tr><td class="n">1,00</td><td class="n">2 700</td><td>knapp, 100 %-Prüfung nötig</td></tr>
+          <tr class="hl"><td class="n">1,33</td><td class="n">63</td><td>übliche Mindestforderung</td></tr>
+          <tr><td class="n">1,67</td><td class="n">0,6</td><td>neue/kritische Merkmale (Automotive)</td></tr>
+          <tr><td class="n">2,00</td><td class="n">0,002</td><td>Six-Sigma-Prozess (Cp = 2)</td></tr>
+        </tbody></table></div>
+        <p style="margin-top:8px">Grenzwerte sind kundenspezifisch. Immer die Spezifikation des Auftraggebers prüfen.</p>
+      </div>
+
+      <div class="card" data-k="msa gage r&r messsystemanalyse ndc toleranz">
+        <h3>Messsystemanalyse (Gage R&amp;R) <small>AIAG MSA</small></h3>
+        <div class="tw"><table><thead><tr><th>%GRR (Streuung oder Toleranz)</th><th>Bewertung</th></tr></thead><tbody>
+          <tr><td>&lt; 10 %</td><td>annehmbar</td></tr>
+          <tr><td>10–30 %</td><td>bedingt annehmbar, je nach Anwendung und Kosten</td></tr>
+          <tr><td>&gt; 30 %</td><td>nicht annehmbar, Messsystem verbessern</td></tr>
+        </tbody></table></div>
+        <p style="margin-top:8px">Zusätzlich: Anzahl unterscheidbarer Kategorien <b>ndc ≥ 5</b>. Attributiv: Kappa ≥ 0,9 gut, &lt; 0,7 ungenügend.</p>
+      </div>
+
+      <div class="card" data-k="oee benchmark world class nakajima">
+        <h3>OEE-Richtwerte</h3>
+        <div class="tw"><table><thead><tr><th>Kennzahl</th><th class="n">„World Class“</th></tr></thead><tbody>
+          <tr><td>Verfügbarkeit</td><td class="n">90 %</td></tr>
+          <tr><td>Leistung</td><td class="n">95 %</td></tr>
+          <tr><td>Qualität</td><td class="n">99,9 %</td></tr>
+          <tr class="hl"><td>OEE</td><td class="n">≈ 85 %</td></tr>
+        </tbody></table></div>
+        <p style="margin-top:8px">Verbreiteter Richtwert nach Nakajima <span class="t t--w">WAHRSCH.</span>. Typische Fertigungen liegen oft deutlich darunter.</p>
+      </div>
+
+      <div class="card" data-k="doe versuchsplan faktoren runs auflösung resolution">
+        <h3>DoE: Versuchsumfang</h3>
+        <div class="tw"><table><thead><tr><th class="n">Faktoren k</th><th class="n">vollfakt. 2ᵏ</th><th class="n">½-Fraktion</th><th>Auflösung ½</th></tr></thead><tbody>
+          <tr><td class="n">3</td><td class="n">8</td><td class="n">4</td><td>III</td></tr>
+          <tr><td class="n">4</td><td class="n">16</td><td class="n">8</td><td>IV</td></tr>
+          <tr><td class="n">5</td><td class="n">32</td><td class="n">16</td><td>V</td></tr>
+          <tr><td class="n">6</td><td class="n">64</td><td class="n">32</td><td>VI</td></tr>
+          <tr><td class="n">7</td><td class="n">128</td><td class="n">64</td><td>VII</td></tr>
+        </tbody></table></div>
+        <ul><li><b>III</b>: Haupteffekte mit 2-fach-WW vermengt</li><li><b>IV</b>: Haupteffekte frei, 2-fach-WW untereinander vermengt</li><li><b>V</b>: Haupteffekte und 2-fach-WW frei schätzbar</li></ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 03 DMAIC -->
+  <section class="ch" id="dmaic">
+    <div class="ch__head"><span class="ch__no">03</span><h2>DMAIC &amp; Statistik</h2></div>
+    <p class="ch__sub">Phasen, Werkzeuge, Ergebnisse und die Auswahl des richtigen Tests.</p>
+    <div class="grid">
+      <div class="card card--span" data-k="dmaic define measure analyze improve control phasen tollgate deliverables">
+        <h3>DMAIC-Phasen <small>Tollgate je Phase</small></h3>
+        <div class="tw"><table><thead><tr><th>Phase</th><th>Kernfrage</th><th>Werkzeuge</th><th>Ergebnis (Tollgate)</th></tr></thead><tbody>
+          <tr><td><b>Define</b></td><td>Was ist das Problem, was ist das Ziel?</td><td>Projektcharter, SIPOC, VOC, CTQ-Baum, Kano, COPQ, Stakeholder-Analyse</td><td>Unterschriebene Charter, Scope, Team, Business Case</td></tr>
+          <tr><td><b>Measure</b></td><td>Wie gut ist der Prozess heute?</td><td>Datenerfassungsplan, MSA/Gage R&amp;R, Prozessfähigkeit, Pareto, Flussdiagramm</td><td>Validierte Baseline (σ, Cpk, DPMO), Messsystem fähig</td></tr>
+          <tr><td><b>Analyze</b></td><td>Was sind die Grundursachen?</td><td>Ishikawa, 5-Why, Multi-Vari, Hypothesentests, ANOVA, Regression, FMEA</td><td>Statistisch belegte Grundursachen (vital few Xs)</td></tr>
+          <tr><td><b>Improve</b></td><td>Wie beseitigen wir die Ursachen?</td><td>DoE, RSM, Poka-Yoke, Lösungsmatrix, Pilot, Kosten-Nutzen</td><td>Pilotierte Lösung, Nachweis der Verbesserung</td></tr>
+          <tr><td><b>Control</b></td><td>Wie halten wir das Niveau?</td><td>Regelkarten (SPC), Kontrollplan, Standardarbeit, Audits, Reaktionsplan</td><td>Übergabe an Prozesseigner, Erfolgsnachweis</td></tr>
+        </tbody></table></div>
+      </div>
+
+      <div class="card card--span" data-k="hypothesentest auswahl t-test anova mann-whitney chi-quadrat kruskal wilcoxon levene">
+        <h3>Welcher Hypothesentest? <small>Analyze</small></h3>
+        <div class="tw"><table><thead><tr><th>Frage</th><th>Normalverteilt (parametrisch)</th><th>Nicht normalverteilt</th></tr></thead><tbody>
+          <tr><td>1 Mittelwert gegen Sollwert</td><td>1-Stichproben-t-Test</td><td>1-Stichproben-Wilcoxon / Vorzeichentest</td></tr>
+          <tr><td>2 unabhängige Gruppen</td><td>2-Stichproben-t-Test</td><td>Mann-Whitney-U</td></tr>
+          <tr><td>2 verbundene Messungen (vorher/nachher)</td><td>Gepaarter t-Test</td><td>Wilcoxon-Vorzeichen-Rang</td></tr>
+          <tr><td>≥ 3 Gruppen, Lage</td><td>Einfaktorielle ANOVA</td><td>Kruskal-Wallis, Mood-Median</td></tr>
+          <tr><td>Streuungen vergleichen</td><td>F-Test (2), Bartlett (≥ 3)</td><td>Levene</td></tr>
+          <tr><td>Anteile (diskret)</td><td colspan="2">1- / 2-Anteile-Test; ≥ 3 Gruppen: χ²-Test</td></tr>
+          <tr><td>Zusammenhang zweier stetiger Größen</td><td>Pearson-Korrelation, Regression</td><td>Spearman-Rang</td></tr>
+          <tr><td>Zusammenhang zweier kategorialer Größen</td><td colspan="2">χ²-Unabhängigkeitstest</td></tr>
+          <tr><td>Normalverteilung prüfen</td><td colspan="2">Anderson-Darling (p &gt; 0,05 → keine Abweichung nachweisbar)</td></tr>
+        </tbody></table></div>
+        <p style="margin-top:8px">Entscheidung: p &lt; α (meist 0,05) → H₀ verwerfen. Fehler 1. Art = α, Fehler 2. Art = β, Power = 1 − β (Ziel ≥ 0,8).</p>
+      </div>
+
+      <div class="card" data-k="rollen black belt green belt champion sponsor master">
+        <h3>Six-Sigma-Rollen</h3>
+        <ul>
+          <li><b>Sponsor / Auftraggeber</b>: gibt Projekt frei, stellt Ressourcen</li>
+          <li><b>Champion</b>: priorisiert Projekte, beseitigt Hindernisse, bestätigt Einsparungen</li>
+          <li><b>Master Black Belt</b>: Methodencoach, Programmsteuerung</li>
+          <li><b>Black Belt</b>: leitet komplexe Projekte Vollzeit, coacht Green Belts</li>
+          <li><b>Green Belt</b>: leitet kleinere Projekte neben der Linienaufgabe</li>
+          <li><b>Prozesseigner</b>: übernimmt den verbesserten Prozess in Control</li>
+        </ul>
+      </div>
+
+      <div class="card" data-k="projektcharter inhalt problem ziel smart scope">
+        <h3>Projektcharter: Pflichtinhalte</h3>
+        <ol>
+          <li>Business Case (warum jetzt?)</li>
+          <li>Problembeschreibung (was, wo, seit wann, wie viel)</li>
+          <li>Ziel SMART (Baseline → Ziel, Termin)</li>
+          <li>Scope: in / out of scope</li>
+          <li>Primäre und sekundäre Kennzahl (Y, Gegenkennzahl)</li>
+          <li>Team, Rollen, Zeitaufwand</li>
+          <li>Meilensteine je Phase</li>
+          <li>Erwartete Einsparung (mit Controlling abgestimmt)</li>
+        </ol>
+      </div>
+
+      <div class="card" data-k="copq kosten schlechter qualität fehlerkosten">
+        <h3>COPQ: Kosten schlechter Qualität</h3>
+        <ul>
+          <li><b>Interne Fehlerkosten</b>: Ausschuss, Nacharbeit, Sortieren</li>
+          <li><b>Externe Fehlerkosten</b>: Reklamation, Garantie, Rückruf</li>
+          <li><b>Prüfkosten</b>: Wareneingang, Endprüfung, Audits</li>
+          <li><b>Verhütungskosten</b>: Schulung, FMEA, Poka-Yoke</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 LEAN -->
+  <section class="ch" id="lean">
+    <div class="ch__head"><span class="ch__no">04</span><h2>Lean-Methoden</h2></div>
+    <p class="ch__sub">Verschwendung erkennen, Fluss herstellen, Ziehen statt Schieben.</p>
+    <div class="grid">
+      <div class="card" data-k="verschwendung muda timwoods 8 arten">
+        <h3>8 Verschwendungsarten <small>TIMWOODS</small></h3>
+        <ul>
+          <li><b>T</b>ransport: unnötiges Bewegen von Material</li>
+          <li><b>I</b>nventory: Bestände über Bedarf</li>
+          <li><b>M</b>otion: unnötige Bewegung von Menschen</li>
+          <li><b>W</b>aiting: Warten auf Material, Info, Maschine</li>
+          <li><b>O</b>verproduction: mehr oder früher als benötigt</li>
+          <li><b>O</b>verprocessing: mehr Aufwand als der Kunde bezahlt</li>
+          <li><b>D</b>efects: Fehler, Nacharbeit</li>
+          <li><b>S</b>kills: ungenutztes Mitarbeiterpotenzial</li>
+        </ul>
+        <p style="margin-top:8px">Dazu <b>Mura</b> (Ungleichmäßigkeit) und <b>Muri</b> (Überlastung).</p>
+      </div>
+      <div class="card" data-k="5s sortieren setzen säubern standardisieren selbstdisziplin">
+        <h3>5S</h3>
+        <ol>
+          <li><b>Seiri</b>, Sortieren: Unnötiges entfernen (Rote-Karte-Aktion)</li>
+          <li><b>Seiton</b>, Set in order: fester Platz für alles, markiert</li>
+          <li><b>Seiso</b>, Säubern: reinigen heißt inspizieren</li>
+          <li><b>Seiketsu</b>, Standardisieren: Regeln, visuelle Standards</li>
+          <li><b>Shitsuke</b>, Selbstdisziplin: Audits, Gewohnheit</li>
+        </ol>
+        <p style="margin-top:8px">Oft erweitert um Safety (6S).</p>
+      </div>
+      <div class="card" data-k="smed rüstzeit rüsten intern extern shingo">
+        <h3>SMED: Rüstzeit senken</h3>
+        <ol>
+          <li>Rüstvorgang filmen und alle Schritte erfassen</li>
+          <li>Intern (Maschine steht) und extern (Maschine läuft) trennen</li>
+          <li>Interne in externe Tätigkeiten umwandeln</li>
+          <li>Interne Tätigkeiten straffen (Schnellspanner, Parallelarbeit)</li>
+          <li>Externe Tätigkeiten straffen, standardisieren</li>
+        </ol>
+        <p style="margin-top:8px">Ziel nach Shingo: Rüsten unter 10 Minuten (einstellig).</p>
+      </div>
+      <div class="card" data-k="wertstrom vsm value stream mapping ist soll durchlaufzeit">
+        <h3>Wertstromanalyse (VSM)</h3>
+        <ol>
+          <li>Produktfamilie wählen</li>
+          <li>Ist-Zustand am Gemba aufnehmen: Prozessschritte, Bestände, Info-Fluss</li>
+          <li>Je Prozess: ZZ (Zykluszeit), RZ (Rüstzeit), Verfügbarkeit, Werker, Losgröße</li>
+          <li>Zeitlinie: Bearbeitungszeit vs. Durchlaufzeit (Bestand ÷ Tagesbedarf)</li>
+          <li>Flussgrad = Σ Bearbeitungszeit / Durchlaufzeit</li>
+          <li>Soll-Zustand: Takt, Fluss, Supermarkt, Schrittmacher, Nivellieren</li>
+          <li>Umsetzungsplan mit Kaizen-Blitzen</li>
+        </ol>
+      </div>
+      <div class="card" data-k="tpm 8 säulen autonome instandhaltung geplante">
+        <h3>TPM: 8 Säulen</h3>
+        <ol>
+          <li>Autonome Instandhaltung</li><li>Geplante Instandhaltung</li><li>Fokussierte Verbesserung</li><li>Qualitätsinstandhaltung</li>
+          <li>Anlaufüberwachung (Early Equipment Mgmt.)</li><li>Training &amp; Ausbildung</li><li>Arbeitssicherheit, Gesundheit, Umwelt</li><li>TPM in der Verwaltung</li>
+        </ol>
+        <p style="margin-top:8px">6 große Verluste: Ausfälle, Rüsten, Leerlauf/Kurzstopps, reduzierte Geschwindigkeit, Anlauf-Ausschuss, Prozessfehler.</p>
+      </div>
+      <div class="card" data-k="toyota 14 prinzipien liker jidoka just in time heijunka">
+        <h3>Toyota-Haus</h3>
+        <ul>
+          <li><b>Dach</b>: höchste Qualität, niedrigste Kosten, kürzeste Durchlaufzeit</li>
+          <li><b>Säule 1 Just-in-Time</b>: Takt, Fluss, Pull</li>
+          <li><b>Säule 2 Jidoka</b>: bei Fehler stoppen, Andon, Poka-Yoke</li>
+          <li><b>Fundament</b>: Heijunka, Standardarbeit, Kaizen, Stabilität</li>
+        </ul>
+      </div>
+      <div class="card" data-k="shopfloor management kpi board tagesgespräch gemba walk">
+        <h3>Shopfloor Management</h3>
+        <ul>
+          <li>Tägliche Kurzrunde 10–15 min am Board, gleiche Uhrzeit</li>
+          <li>Kennzahlen: Sicherheit, Qualität, Liefertreue, Kosten, Personal (SQDCP)</li>
+          <li>Abweichung → Maßnahme mit Verantwortlichem und Termin</li>
+          <li>Eskalationsstufen: Team → Meister → Bereichsleitung (mit Zeitregel)</li>
+          <li>Gemba Walk: zuhören, fragen, nicht sofort Lösungen vorgeben</li>
+        </ul>
+      </div>
+      <div class="card" data-k="poka yoke fehlervermeidung kontakt fixwert schrittfolge">
+        <h3>Poka-Yoke</h3>
+        <ul>
+          <li><b>Kontaktmethode</b>: Form, Größe, Farbe verhindert falsche Lage</li>
+          <li><b>Fixwertmethode</b>: Zählung (alle 6 Schrauben gesetzt?)</li>
+          <li><b>Schrittfolgemethode</b>: Reihenfolge wird erzwungen</li>
+          <li>Wirkung: <b>Verhindern</b> (Kontrolle) vor <b>Melden</b> (Warnung)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 QUALITÄT -->
+  <section class="ch" id="qualitaet">
+    <div class="ch__head"><span class="ch__no">05</span><h2>Qualität &amp; Problemlösung</h2></div>
+    <p class="ch__sub">Strukturierte Problemlösung und Qualitätswerkzeuge.</p>
+    <div class="grid">
+      <div class="card" data-k="8d report d0 d1 d2 d3 d4 d5 d6 d7 d8 reklamation">
+        <h3>8D-Report</h3>
+        <ol start="0">
+          <li><b>D0</b> Vorbereiten, Sofortbedarf klären</li>
+          <li><b>D1</b> Team bilden</li>
+          <li><b>D2</b> Problem beschreiben (5W2H, Ist/Ist-nicht)</li>
+          <li><b>D3</b> Sofortmaßnahmen (Eindämmung)</li>
+          <li><b>D4</b> Grundursache: Entstehung <i>und</i> Nichtentdeckung</li>
+          <li><b>D5</b> Abstellmaßnahmen wählen und verifizieren</li>
+          <li><b>D6</b> Umsetzen und Wirksamkeit validieren</li>
+          <li><b>D7</b> Wiederauftreten verhindern (FMEA, Standards, Yokoten)</li>
+          <li><b>D8</b> Abschluss, Team würdigen</li>
+        </ol>
+      </div>
+      <div class="card" data-k="a3 report toyota problemlösung pdca">
+        <h3>A3-Report</h3>
+        <ol>
+          <li>Hintergrund</li><li>Ist-Zustand (mit Daten)</li><li>Ziel</li><li>Ursachenanalyse</li>
+          <li>Gegenmaßnahmen</li><li>Umsetzungsplan</li><li>Nachverfolgung / Ergebnis</li>
+        </ol>
+        <p style="margin-top:8px">Links Plan, rechts Do-Check-Act. Eine Seite DIN A3.</p>
+      </div>
+      <div class="card" data-k="fmea aiag vda action priority rpz bedeutung auftreten entdeckung">
+        <h3>FMEA <small>AIAG-VDA 2019</small></h3>
+        <p>7 Schritte: Planung, Struktur, Funktion, Fehler, Risikoanalyse, Optimierung, Dokumentation.</p>
+        <ul>
+          <li><b>B</b> Bedeutung 1–10 (9–10: Sicherheit/Gesetz)</li>
+          <li><b>A</b> Auftreten 1–10</li>
+          <li><b>E</b> Entdeckung 1–10 (10 = nicht entdeckbar)</li>
+          <li>Statt RPZ = B·A·E nun <b>Aufgabenpriorität AP</b> hoch / mittel / niedrig aus Tabelle</li>
+        </ul>
+        <p style="margin-top:8px">Viele Kunden in KSA arbeiten noch mit RPZ <span class="t t--v">VERMUTUNG</span>. Vorgabe beim Kunden klären.</p>
+      </div>
+      <div class="card" data-k="7 qualitätswerkzeuge q7 pareto ishikawa histogramm">
+        <h3>7 Qualitätswerkzeuge (Q7)</h3>
+        <ol><li>Fehlersammelliste</li><li>Histogramm</li><li>Pareto-Diagramm</li><li>Ursache-Wirkungs-Diagramm (Ishikawa)</li><li>Korrelationsdiagramm</li><li>Regelkarte</li><li>Schichtung / Flussdiagramm</li></ol>
+        <p style="margin-top:8px">Ishikawa-Kategorien: Mensch, Maschine, Methode, Material, Messung, Mitwelt (6M).</p>
+      </div>
+      <div class="card" data-k="7 managementwerkzeuge m7 affinität baum matrix">
+        <h3>7 Managementwerkzeuge (M7)</h3>
+        <ol><li>Affinitätsdiagramm</li><li>Relationendiagramm</li><li>Baumdiagramm</li><li>Matrixdiagramm</li><li>Portfolio / Matrix-Datenanalyse</li><li>Problem-Entscheidungs-Plan (PDPC)</li><li>Netzplan</li></ol>
+      </div>
+      <div class="card" data-k="5 why warum ursache 5w2h">
+        <h3>5-Why &amp; 5W2H</h3>
+        <ul>
+          <li><b>5-Why</b>: so lange „Warum?“ fragen, bis eine beeinflussbare Systemursache erreicht ist. Jede Antwort mit Fakten prüfen.</li>
+          <li><b>5W2H</b>: Was, Wer, Wo, Wann, Warum, Wie, Wie viel</li>
+          <li><b>Ist / Ist-nicht</b>: grenzt das Problem ab (wo tritt es auf, wo nicht?)</li>
+        </ul>
+      </div>
+      <div class="card" data-k="iso 9001 13053 18404 normen qualitätsmanagement 14001 45001">
+        <h3>Relevante Normen</h3>
+        <ul>
+          <li><b>ISO 9001</b>: Qualitätsmanagementsysteme</li>
+          <li><b>ISO 13053-1/-2</b>: Six Sigma DMAIC, Methoden</li>
+          <li><b>ISO 18404</b>: Kompetenzen Six Sigma / Lean</li>
+          <li><b>ISO 14001</b>: Umweltmanagement</li>
+          <li><b>ISO 45001</b>: Arbeitsschutzmanagement</li>
+          <li><b>IATF 16949</b>: Automotive QM</li>
+          <li><b>ISO 22514</b>: Prozessfähigkeit, statistische Methoden</li>
+        </ul>
+      </div>
+      <div class="card" data-k="pdca kaizen deming zyklus kvp">
+        <h3>PDCA / KVP</h3>
+        <ul>
+          <li><b>Plan</b>: Problem verstehen, Ursache, Maßnahme, Ziel</li>
+          <li><b>Do</b>: im Kleinen umsetzen</li>
+          <li><b>Check</b>: Wirkung mit Daten prüfen</li>
+          <li><b>Act</b>: standardisieren oder neuen Zyklus starten</li>
+        </ul>
+        <p style="margin-top:8px">Kaizen-Workshop: typisch 3–5 Tage, fester Scope, Umsetzung im Workshop.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 REFA -->
+  <section class="ch" id="refa">
+    <div class="ch__head"><span class="ch__no">06</span><h2>REFA &amp; Arbeitsstudium</h2></div>
+    <p class="ch__sub">Zeitarten nach REFA und Grundlagen der Zeitaufnahme.</p>
+    <div class="grid">
+      <div class="card" data-k="refa zeitarten auftragszeit rüstzeit ausführungszeit grundzeit verteilzeit erholungszeit">
+        <h3>REFA-Zeitgliederung (Mensch)</h3>
+        <div class="f">T = t<sub>r</sub> + t<sub>a</sub> &nbsp;&nbsp; t<sub>a</sub> = m · t<sub>e</sub></div>
+        <div class="f">t<sub>e</sub> = t<sub>g</sub> + t<sub>er</sub> + t<sub>v</sub> &nbsp;&nbsp; t<sub>g</sub> = t<sub>t</sub> + t<sub>w</sub></div>
+        <div class="f">t<sub>t</sub> = t<sub>tb</sub> (beeinflussbar) + t<sub>tu</sub> (unbeeinflussbar)</div>
+        <ul>
+          <li><b>T</b> Auftragszeit, <b>t<sub>r</sub></b> Rüstzeit, <b>t<sub>a</sub></b> Ausführungszeit</li>
+          <li><b>m</b> Menge, <b>t<sub>e</sub></b> Zeit je Einheit</li>
+          <li><b>t<sub>g</sub></b> Grundzeit, <b>t<sub>er</sub></b> Erholungszeit, <b>t<sub>v</sub></b> Verteilzeit</li>
+          <li><b>t<sub>t</sub></b> Tätigkeitszeit, <b>t<sub>w</sub></b> Wartezeit</li>
+        </ul>
+        <p style="margin-top:8px">Bezeichnungen je nach REFA-Lehrbuchausgabe leicht abweichend <span class="t t--w">WAHRSCH.</span>.</p>
+      </div>
+      <div class="card" data-k="zeitaufnahme leistungsgrad normalleistung ist-zeit soll-zeit">
+        <h3>Zeitaufnahme &amp; Leistungsgrad</h3>
+        <div class="f">Soll-Zeit = Ist-Zeit × Leistungsgrad / 100 %</div>
+        <ol>
+          <li>Arbeitsablauf in Ablaufabschnitte mit Messpunkten gliedern</li>
+          <li>Ist-Zeiten mehrfach erfassen, Leistungsgrad je Zyklus beurteilen</li>
+          <li>Statistisch prüfen: Variationskoeffizient, Mindestanzahl der Messungen</li>
+          <li>Zuschläge für Verteilzeit und Erholung (betrieblich ermittelt) addieren</li>
+        </ol>
+      </div>
+      <div class="card" data-k="refa arbeitssystem 7 systembegriffe arbeitsaufgabe eingabe ausgabe">
+        <h3>REFA-Arbeitssystem</h3>
+        <ul>
+          <li>Arbeitsaufgabe</li><li>Arbeitsablauf</li><li>Eingabe (Material, Info, Energie)</li><li>Ausgabe</li>
+          <li>Mensch</li><li>Betriebsmittel</li><li>Umwelteinflüsse</li>
+        </ul>
+      </div>
+      <div class="card" data-k="mtm multimoment methods time measurement tmu">
+        <h3>Weitere Zeitermittlung</h3>
+        <ul>
+          <li><b>MTM</b>: Systeme vorbestimmter Zeiten, 1 TMU = 0,036 s</li>
+          <li><b>Multimomentaufnahme</b>: Häufigkeitsstudie über Stichproben</li>
+          <li><b>Vergleichen &amp; Schätzen</b>: für Einzelfertigung</li>
+          <li><b>Selbstaufschreibung</b>: für indirekte Bereiche</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 PM -->
+  <section class="ch" id="pm">
+    <div class="ch__head"><span class="ch__no">07</span><h2>Projektmanagement</h2></div>
+    <p class="ch__sub">PRINCE2, Planung, Risiken und Verantwortlichkeiten.</p>
+    <div class="grid">
+      <div class="card" data-k="prince2 7 grundprinzipien principles">
+        <h3>PRINCE2: 7 Grundprinzipien</h3>
+        <ol><li>Fortlaufende geschäftliche Rechtfertigung</li><li>Lernen aus Erfahrung</li><li>Definierte Rollen und Verantwortlichkeiten</li><li>Steuern über Managementphasen</li><li>Steuern nach dem Ausnahmeprinzip</li><li>Produktorientierung</li><li>Anpassen an die Projektumgebung</li></ol>
+      </div>
+      <div class="card" data-k="prince2 themen practices business case organisation pläne qualität risiko änderungen fortschritt">
+        <h3>PRINCE2: 7 Themen / Practices</h3>
+        <ol><li>Business Case</li><li>Organisation</li><li>Pläne</li><li>Qualität</li><li>Risiko</li><li>Änderungen (Issues)</li><li>Fortschritt</li></ol>
+        <p style="margin-top:8px">In der 7. Edition (2023) heißen die Themen „Practices“ <span class="t t--w">WAHRSCH.</span>.</p>
+      </div>
+      <div class="card" data-k="prince2 prozesse vorbereiten lenken initiieren steuern phase abschließen">
+        <h3>PRINCE2: 7 Prozesse</h3>
+        <ol><li>Vorbereiten eines Projekts (SU)</li><li>Lenken eines Projekts (DP)</li><li>Initiieren eines Projekts (IP)</li><li>Steuern einer Phase (CS)</li><li>Managen der Produktlieferung (MP)</li><li>Managen eines Phasenübergangs (SB)</li><li>Abschließen eines Projekts (CP)</li></ol>
+      </div>
+      <div class="card" data-k="raci verantwortlich responsible accountable consulted informed">
+        <h3>RACI-Matrix</h3>
+        <ul>
+          <li><b>R</b>esponsible: führt aus</li>
+          <li><b>A</b>ccountable: trägt Verantwortung, genau eine Person</li>
+          <li><b>C</b>onsulted: wird vorher gefragt</li>
+          <li><b>I</b>nformed: wird informiert</li>
+        </ul>
+      </div>
+      <div class="card" data-k="risiko matrix bewertung wahrscheinlichkeit auswirkung">
+        <h3>Risikomatrix 5×5</h3>
+        <div class="tw"><table><thead><tr><th>W \ A</th><th class="n">1</th><th class="n">2</th><th class="n">3</th><th class="n">4</th><th class="n">5</th></tr></thead><tbody id="riskTab"></tbody></table></div>
+        <p style="margin-top:8px">Risikowert = Wahrscheinlichkeit × Auswirkung. Strategien: vermeiden, reduzieren, übertragen, akzeptieren.</p>
+      </div>
+      <div class="card" data-k="netzplan kritischer pfad puffer pert schätzung">
+        <h3>Netzplan &amp; Schätzung</h3>
+        <div class="f">PERT: t<sub>e</sub> = (o + 4m + p) / 6 &nbsp;·&nbsp; σ = (p − o) / 6</div>
+        <ul>
+          <li>Gesamtpuffer = SAZ − FAZ (bzw. SEZ − FEZ)</li>
+          <li>Kritischer Pfad: alle Vorgänge mit Gesamtpuffer 0</li>
+          <li>Magisches Dreieck: Leistung, Zeit, Kosten</li>
+        </ul>
+      </div>
+      <div class="card" data-k="earned value ev pv ac cpi spi kosten termin">
+        <h3>Earned Value</h3>
+        <div class="f">CPI = EV / AC &nbsp;·&nbsp; SPI = EV / PV</div>
+        <div class="f">EAC = BAC / CPI &nbsp;·&nbsp; CV = EV − AC &nbsp;·&nbsp; SV = EV − PV</div>
+        <p>Werte &lt; 1 bedeuten Kostenüberschreitung (CPI) bzw. Verzug (SPI).</p>
+      </div>
+      <div class="card" data-k="change management kotter widerstand transformation">
+        <h3>Change Management (Kotter, 8 Schritte)</h3>
+        <ol><li>Dringlichkeit erzeugen</li><li>Führungskoalition bilden</li><li>Vision entwickeln</li><li>Vision kommunizieren</li><li>Hindernisse beseitigen</li><li>Schnelle Erfolge sichtbar machen</li><li>Erfolge ausbauen</li><li>In der Kultur verankern</li></ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 VORLAGEN -->
+  <section class="ch" id="vorlagen">
+    <div class="ch__head"><span class="ch__no">08</span><h2>Vorlagen &amp; Checklisten</h2></div>
+    <p class="ch__sub">Abhaken speichert nur in diesem Browser.</p>
+    <div class="grid">
+      <div class="card" data-k="sipoc vorlage supplier input process output customer">
+        <h3>SIPOC-Vorlage</h3>
+        <div class="tw"><table><thead><tr><th>Supplier</th><th>Input</th><th>Process (5–7 Schritte)</th><th>Output</th><th>Customer</th></tr></thead><tbody>
+          <tr><td>Wer liefert?</td><td>Was geht rein?</td><td>Start … Ende</td><td>Was kommt raus?</td><td>Wer nutzt es?</td></tr>
+        </tbody></table></div>
+        <p style="margin-top:8px">Reihenfolge beim Ausfüllen: P → O → C → I → S.</p>
+      </div>
+      <div class="card" data-k="gemba walk checkliste beobachten">
+        <h3>Gemba-Walk-Checkliste</h3>
+        <ul class="check" data-store="gemba">
+          <li><input type="checkbox" id="g1"><span>Zweck des Rundgangs festgelegt</span></li>
+          <li><input type="checkbox" id="g2"><span>Standard vorhanden und sichtbar?</span></li>
+          <li><input type="checkbox" id="g3"><span>Abweichungen vom Standard beobachtet</span></li>
+          <li><input type="checkbox" id="g4"><span>Mitarbeiter befragt (nicht belehrt)</span></li>
+          <li><input type="checkbox" id="g5"><span>Bestände, Wartezeiten, Wege notiert</span></li>
+          <li><input type="checkbox" id="g6"><span>Kennzahlenboard aktuell?</span></li>
+          <li><input type="checkbox" id="g7"><span>Sicherheitsrisiken festgehalten</span></li>
+          <li><input type="checkbox" id="g8"><span>Maßnahmen mit Verantwortlichem und Termin</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="kaizen workshop agenda ablauf">
+        <h3>Kaizen-Workshop: Ablauf 5 Tage</h3>
+        <ol>
+          <li><b>Tag 1</b>: Schulung, Ziel, Ist-Aufnahme am Gemba</li>
+          <li><b>Tag 2</b>: Analyse, Verschwendung, Ursachen</li>
+          <li><b>Tag 3</b>: Lösungen entwickeln und testen</li>
+          <li><b>Tag 4</b>: Umsetzen, Standard erstellen</li>
+          <li><b>Tag 5</b>: Ergebnis präsentieren, 30-Tage-Plan</li>
+        </ol>
+      </div>
+      <div class="card" data-k="projektstart checkliste kickoff">
+        <h3>Projektstart-Checkliste</h3>
+        <ul class="check" data-store="start">
+          <li><input type="checkbox" id="p1"><span>Charter vom Sponsor unterschrieben</span></li>
+          <li><input type="checkbox" id="p2"><span>Baseline-Daten verfügbar und Messsystem geklärt</span></li>
+          <li><input type="checkbox" id="p3"><span>Team und Zeitanteile bestätigt</span></li>
+          <li><input type="checkbox" id="p4"><span>Einsparungslogik mit Controlling abgestimmt</span></li>
+          <li><input type="checkbox" id="p5"><span>Stakeholder und Betriebsrat/HR informiert</span></li>
+          <li><input type="checkbox" id="p6"><span>Kick-off-Termin und Tollgate-Termine gesetzt</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="kontrollplan control plan reaktionsplan">
+        <h3>Kontrollplan: Spalten</h3>
+        <ol><li>Prozessschritt</li><li>Merkmal (Produkt / Prozess)</li><li>Spezifikation / Toleranz</li><li>Messmethode, Messmittel</li><li>Stichprobe: Umfang und Häufigkeit</li><li>Regelmethode (z. B. x̄-R-Karte)</li><li>Reaktionsplan bei Abweichung</li><li>Verantwortlich</li></ol>
+      </div>
+      <div class="card" data-k="lessons learned abschluss projektabschluss übergabe">
+        <h3>Projektabschluss</h3>
+        <ul class="check" data-store="close">
+          <li><input type="checkbox" id="c1"><span>Verbesserung statistisch nachgewiesen</span></li>
+          <li><input type="checkbox" id="c2"><span>Einsparung vom Controlling bestätigt</span></li>
+          <li><input type="checkbox" id="c3"><span>Kontrollplan an Prozesseigner übergeben</span></li>
+          <li><input type="checkbox" id="c4"><span>Standards und Schulungen aktualisiert</span></li>
+          <li><input type="checkbox" id="c5"><span>Lessons Learned dokumentiert, Yokoten geplant</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 KSA -->
+  <section class="ch" id="ksa">
+    <div class="ch__head"><span class="ch__no">09</span><h2>Saudi-Arabien Praxis</h2></div>
+    <p class="ch__sub">Rahmenbedingungen für Arbeit und Technik vor Ort. Rechtliche und behördliche Angaben ändern sich: vor jeder Entscheidung bei der offiziellen Stelle prüfen.</p>
+    <div class="grid">
+      <div class="card" data-k="arbeitswoche wochenende zeitzone zeitverschiebung sar riyal währung">
+        <h3>Basisdaten</h3>
+        <div class="tw"><table><tbody>
+          <tr><td>Arbeitswoche</td><td>Sonntag–Donnerstag, Wochenende Freitag/Samstag <span class="t t--s">SICHER</span></td></tr>
+          <tr><td>Zeitzone</td><td>UTC+3 (AST), keine Sommerzeit <span class="t t--s">SICHER</span></td></tr>
+          <tr><td>Zu Deutschland</td><td>+2 h (Winter), +1 h (Sommer) <span class="t t--s">SICHER</span></td></tr>
+          <tr><td>Währung</td><td>Saudi-Riyal, fest an USD: 3,75 SAR = 1 USD <span class="t t--s">SICHER</span></td></tr>
+          <tr><td>Stromnetz</td><td>60 Hz; 230/400 V als Standard <span class="t t--w">WAHRSCH.</span></td></tr>
+          <tr><td>Geschäftssprache</td><td>Englisch in Industrie und Engineering, Arabisch amtlich</td></tr>
+          <tr><td>Kalender</td><td>Hidschri (Mondkalender) und gregorianisch parallel</td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="card" data-k="arbeitszeit ramadan arbeitsrecht stunden">
+        <h3>Arbeitszeit</h3>
+        <ul>
+          <li>Regelarbeitszeit 8 h/Tag bzw. 48 h/Woche <span class="t t--w">WAHRSCH.</span></li>
+          <li>Ramadan: für Muslime max. 6 h/Tag bzw. 36 h/Woche <span class="t t--w">WAHRSCH.</span></li>
+          <li>Gebetszeiten unterbrechen Termine. Meetings um sie herum planen.</li>
+          <li>Feiertage: Gründungstag 22. Feb., Nationalfeiertag 23. Sep., Eid al-Fitr und Eid al-Adha (Datum nach Mondkalender) <span class="t t--s">SICHER</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="sce saudi council of engineers akkreditierung ingenieur registrierung">
+        <h3>Saudi Council of Engineers (SCE)</h3>
+        <ul>
+          <li>Ausländische Ingenieure benötigen eine Berufsakkreditierung beim SCE, um im Ingenieurberuf eine Aufenthaltserlaubnis zu erhalten <span class="t t--w">WAHRSCH.</span></li>
+          <li>Prüfung der Abschlüsse, je nach Klassifizierung ggf. Berufsexamen <span class="t t--w">WAHRSCH.</span></li>
+          <li>Berufsbezeichnung im Visum muss zur Akkreditierung passen <span class="t t--v">VERMUTUNG</span></li>
+          <li>Für dich: B.Eng. Maschinenbau ist die Grundlage für die Akkreditierung</li>
+        </ul>
+      </div>
+      <div class="card" data-k="visum iqama qiwa muqeem absher gosi aufenthalt arbeitserlaubnis">
+        <h3>Visum &amp; Behörden-Plattformen</h3>
+        <ul>
+          <li><b>Arbeitsvisum</b>: über den Arbeitgeber als Sponsor <span class="t t--s">SICHER</span></li>
+          <li><b>Iqama</b>: Aufenthaltstitel, nach Einreise <span class="t t--s">SICHER</span></li>
+          <li><b>Qiwa</b>: Arbeitsministerium, Arbeitsverträge, Berufsbezeichnung <span class="t t--w">WAHRSCH.</span></li>
+          <li><b>Absher</b>: Innenministerium, persönliche Behördendienste <span class="t t--s">SICHER</span></li>
+          <li><b>Muqeem</b>: Arbeitgeberportal für Aufenthaltstitel <span class="t t--w">WAHRSCH.</span></li>
+          <li><b>GOSI</b>: Sozialversicherung (für Ausländer v. a. Arbeitsunfallversicherung) <span class="t t--w">WAHRSCH.</span></li>
+          <li><b>Medizinische Untersuchung</b> und <b>Führungszeugnis</b> für das Visum <span class="t t--w">WAHRSCH.</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="apostille beglaubigung legalisierung zeugnisse urkunden">
+        <h3>Dokumente beglaubigen</h3>
+        <ul>
+          <li>Saudi-Arabien ist dem Haager Apostille-Übereinkommen beigetreten (in Kraft seit Ende 2022) <span class="t t--w">WAHRSCH.</span></li>
+          <li>Damit reicht für deutsche Urkunden in der Regel eine Apostille statt Legalisierung durch die Botschaft <span class="t t--w">WAHRSCH.</span></li>
+          <li>Apostille für Hochschulzeugnisse: zuständige Stelle des Bundeslandes (Sachsen-Anhalt) <span class="t t--w">WAHRSCH.</span></li>
+          <li>Ggf. Primary Source Verification über einen Drittanbieter <span class="t t--v">VERMUTUNG</span></li>
+          <li>Englische Übersetzung durch vereidigte Übersetzer</li>
+        </ul>
+      </div>
+      <div class="card" data-k="normen saso aramco saes sbc building code standards">
+        <h3>Normen &amp; Regelwerke</h3>
+        <ul>
+          <li><b>SASO</b>: Saudi Standards, Metrology and Quality Organization <span class="t t--s">SICHER</span></li>
+          <li><b>SBC</b>: Saudi Building Code <span class="t t--s">SICHER</span></li>
+          <li><b>SAES</b>: Saudi Aramco Engineering Standards, für Aramco-Projekte verbindlich <span class="t t--w">WAHRSCH.</span></li>
+          <li>Daneben verbreitet: ASME, API, ASTM, NFPA, IEC, ISO</li>
+          <li>Klima: Umgebungstemperaturen bis ca. 50 °C, Staub, Feuchte an der Küste → Auslegung und Derating prüfen <span class="t t--w">WAHRSCH.</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="vision 2030 iktva lokalisierung industrie modon jubail yanbu neom saudi made">
+        <h3>Industrie &amp; Vision 2030</h3>
+        <ul>
+          <li><b>Vision 2030</b>: Diversifizierung weg vom Öl, Ausbau der Industrie <span class="t t--s">SICHER</span></li>
+          <li><b>IKTVA</b>: Lokalisierungsprogramm von Saudi Aramco <span class="t t--s">SICHER</span></li>
+          <li><b>Nationale Industriestrategie</b> (2022) <span class="t t--w">WAHRSCH.</span></li>
+          <li><b>MODON</b>: Industriestädte, <b>Royal Commission</b>: Jubail und Yanbu <span class="t t--s">SICHER</span></li>
+          <li>Großprojekte: NEOM, Red Sea Global, Qiddiya, ROSHN <span class="t t--s">SICHER</span></li>
+          <li><b>Saudisierung (Nitaqat)</b>: Quoten für saudische Beschäftigte, beeinflusst Einstellung von Ausländern <span class="t t--s">SICHER</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="arabisch phrasen begrüßung höflichkeit">
+        <h3>Arabisch für den Alltag</h3>
+        <div class="tw"><table><tbody>
+          <tr><td>As-salamu alaikum</td><td>Friede sei mit Ihnen (Gruß)</td></tr>
+          <tr><td>Wa alaikum as-salam</td><td>Antwort auf den Gruß</td></tr>
+          <tr><td>Marhaba</td><td>Hallo</td></tr>
+          <tr><td>Shukran</td><td>Danke</td></tr>
+          <tr><td>Afwan</td><td>Bitte (gern geschehen)</td></tr>
+          <tr><td>Insha'Allah</td><td>So Gott will</td></tr>
+          <tr><td>Yalla</td><td>Los geht's</td></tr>
+          <tr><td>Ma'a as-salama</td><td>Auf Wiedersehen</td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="card" data-k="geschäftskultur etikette meeting beziehung">
+        <h3>Geschäftspraxis</h3>
+        <ul>
+          <li>Beziehung vor Geschäft: erste Treffen dienen dem Kennenlernen</li>
+          <li>Entscheidungen fallen oft hierarchisch und brauchen Zeit</li>
+          <li>Kritik nicht öffentlich äußern. Gesichtswahrung beachten</li>
+          <li>Rechte Hand für Begrüßung, Übergabe, Essen</li>
+          <li>Konservative Kleidung im Büro</li>
+          <li>Vereinbarungen schriftlich bestätigen</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 UMZUG -->
+  <section class="ch" id="umzug">
+    <div class="ch__head"><span class="ch__no">10</span><h2>Bewerbung &amp; Umzug</h2></div>
+    <p class="ch__sub">Dein Stand aus den vorliegenden Unterlagen. Abhaken speichert nur in diesem Browser.</p>
+    <div class="grid">
+      <div class="card" data-k="unterlagen dokumente checkliste bewerbung lebenslauf">
+        <h3>Unterlagen <small id="pr_docs_l"></small></h3>
+        <div class="progress"><i id="pr_docs"></i></div>
+        <ul class="check" data-store="docs" data-progress="pr_docs">
+          <li><input type="checkbox" id="d1" checked><span>Bachelorurkunde B.Eng. (liegt vor)</span></li>
+          <li><input type="checkbox" id="d2" checked><span>Bachelorzeugnis mit Note (liegt vor)</span></li>
+          <li><input type="checkbox" id="d3"><span>Transcript of Records / Diploma Supplement (fehlt)</span></li>
+          <li><input type="checkbox" id="d4" checked><span>Six Sigma Black Belt, englisch (liegt vor)</span></li>
+          <li><input type="checkbox" id="d5" checked><span>LEAN Expertenwissen (liegt vor, nur deutsch)</span></li>
+          <li><input type="checkbox" id="d6" checked><span>REFA-Zeugnis (liegt vor, nur deutsch)</span></li>
+          <li><input type="checkbox" id="d7"><span>Arbeitszeugnisse / Experience Letters (fehlen)</span></li>
+          <li><input type="checkbox" id="d8"><span>Lebenslauf englisch, 2 Seiten</span></li>
+          <li><input type="checkbox" id="d9"><span>Apostille für Urkunde und Zeugnis</span></li>
+          <li><input type="checkbox" id="d10"><span>Beglaubigte englische Übersetzungen</span></li>
+          <li><input type="checkbox" id="d11"><span>Reisepass, mind. 6 Monate gültig</span></li>
+          <li><input type="checkbox" id="d12"><span>Führungszeugnis (ggf. mit Apostille)</span></li>
+          <li><input type="checkbox" id="d13"><span>Passfotos nach Visa-Vorgabe</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="schritte ablauf umzug visum zeitplan">
+        <h3>Ablauf <small id="pr_steps_l"></small></h3>
+        <div class="progress"><i id="pr_steps"></i></div>
+        <ul class="check" data-store="steps" data-progress="pr_steps">
+          <li><input type="checkbox" id="s1" checked><span>Website erstellt</span></li>
+          <li><input type="checkbox" id="s2"><span>Kontaktdaten und Erfahrung auf Website ergänzt</span></li>
+          <li><input type="checkbox" id="s3"><span>LinkedIn-Profil auf Englisch, Standort KSA als Ziel</span></li>
+          <li><input type="checkbox" id="s4"><span>Zielarbeitgeber-Liste (Industrie, EPC, Beratung)</span></li>
+          <li><input type="checkbox" id="s5"><span>Recruiter und Personalvermittler mit KSA-Fokus kontaktiert</span></li>
+          <li><input type="checkbox" id="s6"><span>Angebot erhalten, Vertrag geprüft (Gehalt, Wohnen, Flüge, Schulgeld)</span></li>
+          <li><input type="checkbox" id="s7"><span>SCE-Akkreditierung beantragt</span></li>
+          <li><input type="checkbox" id="s8"><span>Visum, Medizincheck, Einreise</span></li>
+          <li><input type="checkbox" id="s9"><span>Iqama, Bankkonto, Wohnung</span></li>
+          <li><input type="checkbox" id="s10"><span>Deutschland: Abmeldung, Krankenversicherung, Rente, Steuer geklärt</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="vertrag paket gehalt benefits housing transport">
+        <h3>Typische Vertragsbestandteile</h3>
+        <ul>
+          <li>Grundgehalt plus <b>Housing Allowance</b> und <b>Transport Allowance</b></li>
+          <li>Jährlicher Heimflug, ggf. für Familie</li>
+          <li>Medizinische Versicherung (Pflicht für Arbeitgeber) <span class="t t--w">WAHRSCH.</span></li>
+          <li><b>End-of-Service-Benefit</b>: Abfindung nach Dienstjahren <span class="t t--s">SICHER</span></li>
+          <li>Keine Einkommensteuer auf Gehalt für Arbeitnehmer <span class="t t--w">WAHRSCH.</span></li>
+          <li>Deutsche Steuerpflicht bei Wegzug klären (Wohnsitz, DBA) <span class="t t--w">WAHRSCH.</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="lebenslauf cv tipps englisch saudi">
+        <h3>CV für Saudi-Arabien</h3>
+        <ul>
+          <li>Englisch, 2 Seiten, Ergebnisse mit Zahlen (z. B. „Ausschuss −35 %“)</li>
+          <li>Oben: Titel, Nationalität, Verfügbarkeit, Bereitschaft zum Umzug</li>
+          <li>Foto ist in der Region üblich <span class="t t--w">WAHRSCH.</span></li>
+          <li>Zertifikate mit Nummer und Aussteller nennen</li>
+          <li>Schlüsselwörter aus der Stellenanzeige übernehmen (ATS)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 QUELLEN -->
+  <section class="ch" id="quellen">
+    <div class="ch__head"><span class="ch__no">11</span><h2>Software &amp; Quellen</h2></div>
+    <p class="ch__sub">Adressen vor Nutzung im Browser prüfen. Sie wurden nicht live getestet.</p>
+    <div class="grid">
+      <div class="card" data-k="software minitab jmp excel power bi visio ms project python">
+        <h3>Software</h3>
+        <ul class="links">
+          <li><b>Minitab</b><span>Statistik-Standard in Six Sigma</span></li>
+          <li><b>JMP</b><span>Statistik, DoE</span></li>
+          <li><b>Excel</b><span>Analyse-Funktionen, Pivot, Solver</span></li>
+          <li><b>Power BI</b><span>Dashboards, KPI-Reporting</span></li>
+          <li><b>MS Project</b><span>Terminplanung, Ressourcen</span></li>
+          <li><b>Visio / draw.io</b><span>Flussdiagramme, VSM</span></li>
+          <li><b>Python (pandas, scipy)</b><span>Datenanalyse, frei</span></li>
+          <li><b>Primavera P6</b><span>Großprojekte in KSA verbreitet <span class="t t--w">WAHRSCH.</span></span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="links quellen asq iassc peoplecert refa gpm verbände">
+        <h3>Fachverbände &amp; Zertifizierer</h3>
+        <ul class="links">
+          <li><a href="https://asq.org" target="_blank" rel="noopener">asq.org</a><span>American Society for Quality</span></li>
+          <li><a href="https://www.iassc.org" target="_blank" rel="noopener">iassc.org</a><span>Lean Six Sigma Zertifizierung</span></li>
+          <li><a href="https://www.peoplecert.org" target="_blank" rel="noopener">peoplecert.org</a><span>PRINCE2-Prüfungen</span></li>
+          <li><a href="https://www.gpm-ipma.de" target="_blank" rel="noopener">gpm-ipma.de</a><span>GPM / IPMA</span></li>
+          <li><a href="https://refa.de" target="_blank" rel="noopener">refa.de</a><span>REFA-Verband</span></li>
+          <li><a href="https://www.iso.org" target="_blank" rel="noopener">iso.org</a><span>Normen</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="links saudi behörden sce qiwa absher saso misa modon">
+        <h3>Saudi-Arabien: offizielle Stellen</h3>
+        <ul class="links">
+          <li><a href="https://www.saudieng.sa" target="_blank" rel="noopener">saudieng.sa</a><span>Saudi Council of Engineers</span></li>
+          <li><a href="https://qiwa.sa" target="_blank" rel="noopener">qiwa.sa</a><span>Arbeitsmarktplattform</span></li>
+          <li><a href="https://www.absher.sa" target="_blank" rel="noopener">absher.sa</a><span>Behördendienste</span></li>
+          <li><a href="https://www.gosi.gov.sa" target="_blank" rel="noopener">gosi.gov.sa</a><span>Sozialversicherung</span></li>
+          <li><a href="https://www.saso.gov.sa" target="_blank" rel="noopener">saso.gov.sa</a><span>Normen und Qualität</span></li>
+          <li><a href="https://misa.gov.sa" target="_blank" rel="noopener">misa.gov.sa</a><span>Investitionsministerium</span></li>
+          <li><a href="https://modon.gov.sa" target="_blank" rel="noopener">modon.gov.sa</a><span>Industriestädte</span></li>
+          <li><a href="https://www.vision2030.gov.sa" target="_blank" rel="noopener">vision2030.gov.sa</a><span>Vision 2030</span></li>
+          <li><a href="https://riad.diplo.de" target="_blank" rel="noopener">riad.diplo.de</a><span>Deutsche Botschaft Riad</span></li>
+          <li><a href="https://saudiarabien.ahk.de" target="_blank" rel="noopener">saudiarabien.ahk.de</a><span>Deutsch-Saudische Handelskammer</span></li>
+        </ul>
+      </div>
+      <div class="card" data-k="bücher literatur nachschlagewerk">
+        <h3>Standardliteratur</h3>
+        <ul>
+          <li>Womack, Jones: <i>Lean Thinking</i></li>
+          <li>Liker: <i>The Toyota Way</i></li>
+          <li>Rother, Shook: <i>Learning to See</i> (VSM)</li>
+          <li>Shingo: <i>A Revolution in Manufacturing: The SMED System</i></li>
+          <li>Montgomery: <i>Introduction to Statistical Quality Control</i></li>
+          <li>Montgomery: <i>Design and Analysis of Experiments</i></li>
+          <li>AIAG: <i>Measurement Systems Analysis</i> (MSA-Handbuch)</li>
+          <li>AIAG &amp; VDA: <i>FMEA-Handbuch</i> (2019)</li>
+          <li>AXELOS: <i>Managing Successful Projects with PRINCE2</i></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 GLOSSAR -->
+  <section class="ch" id="glossar">
+    <div class="ch__head"><span class="ch__no">12</span><h2>Glossar A–Z</h2></div>
+    <p class="ch__sub">Begriffe und Abkürzungen aus Lean, Six Sigma, Qualität und Projektarbeit.</p>
+    <div class="az" id="az"></div>
+    <div class="gl" id="gl"></div>
+  </section>
+
+  <p class="empty" id="empty" hidden>Keine Treffer. Anderen Suchbegriff versuchen, z. B. „Cpk“ oder „Visum“.</p>
+
+  <p class="foot">Werkzeugkasten Martin Lissner · Stand Oktober 2026 · Methodenwissen nach gängiger Lehrmeinung. Rechtliche Angaben zu Saudi-Arabien ohne Gewähr, immer bei der zuständigen Stelle prüfen.</p>
+  </main>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const num = id => parseFloat(String($(id).value).replace(",", "."));
+  const fmt = (v, d = 2) => (isFinite(v) ? v.toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d }) : "–");
+  const pct = (v, d = 1) => (isFinite(v) ? fmt(v * 100, d) + " %" : "–");
+
+  /* Normal distribution: erfc from Numerical Recipes (relative error < 1.2e-7) */
+  function erfc(x) {
+    const z = Math.abs(x), t = 1 / (1 + 0.5 * z);
+    const r = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+    return x >= 0 ? r : 2 - r;
+  }
+  const Q = z => 0.5 * erfc(z / Math.SQRT2);           /* upper tail */
+  function zFromTail(p) {                              /* inverse of Q by bisection */
+    if (!(p > 0 && p < 1)) return NaN;
+    let lo = -10, hi = 10;
+    for (let i = 0; i < 100; i++) { const m = (lo + hi) / 2; if (Q(m) > p) lo = m; else hi = m; }
+    return (lo + hi) / 2;
+  }
+  const verdict = (el, cls, txt) => { el.className = "verdict " + cls; el.textContent = txt; };
+
+  const calcs = {
+    sigma() {
+      const d = num("s_d"), u = num("s_u"), o = num("s_o"), sh = num("s_sh");
+      const dpmo = d / (u * o) * 1e6;
+      $("s_dpmo").textContent = fmt(dpmo, 0);
+      $("s_y").textContent = pct(1 - dpmo / 1e6, 3);
+      $("s_z").textContent = dpmo <= 0 ? "> 6" : fmt(zFromTail(dpmo / 1e6) + sh, 2);
+    },
+    cpk() {
+      const usl = num("c_usl"), lsl = num("c_lsl"), m = num("c_m"), s = num("c_s");
+      const cp = (usl - lsl) / (6 * s), cpk = Math.min(usl - m, m - lsl) / (3 * s);
+      const ppm = (Q((usl - m) / s) + Q((m - lsl) / s)) * 1e6;
+      $("c_cp").textContent = fmt(cp); $("c_cpk").textContent = fmt(cpk);
+      $("c_ppm").textContent = fmt(ppm, ppm < 10 ? 2 : 0);
+      $("c_z").textContent = fmt(3 * cpk + 1.5, 2);
+      const v = $("c_v");
+      if (!isFinite(cpk)) verdict(v, "", "");
+      else if (cpk >= 1.67) verdict(v, "v-ok", "Fähig, auch für kritische Merkmale (≥ 1,67).");
+      else if (cpk >= 1.33) verdict(v, "v-ok", "Fähig nach üblicher Mindestforderung (≥ 1,33).");
+      else if (cpk >= 1.0) verdict(v, "v-warn", "Bedingt fähig. Streuung senken oder Prozess zentrieren.");
+      else verdict(v, "v-bad", "Nicht fähig. Prüfung und Verbesserung erforderlich.");
+    },
+    oee() {
+      const pt = num("o_pt"), dt = num("o_dt"), ct = num("o_ct"), tc = num("o_tc"), gc = num("o_gc");
+      const run = pt - dt, a = run / pt, p = (ct * tc) / (run * 60), q = gc / tc, oee = a * p * q;
+      $("o_a").textContent = pct(a); $("o_p").textContent = pct(p); $("o_q").textContent = pct(q); $("o_oee").textContent = pct(oee);
+      const v = $("o_v");
+      if (!isFinite(oee)) verdict(v, "", "");
+      else if (p > 1.0001) verdict(v, "v-bad", "Leistung über 100 %: ideale Taktzeit zu hoch angesetzt.");
+      else if (oee >= 0.85) verdict(v, "v-ok", "Auf Niveau des „World Class“-Richtwerts (≈ 85 %).");
+      else if (oee >= 0.6) verdict(v, "v-warn", "Typischer Bereich. Größter Verlust: " + [["Verfügbarkeit", a], ["Leistung", p], ["Qualität", q]].sort((x, y) => x[1] - y[1])[0][0] + ".");
+      else verdict(v, "v-bad", "Niedrig. Größter Verlust: " + [["Verfügbarkeit", a], ["Leistung", p], ["Qualität", q]].sort((x, y) => x[1] - y[1])[0][0] + ".");
+    },
+    takt() {
+      const avail = (num("t_sh") - num("t_br")) * num("t_n") * 60, d = num("t_d"), wc = num("t_wc");
+      const tt = avail / d, op = wc / tt;
+      $("t_tt").textContent = fmt(tt, 1) + " s"; $("t_op").textContent = fmt(op, 2); $("t_opr").textContent = isFinite(op) ? Math.ceil(op - 1e-9) : "–";
+    },
+    n() {
+      const t = $("n_t").value, z = parseFloat($("n_c").value), s = num("n_s"), e = num("n_e");
+      const n = t === "m" ? Math.pow(z * s / e, 2) : z * z * s * (1 - s) / (e * e);
+      $("n_n").textContent = isFinite(n) && n > 0 ? Math.ceil(n).toLocaleString("de-DE") : "–";
+    },
+    imr() {
+      const d = $("i_d").value.replace(/;/g, " ").split(/[\s;]+/).map(x => parseFloat(x.replace(",", "."))).filter(isFinite);
+      $("i_n").textContent = d.length;
+      if (d.length < 2) { ["i_m", "i_u", "i_l", "i_mr", "i_umr"].forEach(k => ($(k).textContent = "–")); verdict($("i_v"), "", ""); return; }
+      const m = d.reduce((a, b) => a + b, 0) / d.length;
+      let mr = 0; for (let i = 1; i < d.length; i++) mr += Math.abs(d[i] - d[i - 1]); mr /= d.length - 1;
+      const u = m + 2.66 * mr, l = m - 2.66 * mr;
+      const dec = Math.max(2, ...d.map(x => (String(x).split(".")[1] || "").length)) + 1;
+      $("i_m").textContent = fmt(m, dec); $("i_u").textContent = fmt(u, dec); $("i_l").textContent = fmt(l, dec);
+      $("i_mr").textContent = fmt(mr, dec); $("i_umr").textContent = fmt(3.267 * mr, dec);
+      const out = d.map((x, i) => (x > u || x < l ? i + 1 : 0)).filter(Boolean);
+      if (out.length) verdict($("i_v"), "v-bad", "Außerhalb der Grenzen: Punkt " + out.join(", ") + ".");
+      else verdict($("i_v"), "v-ok", "Alle Punkte innerhalb der Eingriffsgrenzen (Regel 1).");
+    },
+    little() {
+      const w = num("l_w"), th = num("l_th"), lt = num("l_lt");
+      let r = "Zwei Werte eingeben";
+      if (!isFinite(w) && isFinite(th) && isFinite(lt)) r = "WIP = " + fmt(th * lt, 1) + " Stk";
+      else if (isFinite(w) && !isFinite(th) && isFinite(lt)) r = "Durchsatz = " + fmt(w / lt, 1) + " Stk/Tag";
+      else if (isFinite(w) && isFinite(th) && !isFinite(lt)) r = "DLZ = " + fmt(w / th, 2) + " Tage";
+      else if (isFinite(w) && isFinite(th) && isFinite(lt)) r = "Ein Feld leeren";
+      $("l_r").textContent = r;
+    },
+    kanban() {
+      const n = num("k_d") * num("k_l") * (1 + num("k_a") / 100) / num("k_c");
+      $("k_n").textContent = isFinite(n) ? Math.ceil(n - 1e-9) + "  (" + fmt(n, 2) + ")" : "–";
+    },
+    units() {
+      const v = num("u_v"), t = $("u_t").value;
+      const map = {
+        psi: [v * 0.0689476, "bar"], bar: [v / 0.0689476, "psi"], in: [v * 25.4, "mm"], mm: [v / 25.4, "in"],
+        f: [(v - 32) * 5 / 9, "°C"], c: [v * 9 / 5 + 32, "°F"], lb: [v * 0.45359237, "kg"], kg: [v / 0.45359237, "lb"],
+        bbl: [v * 0.158987, "m³"], m3: [v / 0.158987, "bbl"], lbft: [v * 1.355818, "N·m"], nm: [v / 1.355818, "lbf·ft"],
+        gpm: [v * 0.227125, "m³/h"], hp: [v * 0.745700, "kW"]
+      };
+      const [r, u] = map[t]; $("u_r").textContent = fmt(r, 3) + " " + u;
+    },
+    hz() {
+      const p = num("h_p"), s = num("h_s") / 100;
+      $("h_50").textContent = fmt(60 * 50 / p * (1 - s), 0) + " min⁻¹";
+      $("h_60").textContent = fmt(60 * 60 / p * (1 - s), 0) + " min⁻¹";
+    }
+  };
+  const bind = { s_: "sigma", c_: "cpk", o_: "oee", t_: "takt", n_: "n", i_: "imr", l_: "little", k_: "kanban", u_: "units", h_: "hz" };
+  document.querySelectorAll("#rechner input, #rechner select, #rechner textarea").forEach(el => {
+    const fn = calcs[bind[el.id.slice(0, 2)]];
+    if (fn) el.addEventListener("input", fn);
+  });
+  Object.values(calcs).forEach(fn => fn());
+
+  /* Tables */
+  const sigTab = $("sigTab");
+  [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6].forEach(s => {
+    const dpmo = Q(s - 1.5) * 1e6;
+    const tr = document.createElement("tr"); if (s === 6) tr.className = "hl";
+    tr.innerHTML = `<td class="n">${fmt(s, 1)}</td><td class="n">${fmt(dpmo, dpmo < 10 ? 1 : 0)}</td><td class="n">${pct(1 - dpmo / 1e6, dpmo < 100 ? 5 : 2)}</td><td class="n">${fmt(s / 3, 2)}</td>`;
+    sigTab.appendChild(tr);
+  });
+  const cc = [
+    [2, 1.880, 0, 3.267, 1.128, 2.659, 0, 3.267, 0.7979], [3, 1.023, 0, 2.574, 1.693, 1.954, 0, 2.568, 0.8862],
+    [4, 0.729, 0, 2.282, 2.059, 1.628, 0, 2.266, 0.9213], [5, 0.577, 0, 2.114, 2.326, 1.427, 0, 2.089, 0.9400],
+    [6, 0.483, 0, 2.004, 2.534, 1.287, 0.030, 1.970, 0.9515], [7, 0.419, 0.076, 1.924, 2.704, 1.182, 0.118, 1.882, 0.9594],
+    [8, 0.373, 0.136, 1.864, 2.847, 1.099, 0.185, 1.815, 0.9650], [9, 0.337, 0.184, 1.816, 2.970, 1.032, 0.239, 1.761, 0.9693],
+    [10, 0.308, 0.223, 1.777, 3.078, 0.975, 0.284, 1.716, 0.9727]
+  ];
+  $("ccTab").innerHTML = cc.map(r => "<tr>" + r.map((v, i) => `<td class="n">${i === 0 ? v : v.toLocaleString("de-DE", { minimumFractionDigits: 3, maximumFractionDigits: 4 })}</td>`).join("") + "</tr>").join("");
+  let risk = "";
+  for (let w = 5; w >= 1; w--) {
+    risk += `<tr><th class="n">${w}</th>`;
+    for (let a = 1; a <= 5; a++) { const r = w * a; const c = r >= 15 ? "v-bad" : r >= 8 ? "v-warn" : "v-ok"; risk += `<td class="n ${c}">${r}</td>`; }
+    risk += "</tr>";
+  }
+  $("riskTab").innerHTML = risk;
+
+  /* Glossary */
+  const G = [
+    ["5S", "Sortieren, Setzen, Säubern, Standardisieren, Selbstdisziplin"], ["8D", "Problemlösungsmethode in acht Disziplinen"],
+    ["A3", "Problemlösung und Planung auf einer DIN-A3-Seite"], ["ANOVA", "Varianzanalyse, vergleicht Mittelwerte mehrerer Gruppen"],
+    ["Andon", "Signal, das eine Störung sofort sichtbar macht"], ["AQL", "Acceptable Quality Limit, Annahmegrenze bei Stichprobenprüfung"],
+    ["Baseline", "Ausgangsleistung des Prozesses vor der Verbesserung"], ["Black Belt", "Vollzeit-Projektleiter für Six-Sigma-Projekte"],
+    ["Bottleneck", "Engpass, bestimmt den Durchsatz des Systems"], ["Champion", "Führungskraft, die Six-Sigma-Projekte priorisiert und unterstützt"],
+    ["COPQ", "Cost of Poor Quality, Kosten schlechter Qualität"], ["Cp / Cpk", "Prozessfähigkeitsindizes (Streuung / Lage und Streuung)"],
+    ["CTQ", "Critical to Quality, aus Kundensicht kritisches Merkmal"], ["CUSUM", "Kumulierte-Summen-Karte für kleine Verschiebungen"],
+    ["DMAIC", "Define, Measure, Analyze, Improve, Control"], ["DMADV", "Define, Measure, Analyze, Design, Verify (Design for Six Sigma)"],
+    ["DoE", "Design of Experiments, statistische Versuchsplanung"], ["DPMO", "Defects per Million Opportunities"],
+    ["DPU", "Defects per Unit, Fehler je Einheit"], ["EWMA", "Regelkarte mit exponentiell gewichtetem gleitendem Mittel"],
+    ["FIFO", "First in, first out, Reihenfolgeregel in Fließstrecken"], ["FMEA", "Fehlermöglichkeits- und Einflussanalyse"],
+    ["FPY", "First Pass Yield, Anteil ohne Nacharbeit beim ersten Durchlauf"], ["Gage R&R", "Wiederhol- und Vergleichpräzision eines Messsystems"],
+    ["Gemba", "Ort der Wertschöpfung, der Shopfloor"], ["Green Belt", "Projektleiter für kleinere Six-Sigma-Projekte, Teilzeit"],
+    ["Heijunka", "Nivellierung von Menge und Variantenmix"], ["Hoshin Kanri", "Strategieentfaltung über alle Ebenen"],
+    ["Ishikawa", "Ursache-Wirkungs-Diagramm (Fischgräte)"], ["I-MR", "Einzelwert- und Gleitende-Spannweite-Karte"],
+    ["Jidoka", "Autonomation: Prozess stoppt selbst bei Fehler"], ["JIT", "Just in Time, liefern was, wann und wie viel benötigt wird"],
+    ["Kaizen", "Kontinuierliche Verbesserung in kleinen Schritten"], ["Kanban", "Karte zur Steuerung des Pull-Prinzips"],
+    ["KPI", "Key Performance Indicator, Leistungskennzahl"], ["Kano", "Modell der Kundenzufriedenheit: Basis-, Leistungs-, Begeisterungsmerkmale"],
+    ["LCL / UCL", "Untere / obere Eingriffsgrenze einer Regelkarte"], ["Lead Time", "Durchlaufzeit vom Auftrag bis zur Lieferung"],
+    ["LSL / USL", "Untere / obere Spezifikationsgrenze"], ["MSA", "Messsystemanalyse"],
+    ["MTBF", "Mean Time Between Failures, mittlere Betriebsdauer zwischen Ausfällen"], ["MTTR", "Mean Time To Repair, mittlere Reparaturdauer"],
+    ["Muda / Mura / Muri", "Verschwendung / Ungleichmäßigkeit / Überlastung"], ["ndc", "Anzahl unterscheidbarer Kategorien (MSA), Ziel ≥ 5"],
+    ["Nitaqat", "Saudisierungsprogramm mit Quoten für saudische Mitarbeiter"], ["OEE", "Overall Equipment Effectiveness, Gesamtanlageneffektivität"],
+    ["One-Piece-Flow", "Fluss in Losgröße eins"], ["Pareto", "80/20-Prinzip, Sortierung nach Häufigkeit"],
+    ["PDCA", "Plan, Do, Check, Act (Deming-Zyklus)"], ["Poka-Yoke", "Fehlhandlungssicherheit"],
+    ["Pp / Ppk", "Prozessleistungsindizes mit Gesamtstreuung"], ["p-Wert", "Wahrscheinlichkeit, das Ergebnis bei gültiger H₀ zu beobachten"],
+    ["QFD", "Quality Function Deployment, House of Quality"], ["RACI", "Responsible, Accountable, Consulted, Informed"],
+    ["RPZ / RPN", "Risikoprioritätszahl = B × A × E"], ["RSM", "Response Surface Methodology, Wirkungsflächen"],
+    ["RTY", "Rolled Throughput Yield, Produkt aller FPY"], ["SIPOC", "Supplier, Input, Process, Output, Customer"],
+    ["SMED", "Single Minute Exchange of Die, Rüstzeitreduzierung"], ["SPC", "Statistische Prozesslenkung"],
+    ["SQDCP", "Safety, Quality, Delivery, Cost, People (Shopfloor-Kennzahlen)"], ["Supermarkt", "Kontrolliertes Pufferlager im Pull-System"],
+    ["Takt", "Verfügbare Zeit / Kundenbedarf"], ["TPM", "Total Productive Maintenance"],
+    ["TQM", "Total Quality Management"], ["VOC", "Voice of the Customer, Kundenstimme"],
+    ["VSM", "Value Stream Mapping, Wertstromanalyse"], ["WIP", "Work in Progress, Umlaufbestand"],
+    ["X / Y", "Einflussgrößen (X) und Ergebnisgröße Y = f(X)"], ["Yamazumi", "Stapeldiagramm der Arbeitsinhalte je Station"],
+    ["Yokoten", "Übertragen einer Lösung auf andere Bereiche"], ["Zykluszeit", "Zeit zwischen zwei fertigen Einheiten an einem Prozess"]
+  ].sort((a, b) => a[0].localeCompare(b[0], "de"));
+  const gl = $("gl"), az = $("az"); let cur = "";
+  G.forEach(([t, d]) => {
+    const L = /[0-9]/.test(t[0]) ? "#" : t[0].toUpperCase();
+    if (L !== cur) {
+      cur = L;
+      const h = document.createElement("div"); h.className = "letter"; h.id = "gl-" + (L === "#" ? "0" : L); h.textContent = L; gl.appendChild(h);
+      const a = document.createElement("a"); a.href = "#" + h.id; a.textContent = L; az.appendChild(a);
+    }
+    const e = document.createElement("dl"); e.className = "term card-g"; e.dataset.k = (t + " " + d).toLowerCase();
+    e.innerHTML = "<dt></dt><dd></dd>"; e.firstChild.textContent = t; e.lastChild.textContent = d; gl.appendChild(e);
+  });
+
+  /* Checklists (localStorage is a convenience only) */
+  const store = { get(k) { try { return JSON.parse(localStorage.getItem("wk_" + k) || "null"); } catch (e) { return null; } },
+                  set(k, v) { try { localStorage.setItem("wk_" + k, JSON.stringify(v)); } catch (e) {} } };
+  document.querySelectorAll(".check").forEach(list => {
+    const key = list.dataset.store, saved = store.get(key), boxes = [...list.querySelectorAll("input")];
+    if (saved) boxes.forEach(b => { if (b.id in saved) b.checked = saved[b.id]; });
+    const upd = () => {
+      boxes.forEach(b => b.closest("li").classList.toggle("done", b.checked));
+      const p = list.dataset.progress;
+      if (p) { const n = boxes.filter(b => b.checked).length; $(p).style.width = (n / boxes.length * 100) + "%"; $(p + "_l").textContent = n + " / " + boxes.length; }
+    };
+    boxes.forEach(b => b.addEventListener("change", () => { store.set(key, Object.fromEntries(boxes.map(x => [x.id, x.checked]))); upd(); }));
+    upd();
+  });
+
+  /* Search */
+  const cards = [...document.querySelectorAll(".card, .card-g")];
+  cards.forEach(c => { c._t = ((c.dataset.k || "") + " " + c.textContent).toLowerCase(); });
+  const sections = [...document.querySelectorAll("section.ch")];
+  const q = $("q"), count = $("count");
+  function filter() {
+    const terms = q.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    cards.forEach(c => { const ok = terms.every(t => c._t.includes(t)); c.hidden = !ok; if (ok && c.classList.contains("card")) shown++; });
+    sections.forEach(s => {
+      const any = [...s.querySelectorAll(".card, .card-g")].some(c => !c.hidden);
+      s.hidden = !any;
+      s.querySelectorAll(".letter").forEach(l => {
+        let n = l.nextElementSibling, vis = false;
+        while (n && !n.classList.contains("letter")) { if (!n.hidden) vis = true; n = n.nextElementSibling; }
+        l.hidden = !vis;
+      });
+      const azEl = s.querySelector(".az"); if (azEl) azEl.hidden = terms.length > 0;
+    });
+    $("empty").hidden = sections.some(s => !s.hidden);
+    count.textContent = terms.length ? shown + " Karten" : cards.filter(c => c.classList.contains("card")).length + " Karten · " + G.length + " Begriffe";
+  }
+  q.addEventListener("input", filter);
+  document.addEventListener("keydown", e => { if (e.key === "/" && document.activeElement !== q && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); q.focus(); } });
+  filter();
+
+  /* Active chapter in index */
+  const links = [...document.querySelectorAll("#toc a")];
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver(es => es.forEach(e => {
+      if (e.isIntersecting) links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id));
+    }), { rootMargin: "-30% 0px -65% 0px" });
+    sections.forEach(s => io.observe(s));
+  }
+})();
+</script>
+</body>
+</html>
