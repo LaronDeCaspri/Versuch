@@ -101,6 +101,8 @@ h2 { font: 800 clamp(1.4rem, 2.6vw, 1.9rem)/1.1 var(--display); font-stretch: 11
 .t--s { background: var(--signal-soft); color: var(--signal); }
 .t--w { background: var(--warn-soft); color: var(--warn); }
 .t--v { background: var(--alarm-soft); color: var(--alarm); }
+.t--g { background: var(--signal); color: var(--sheet); }
+.src { margin: 10px 0 0; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 0.76rem; color: var(--muted); }
 
 /* Formula */
 .f { font: 400 0.86rem/1.6 var(--mono); background: var(--paper); border-radius: 3px; padding: 8px 10px; margin: 8px 0; overflow-x: auto; white-space: nowrap; }
@@ -189,6 +191,7 @@ textarea { resize: vertical; min-height: 64px; margin-top: 8px; }
       <li><a href="#glossar"><b>12</b>Glossar A–Z</a></li>
     </ol>
     <div class="legend">
+      <div><span class="t t--g">GEPRÜFT</span> per Websuche 10/2026</div>
       <div><span class="t t--s">SICHER</span> Standardwissen</div>
       <div><span class="t t--w">WAHRSCH.</span> vor Nutzung prüfen</div>
       <div><span class="t t--v">VERMUTUNG</span> unbedingt prüfen</div>
@@ -847,61 +850,72 @@ textarea { resize: vertical; min-height: 64px; margin-top: 8px; }
   <!-- 09 KSA -->
   <section class="ch" id="ksa">
     <div class="ch__head"><span class="ch__no">09</span><h2>Saudi-Arabien Praxis</h2></div>
-    <p class="ch__sub">Rahmenbedingungen für Arbeit und Technik vor Ort. Rechtliche und behördliche Angaben ändern sich: vor jeder Entscheidung bei der offiziellen Stelle prüfen.</p>
+    <p class="ch__sub">Per Websuche geprüft am 10.10.2026. <span class="t t--g">GEPRÜFT</span> heißt: durch mehrere oder offizielle Quellen bestätigt. Behördliche Regeln ändern sich trotzdem, vor jeder Entscheidung bei der zuständigen Stelle bestätigen.</p>
     <div class="grid">
-      <div class="card" data-k="arbeitswoche wochenende zeitzone zeitverschiebung sar riyal währung">
+      <div class="card" data-k="arbeitswoche wochenende zeitzone zeitverschiebung sar riyal währung strom spannung">
         <h3>Basisdaten</h3>
         <div class="tw"><table><tbody>
-          <tr><td>Arbeitswoche</td><td>Sonntag–Donnerstag, Wochenende Freitag/Samstag <span class="t t--s">SICHER</span></td></tr>
+          <tr><td>Arbeitswoche</td><td>Sonntag–Donnerstag, Wochenende Freitag/Samstag <span class="t t--g">GEPRÜFT</span></td></tr>
           <tr><td>Zeitzone</td><td>UTC+3 (AST), keine Sommerzeit <span class="t t--s">SICHER</span></td></tr>
           <tr><td>Zu Deutschland</td><td>+2 h (Winter), +1 h (Sommer) <span class="t t--s">SICHER</span></td></tr>
           <tr><td>Währung</td><td>Saudi-Riyal, fest an USD: 3,75 SAR = 1 USD <span class="t t--s">SICHER</span></td></tr>
-          <tr><td>Stromnetz</td><td>60 Hz; 230/400 V als Standard <span class="t t--w">WAHRSCH.</span></td></tr>
+          <tr><td>Netzfrequenz</td><td>60 Hz <span class="t t--g">GEPRÜFT</span></td></tr>
+          <tr><td>Spannung</td><td>Umstellung auf 230/400 V seit 2010 beschlossen. In älteren Gebieten noch 220/380 V oder 127/220 V. Vor Maschinenbeschaffung beim Versorger (Saudi Electricity Company) bestätigen <span class="t t--g">GEPRÜFT</span></td></tr>
           <tr><td>Geschäftssprache</td><td>Englisch in Industrie und Engineering, Arabisch amtlich</td></tr>
           <tr><td>Kalender</td><td>Hidschri (Mondkalender) und gregorianisch parallel</td></tr>
         </tbody></table></div>
+        <p class="src">Quellen: <a href="https://www.worldstandards.eu/electricity/plug-voltage-by-country/saudi-arabia/" target="_blank" rel="noopener">worldstandards.eu</a> · <a href="https://www.cercli.com/resources/saudi-arabia-work-week" target="_blank" rel="noopener">cercli.com</a></p>
       </div>
-      <div class="card" data-k="arbeitszeit ramadan arbeitsrecht stunden">
-        <h3>Arbeitszeit</h3>
+      <div class="card" data-k="arbeitszeit ramadan arbeitsrecht stunden pause feiertage">
+        <h3>Arbeitszeit &amp; Feiertage</h3>
         <ul>
-          <li>Regelarbeitszeit 8 h/Tag bzw. 48 h/Woche <span class="t t--w">WAHRSCH.</span></li>
-          <li>Ramadan: für Muslime max. 6 h/Tag bzw. 36 h/Woche <span class="t t--w">WAHRSCH.</span></li>
+          <li>Höchstens 8 h/Tag bzw. 48 h/Woche (Art. 98 Arbeitsgesetz) <span class="t t--g">GEPRÜFT</span></li>
+          <li>Schichtbetrieb: Durchschnitt über 3 Wochen darf 8 h/48 h nicht überschreiten <span class="t t--w">WAHRSCH.</span></li>
+          <li>Ramadan: für Muslime 6 h/Tag bzw. 36 h/Woche <span class="t t--g">GEPRÜFT</span></li>
+          <li>Höchstens 5 h am Stück, Pause mind. 30 min (Gebet, Essen, Ruhe) <span class="t t--w">WAHRSCH.</span></li>
           <li>Gebetszeiten unterbrechen Termine. Meetings um sie herum planen.</li>
-          <li>Feiertage: Gründungstag 22. Feb., Nationalfeiertag 23. Sep., Eid al-Fitr und Eid al-Adha (Datum nach Mondkalender) <span class="t t--s">SICHER</span></li>
+          <li>Feiertage: Gründungstag 22. Feb. (seit 2022), Nationalfeiertag 23. Sep., Eid al-Fitr und Eid al-Adha nach Mondkalender <span class="t t--g">GEPRÜFT</span></li>
         </ul>
+        <p class="src">Quellen: <a href="https://etqanlawfirm-sa.com/en/saudi-labor-law-working-hours/" target="_blank" rel="noopener">Etqan Law Firm</a> · <a href="https://gpg-pdf.chambers.com/doing-business-in-2025/721" target="_blank" rel="noopener">Chambers 2025</a> · <a href="https://gulfnews.com/world/gulf/saudi/official-holiday-rules-amended-for-state-employees-in-saudi-arabia-1.93618921" target="_blank" rel="noopener">Gulf News</a></p>
       </div>
-      <div class="card" data-k="sce saudi council of engineers akkreditierung ingenieur registrierung">
+      <div class="card" data-k="sce saudi council of engineers akkreditierung ingenieur registrierung prüfung pearson">
         <h3>Saudi Council of Engineers (SCE)</h3>
         <ul>
-          <li>Ausländische Ingenieure benötigen eine Berufsakkreditierung beim SCE, um im Ingenieurberuf eine Aufenthaltserlaubnis zu erhalten <span class="t t--w">WAHRSCH.</span></li>
-          <li>Prüfung der Abschlüsse, je nach Klassifizierung ggf. Berufsexamen <span class="t t--w">WAHRSCH.</span></li>
-          <li>Berufsbezeichnung im Visum muss zur Akkreditierung passen <span class="t t--v">VERMUTUNG</span></li>
-          <li>Für dich: B.Eng. Maschinenbau ist die Grundlage für die Akkreditierung</li>
+          <li>Wer in Saudi-Arabien als Ingenieur arbeitet, muss beim SCE registriert sein (Art. 27 der SCE-Satzung) <span class="t t--g">GEPRÜFT</span></li>
+          <li>Ohne SCE-Registrierung keine Ausstellung oder Verlängerung der Iqama im Ingenieurberuf <span class="t t--g">GEPRÜFT</span></li>
+          <li>Neue ausländische Ingenieure müssen vor der Einreise eine Fachprüfung bestehen (über Pearson VUE) <span class="t t--w">WAHRSCH.</span> Gebühren und Ablauf auf saudieng.sa prüfen</li>
+          <li>Der SCE prüft Abschlüsse auf Echtheit, zehntausende gefälschte Abschlüsse wurden aufgedeckt <span class="t t--g">GEPRÜFT</span></li>
+          <li>Abgelehnt oder mit Nicht-Ingenieur-Visum eingereist: Berufswechsel über das Arbeitsamt nötig <span class="t t--w">WAHRSCH.</span></li>
+          <li>Für dich: Der B.Eng. Maschinenbau ist die Grundlage. Prüfe vorab, ob der Fernstudiengang ohne Einschränkung anerkannt wird <span class="t t--v">VERMUTUNG</span></li>
         </ul>
+        <p class="src">Quellen: <a href="https://saudieng.sa/English/AboutSCE/SCEDepartments/Pages/ProfessionalAccreditation.aspx" target="_blank" rel="noopener">SCE Akkreditierung</a> · <a href="https://saudieng.sa/English/MediaCenter/News/Pages/immediateAccreditation.aspx" target="_blank" rel="noopener">SCE Sofortakkreditierung</a> · <a href="https://english.ajel.sa/expat-engineers-need-to-clear-a-test-to-enter-saudi-arabia/" target="_blank" rel="noopener">Ajel</a> · <a href="https://www.arabnews.pk/node/510011" target="_blank" rel="noopener">Arab News</a></p>
       </div>
-      <div class="card" data-k="visum iqama qiwa muqeem absher gosi aufenthalt arbeitserlaubnis">
-        <h3>Visum &amp; Behörden-Plattformen</h3>
+      <div class="card" data-k="visum iqama qiwa muqeem absher gosi aufenthalt arbeitserlaubnis krankenversicherung medizin führungszeugnis">
+        <h3>Visum &amp; Behörden</h3>
         <ul>
-          <li><b>Arbeitsvisum</b>: über den Arbeitgeber als Sponsor <span class="t t--s">SICHER</span></li>
-          <li><b>Iqama</b>: Aufenthaltstitel, nach Einreise <span class="t t--s">SICHER</span></li>
-          <li><b>Qiwa</b>: Arbeitsministerium, Arbeitsverträge, Berufsbezeichnung <span class="t t--w">WAHRSCH.</span></li>
-          <li><b>Absher</b>: Innenministerium, persönliche Behördendienste <span class="t t--s">SICHER</span></li>
-          <li><b>Muqeem</b>: Arbeitgeberportal für Aufenthaltstitel <span class="t t--w">WAHRSCH.</span></li>
-          <li><b>GOSI</b>: Sozialversicherung (für Ausländer v. a. Arbeitsunfallversicherung) <span class="t t--w">WAHRSCH.</span></li>
-          <li><b>Medizinische Untersuchung</b> und <b>Führungszeugnis</b> für das Visum <span class="t t--w">WAHRSCH.</span></li>
+          <li><b>Arbeitsvisum</b>: Der Arbeitgeber stellt den Antrag und holt die Visumgenehmigung ein <span class="t t--g">GEPRÜFT</span></li>
+          <li><b>Krankenversicherung</b>: Pflicht für Arbeitgeber. Seit Ende 2025 muss sie <i>vor</i> Erteilung des Arbeitsvisums bestehen. Ohne Versicherung keine Iqama <span class="t t--g">GEPRÜFT</span></li>
+          <li><b>Medizinische Untersuchung</b> bei zugelassener Stelle und <b>Führungszeugnis</b>, meist nicht älter als 3 Monate <span class="t t--w">WAHRSCH.</span></li>
+          <li>Reisepass mind. 6 Monate gültig <span class="t t--w">WAHRSCH.</span></li>
+          <li><b>Iqama</b>: Aufenthaltstitel nach der Einreise <span class="t t--s">SICHER</span></li>
+          <li><b>Qiwa</b>: Plattform des Arbeitsministeriums für Verträge, Arbeitserlaubnis, Nitaqat <span class="t t--g">GEPRÜFT</span></li>
+          <li><b>Absher</b>: persönliche Behördendienste <span class="t t--s">SICHER</span> · <b>Muqeem</b>: Arbeitgeberportal für Aufenthaltstitel <span class="t t--w">WAHRSCH.</span></li>
+          <li><b>GOSI</b>: Für Ausländer nur Arbeitsunfallversicherung, 2 % vom Lohn, zahlt der Arbeitgeber. Keine Rente, keine Arbeitslosenversicherung <span class="t t--w">WAHRSCH.</span></li>
         </ul>
+        <p class="src">Quellen: <a href="https://kpmg.com/xx/en/our-insights/gms-flash-alert/flash-alert-2025-261.html" target="_blank" rel="noopener">KPMG 12/2025</a> · <a href="https://gulfbusiness.com/?p=137990" target="_blank" rel="noopener">Gulf Business</a> · <a href="https://mercans.com/glossary/qiwa-platform/" target="_blank" rel="noopener">Mercans</a> · <a href="https://mercans.com/glossary/gosi-contributions/" target="_blank" rel="noopener">GOSI-Beiträge</a> · <a href="https://www.jobbatical.com/faq/saudi-work-visa-documents-attestation-requirement" target="_blank" rel="noopener">Jobbatical</a></p>
       </div>
-      <div class="card" data-k="apostille beglaubigung legalisierung zeugnisse urkunden">
+      <div class="card" data-k="apostille beglaubigung legalisierung zeugnisse urkunden vorbeglaubigung landesverwaltungsamt">
         <h3>Dokumente beglaubigen</h3>
         <ul>
-          <li>Saudi-Arabien ist dem Haager Apostille-Übereinkommen beigetreten (in Kraft seit Ende 2022) <span class="t t--w">WAHRSCH.</span></li>
-          <li>Damit reicht für deutsche Urkunden in der Regel eine Apostille statt Legalisierung durch die Botschaft <span class="t t--w">WAHRSCH.</span></li>
-          <li>Apostille für Hochschulzeugnisse: zuständige Stelle des Bundeslandes (Sachsen-Anhalt) <span class="t t--w">WAHRSCH.</span></li>
-          <li>Ggf. Primary Source Verification über einen Drittanbieter <span class="t t--v">VERMUTUNG</span></li>
+          <li>Haager Apostille-Übereinkommen gilt für Saudi-Arabien seit <b>7. Dezember 2022</b>. Eine Apostille ersetzt die Legalisierung durch die Botschaft <span class="t t--g">GEPRÜFT</span></li>
+          <li>Zuständig für Urkunden aus Sachsen-Anhalt: <b>Landesverwaltungsamt Magdeburg</b>, Referat Hoheitsangelegenheiten. Antrag schriftlich per Formular <span class="t t--g">GEPRÜFT</span></li>
+          <li>Hochschulzeugnisse brauchen oft zuerst eine <b>Vorbeglaubigung</b>. Ein Konsulatsmerkblatt nennt das für Hochschulen in Sachsen-Anhalt als schwierig. Vorab beim LVwA und bei der Hochschule Anhalt klären <span class="t t--w">WAHRSCH.</span></li>
+          <li>Manche Ratgeber nennen noch die alte Kette über Kulturattaché und Außenministerium. Was dein Arbeitgeber und der SCE konkret verlangen, schriftlich bestätigen lassen <span class="t t--v">VERMUTUNG</span></li>
           <li>Englische Übersetzung durch vereidigte Übersetzer</li>
         </ul>
+        <p class="src">Quellen: <a href="https://www.hfw.com/insights/a-small-change-with-a-big-effect-apostille-convention-enters-into-force-in-saudi-arabia-dec-2022/" target="_blank" rel="noopener">HFW</a> · <a href="https://lvwa.sachsen-anhalt.de/das-lvwa/kommunales-ordnung-verbraucherschutz-migration/gefahrenabwehr-hoheitsangelegenheiten-sport/hoheitsangelegenheiten/apostillen" target="_blank" rel="noopener">LVwA Sachsen-Anhalt</a> · <a href="https://www.germany.info/us-de/service/apostille-behoerde-deutschland/1217158" target="_blank" rel="noopener">Auswärtiges Amt</a></p>
       </div>
-      <div class="card" data-k="normen saso aramco saes sbc building code standards">
+      <div class="card" data-k="normen saso aramco saes sbc building code standards klima">
         <h3>Normen &amp; Regelwerke</h3>
         <ul>
           <li><b>SASO</b>: Saudi Standards, Metrology and Quality Organization <span class="t t--s">SICHER</span></li>
@@ -911,16 +925,17 @@ textarea { resize: vertical; min-height: 64px; margin-top: 8px; }
           <li>Klima: Umgebungstemperaturen bis ca. 50 °C, Staub, Feuchte an der Küste → Auslegung und Derating prüfen <span class="t t--w">WAHRSCH.</span></li>
         </ul>
       </div>
-      <div class="card" data-k="vision 2030 iktva lokalisierung industrie modon jubail yanbu neom saudi made">
+      <div class="card" data-k="vision 2030 iktva lokalisierung industrie modon jubail yanbu neom saudi made industriestrategie">
         <h3>Industrie &amp; Vision 2030</h3>
         <ul>
           <li><b>Vision 2030</b>: Diversifizierung weg vom Öl, Ausbau der Industrie <span class="t t--s">SICHER</span></li>
+          <li><b>Nationale Industriestrategie</b>, gestartet 18.10.2022: Ziel rund 36 000 Fabriken bis 2035 (2022: ca. 10 600), Industrieexporte 557 Mrd. SAR bis 2030 <span class="t t--g">GEPRÜFT</span></li>
           <li><b>IKTVA</b>: Lokalisierungsprogramm von Saudi Aramco <span class="t t--s">SICHER</span></li>
-          <li><b>Nationale Industriestrategie</b> (2022) <span class="t t--w">WAHRSCH.</span></li>
           <li><b>MODON</b>: Industriestädte, <b>Royal Commission</b>: Jubail und Yanbu <span class="t t--s">SICHER</span></li>
           <li>Großprojekte: NEOM, Red Sea Global, Qiddiya, ROSHN <span class="t t--s">SICHER</span></li>
-          <li><b>Saudisierung (Nitaqat)</b>: Quoten für saudische Beschäftigte, beeinflusst Einstellung von Ausländern <span class="t t--s">SICHER</span></li>
+          <li><b>Saudisierung (Nitaqat)</b>: Quoten für saudische Beschäftigte, beeinflusst die Einstellung von Ausländern <span class="t t--s">SICHER</span></li>
         </ul>
+        <p class="src">Quellen: <a href="https://umbraco.vision2030.gov.sa/mediacenter/news/hrh-crown-prince-launches-national-strategy-for-industry" target="_blank" rel="noopener">Vision 2030</a> · <a href="https://www.agbi.com/manufacturing/2022/10/saudis-new-industrial-strategy-to-drive-exports-to-148bn-by-2030" target="_blank" rel="noopener">AGBI</a></p>
       </div>
       <div class="card" data-k="arabisch phrasen begrüßung höflichkeit">
         <h3>Arabisch für den Alltag</h3>
@@ -969,7 +984,8 @@ textarea { resize: vertical; min-height: 64px; margin-top: 8px; }
           <li><input type="checkbox" id="d9"><span>Apostille für Urkunde und Zeugnis</span></li>
           <li><input type="checkbox" id="d10"><span>Beglaubigte englische Übersetzungen</span></li>
           <li><input type="checkbox" id="d11"><span>Reisepass, mind. 6 Monate gültig</span></li>
-          <li><input type="checkbox" id="d12"><span>Führungszeugnis (ggf. mit Apostille)</span></li>
+          <li><input type="checkbox" id="d14"><span>Vorbeglaubigung Hochschulzeugnis klären (Hochschule Anhalt / LVwA)</span></li>
+          <li><input type="checkbox" id="d12"><span>Führungszeugnis, max. ca. 3 Monate alt (ggf. mit Apostille)</span></li>
           <li><input type="checkbox" id="d13"><span>Passfotos nach Visa-Vorgabe</span></li>
         </ul>
       </div>
@@ -983,7 +999,7 @@ textarea { resize: vertical; min-height: 64px; margin-top: 8px; }
           <li><input type="checkbox" id="s4"><span>Zielarbeitgeber-Liste (Industrie, EPC, Beratung)</span></li>
           <li><input type="checkbox" id="s5"><span>Recruiter und Personalvermittler mit KSA-Fokus kontaktiert</span></li>
           <li><input type="checkbox" id="s6"><span>Angebot erhalten, Vertrag geprüft (Gehalt, Wohnen, Flüge, Schulgeld)</span></li>
-          <li><input type="checkbox" id="s7"><span>SCE-Akkreditierung beantragt</span></li>
+          <li><input type="checkbox" id="s7"><span>SCE-Akkreditierung beantragt, Fachprüfung (Pearson VUE) geklärt</span></li>
           <li><input type="checkbox" id="s8"><span>Visum, Medizincheck, Einreise</span></li>
           <li><input type="checkbox" id="s9"><span>Iqama, Bankkonto, Wohnung</span></li>
           <li><input type="checkbox" id="s10"><span>Deutschland: Abmeldung, Krankenversicherung, Rente, Steuer geklärt</span></li>
@@ -994,7 +1010,7 @@ textarea { resize: vertical; min-height: 64px; margin-top: 8px; }
         <ul>
           <li>Grundgehalt plus <b>Housing Allowance</b> und <b>Transport Allowance</b></li>
           <li>Jährlicher Heimflug, ggf. für Familie</li>
-          <li>Medizinische Versicherung (Pflicht für Arbeitgeber) <span class="t t--w">WAHRSCH.</span></li>
+          <li>Krankenversicherung: Pflicht für den Arbeitgeber, auch für Ehepartner und Kinder <span class="t t--g">GEPRÜFT</span></li>
           <li><b>End-of-Service-Benefit</b>: Abfindung nach Dienstjahren <span class="t t--s">SICHER</span></li>
           <li>Keine Einkommensteuer auf Gehalt für Arbeitnehmer <span class="t t--w">WAHRSCH.</span></li>
           <li>Deutsche Steuerpflicht bei Wegzug klären (Wohnsitz, DBA) <span class="t t--w">WAHRSCH.</span></li>
@@ -1084,7 +1100,7 @@ textarea { resize: vertical; min-height: 64px; margin-top: 8px; }
 
   <p class="empty" id="empty" hidden>Keine Treffer. Anderen Suchbegriff versuchen, z. B. „Cpk“ oder „Visum“.</p>
 
-  <p class="foot">Werkzeugkasten Martin Lissner · Stand Oktober 2026 · Methodenwissen nach gängiger Lehrmeinung. Rechtliche Angaben zu Saudi-Arabien ohne Gewähr, immer bei der zuständigen Stelle prüfen.</p>
+  <p class="foot">Werkzeugkasten Martin Lissner · Stand 10.10.2026 · Kapitel 09 per Websuche geprüft · Methodenwissen nach gängiger Lehrmeinung. Rechtliche Angaben zu Saudi-Arabien ohne Gewähr, immer bei der zuständigen Stelle prüfen.</p>
   </main>
 </div>
 
