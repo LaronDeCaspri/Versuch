@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Martin Lissner Engineering</title>
-<meta name="description" content="Martin Lissner, B.Eng. Mechanical Engineering and Six Sigma Black Belt. Process and quality improvement for industrial operations in Saudi Arabia.">
+<title>Martin Lissner Consulting</title>
+<meta name="description" content="Lean, Six Sigma and maintenance reliability consulting for industrial and facility operations in Saudi Arabia. Martin Lissner, B.Eng. Mechanical Engineering, Six Sigma Black Belt, based in Riyadh.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,600;112,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -179,6 +179,22 @@ p { margin: 0 0 14px; max-width: 68ch; }
 .copy { margin-left: 8px; font: 500 0.72rem/1 var(--mono); background: transparent; color: var(--paper); border: 1px solid color-mix(in srgb, var(--paper) 40%, transparent); padding: 4px 7px; border-radius: 2px; cursor: pointer; }
 .copy:hover { border-color: var(--paper); }
 
+
+/* Packages */
+.pk { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 0; border-top: 1px solid var(--ink); margin-top: 22px; }
+.pk__i { padding: 20px 20px 20px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.pk__h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.pk__h span { font: 500 0.74rem/1 var(--mono); color: var(--signal); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.pk__i p { font-size: 0.94rem; color: var(--muted); margin-bottom: 8px; }
+.pk__d { color: var(--ink) !important; }
+/* Experience */
+.xp { list-style: none; padding: 0; margin: 22px 0 0; border-top: 1px solid var(--ink); }
+.xp li { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 22px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 640px) { .xp li { grid-template-columns: minmax(0, 1fr); } }
+.xp__y { font: 500 0.85rem/1.5 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.xp__t { font-weight: 600; }
+.xp__o { font-size: 0.9rem; color: var(--signal); margin: 2px 0 6px; }
+.xp p { font-size: 0.94rem; color: var(--muted); margin: 0; }
 footer { padding-block: 24px; font: 400 0.78rem/1.5 var(--mono); color: var(--muted); }
 footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 </style>
@@ -187,12 +203,12 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
 
 <header class="top">
   <div class="wrap">
-    <a class="mark" href="#top"><b>Martin Lissner</b><span>B.ENG. · LEAN · SSBB</span></a>
+    <a class="mark" href="#top"><b data-brand>Martin Lissner</b><span>OPERATIONAL EXCELLENCE</span></a>
     <nav class="nav" aria-label="Main">
       <a href="#services">Services</a>
-      <a href="#method">Method</a>
+      <a href="#packages">Packages</a>
+      <a href="#experience">Experience</a>
       <a href="#credentials">Credentials</a>
-      <a href="#ksa">Saudi Arabia</a>
       <a href="#contact" class="nav__cta">Contact</a>
     </nav>
   </div>
@@ -201,12 +217,12 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
 <main id="top">
   <div class="wrap hero">
     <div>
-      <p class="eyebrow">Mechanical Engineer · Six Sigma Black Belt · Lean Expert</p>
+      <p class="eyebrow">Operational Excellence Consulting · Riyadh</p>
       <h1>Stable processes. <em>Measurable</em> results.</h1>
-      <p class="lede">I am a <strong>German mechanical engineer (B.Eng.)</strong> specialised in process analysis, quality and operational excellence. I bring a structured, data-driven approach to production and operations in <strong>Saudi Arabia</strong>, from shop floor analysis to a controlled, sustained improvement.</p>
+      <p class="lede">Lean, Six Sigma and maintenance reliability consulting for <strong>industrial and facility operations in Saudi Arabia</strong>. Led by a German mechanical engineer (B.Eng.) and Six Sigma Black Belt with <strong>20+ years</strong> in automotive, chemical and facility operations.</p>
       <div class="actions">
-        <a class="btn btn--solid" href="#contact">Get in touch</a>
-        <a class="btn" href="#credentials">View credentials</a>
+        <a class="btn btn--solid" href="#contact">Request an assessment</a>
+        <a class="btn" href="#packages">See packages</a>
       </div>
     </div>
 
@@ -222,7 +238,7 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
       <div class="fig"><div class="fig__n">180</div><div class="fig__l">ECTS · B.Eng. Mechanical Engineering</div></div>
       <div class="fig"><div class="fig__n">Black Belt</div><div class="fig__l">Six Sigma, to ISO 13053 / 18404, written exam passed</div></div>
       <div class="fig"><div class="fig__n">Lean Expert</div><div class="fig__l">LEAN Akademie Deutschland, exam passed</div></div>
-      <div class="fig"><div class="fig__n">2,639</div><div class="fig__l">Teaching units (45 min) of state-approved distance training, 2022–2025</div></div>
+      <div class="fig"><div class="fig__n">20+ years</div><div class="fig__l">Maintenance, production and facility operations: BMW, chemical, facility services</div></div>
       <div class="fig"><div class="fig__n">REFA</div><div class="fig__l">Process analysis and design, written exam passed</div></div>
     </div>
   </div>
@@ -231,8 +247,8 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
     <div class="wrap block__grid">
       <div class="rail"><b>Services</b>What I offer</div>
       <div>
-        <h2>Engineering support for process and quality improvement</h2>
-        <p class="muted">Engagements as a full-time engineer or as a project-based consultant for manufacturing, industrial services and infrastructure operations.</p>
+        <h2>Consulting for process, quality and maintenance performance</h2>
+        <p class="muted">Project-based engagements for manufacturers, facility management companies and industrial service providers. On site in Riyadh and across the Kingdom.</p>
         <div class="services">
           <div class="svc">
             <h3>Six Sigma improvement projects</h3>
@@ -245,9 +261,9 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
             <ul class="tags"><li>Value stream mapping</li><li>5S</li><li>SMED</li><li>Kanban</li><li>TPM</li></ul>
           </div>
           <div class="svc">
-            <h3>Process analysis and time studies</h3>
-            <p>Analyse and redesign work systems using REFA methodology as the basis for capacity planning and line balancing.</p>
-            <ul class="tags"><li>REFA work system</li><li>Process data</li><li>Process mapping</li></ul>
+            <h3>Maintenance and reliability</h3>
+            <p>Raise equipment availability with structured preventive and predictive maintenance, root cause analysis and SAP PM workflows.</p>
+            <ul class="tags"><li>RCM</li><li>Preventive / predictive</li><li>SAP PM</li><li>REFA time studies</li></ul>
           </div>
           <div class="svc">
             <h3>Project and change management</h3>
@@ -259,6 +275,23 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
     </div>
   </section>
 
+
+  <section class="block" id="packages">
+    <div class="wrap block__grid">
+      <div class="rail"><b>Packages</b>Fixed scope, clear result</div>
+      <div>
+        <h2>Five ways to start</h2>
+        <p class="muted">Each package has a defined scope, duration and deliverable. Fees are quoted after a free 60-minute scoping call.</p>
+        <div class="pk">
+          <div class="pk__i"><div class="pk__h"><h3>Operations Assessment</h3><span>2–3 weeks</span></div><p>Gemba walks, value stream map, OEE and loss baseline, interviews with operators and supervisors.</p><p class="pk__d"><b>Deliverable:</b> assessment report with quantified losses and a prioritised 12-month roadmap.</p></div>
+          <div class="pk__i"><div class="pk__h"><h3>Six Sigma Improvement Project</h3><span>8–16 weeks</span></div><p>One defined problem, solved with DMAIC: charter, measurement system analysis, root cause statistics, piloted solution, control plan.</p><p class="pk__d"><b>Deliverable:</b> verified improvement against baseline and a control plan handed to the process owner.</p></div>
+          <div class="pk__i"><div class="pk__h"><h3>Maintenance &amp; Reliability Program</h3><span>6–12 weeks</span></div><p>Criticality ranking, preventive maintenance plans, failure analysis, KPI set (availability, MTBF, MTTR), CMMS / SAP PM workflow.</p><p class="pk__d"><b>Deliverable:</b> maintenance system in use and a KPI dashboard reviewed with your team.</p></div>
+          <div class="pk__i"><div class="pk__h"><h3>Lean Shopfloor Implementation</h3><span>4–8 weeks</span></div><p>5S, standard work, SMED for changeovers, shopfloor management board with daily review routine.</p><p class="pk__d"><b>Deliverable:</b> pilot area running on standards, with audit routine and roll-out plan.</p></div>
+          <div class="pk__i"><div class="pk__h"><h3>Training &amp; Kaizen Workshops</h3><span>1–5 days</span></div><p>Lean basics, problem solving (8D, A3, 5-Why), Six Sigma tools for supervisors and engineers. Delivered in English, on site.</p><p class="pk__d"><b>Deliverable:</b> trained team and one improvement implemented during the workshop.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
   <section class="block" id="method">
     <div class="wrap block__grid">
       <div class="rail"><b>Method</b>How a project runs</div>
@@ -276,6 +309,23 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
     </div>
   </section>
 
+
+  <section class="block" id="experience">
+    <div class="wrap block__grid">
+      <div class="rail"><b>Experience</b>Where the methods were applied</div>
+      <div>
+        <h2>From the production line to facility management</h2>
+        <ol class="xp">
+          <li><div class="xp__y">2025–2026</div><div><div class="xp__t">Maintenance &amp; Technical Operations Lead</div><div class="xp__o">Natihat Alaasr Almumayaz Establishment, Dammam, Saudi Arabia</div><p>Maintenance and technical operations for a multi-client facility management business across 4+ customer sites. 98% equipment availability, zero safety incidents, standardised maintenance and HSE procedures.</p></div></li>
+          <li><div class="xp__y">2024</div><div><div class="xp__t">Operations &amp; Facility Services Manager</div><div class="xp__o">SPIE Efficient Facilities GmbH, Leipzig, Germany</div><p>Led an 8-person technical team across commercial customer sites. 12% operating cost reduction through Lean methods and value stream mapping.</p></div></li>
+          <li><div class="xp__y">2018–2024</div><div><div class="xp__t">Facility Director &amp; Vocational Training Manager</div><div class="xp__o">Europäisches Bildungswerk für Beruf und Gesellschaft gGmbH, Magdeburg, Germany</div><p>Built a technical training facility from zero to 150+ apprentices a year with a 94% certification rate. Budget responsibility above EUR 2M, 12-person team, EUR 340K annual savings through in-house programme development.</p></div></li>
+          <li><div class="xp__y">2015–2018</div><div><div class="xp__t">Maintenance Technician, Chemical Manufacturing</div><div class="xp__o">Münzing Micro Technologies GmbH, Elsteraue, Germany</div><p>SAP PM workflows and predictive maintenance in a hazardous chemical environment. 99.2% system uptime, 18% less downtime.</p></div></li>
+          <li><div class="xp__y">2009–2015</div><div><div class="xp__t">Senior Maintenance Technician, Automotive</div><div class="xp__o">BMW Group Plant Leipzig (via Hofmann &amp; Zorbau), Germany</div><p>Maintenance of 200+ production assets in high-volume car manufacturing. Below 2% unplanned downtime, 15% lower maintenance cost, trained 6 junior technicians.</p></div></li>
+          <li><div class="xp__y">1999–2007</div><div><div class="xp__t">Electrical Installation Technician (IHK) and Industrial Maintenance</div><div class="xp__o">Apprenticeship, then Wienerberger Ziegelindustrie GmbH, Reuden, Germany</div><p>Foundation in industrial maintenance, inspection routines and HSE procedures.</p></div></li>
+        </ol>
+      </div>
+    </div>
+  </section>
   <section class="block" id="credentials">
     <div class="wrap block__grid">
       <div class="rail"><b>Credentials</b>Education and certification</div>
@@ -347,9 +397,9 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
 
   <section class="block" id="ksa">
     <div class="wrap block__grid">
-      <div class="rail"><b>Saudi Arabia</b>Why this fit</div>
+      <div class="rail"><b>Why work with me</b>Method and presence</div>
       <div>
-        <h2>German engineering method for a growing industrial base</h2>
+        <h2>German method, local presence</h2>
         <p class="muted">Saudi Vision 2030 aims to expand local manufacturing and industrial capacity. New plants and growing operations need stable, capable processes from the start.</p>
         <div class="fit">
           <div><h3>Standards-based</h3><p>Methods aligned with ISO 13053 and ISO 18404, which international clients and auditors recognise.</p></div>
@@ -364,8 +414,8 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
     <div class="wrap block__grid">
       <div class="rail"><b>Contact</b>Next step</div>
       <div>
-        <h2>Discuss a position or project</h2>
-        <p>Send a short description of the role or the process you want to improve. CV and certificate copies are available on request.</p>
+        <h2>Start with a scoping call</h2>
+        <p>Describe the process, site or problem you want to improve. You receive a short proposal with scope, duration and fee. Company profile and certificate copies on request.</p>
         <div class="cards" id="contactList"></div>
       </div>
     </div>
@@ -373,14 +423,17 @@ footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wr
 </main>
 
 <footer>
-  <div class="wrap"><span>© <span id="yr">2026</span> Martin Lissner</span><span>Mechanical Engineer (B.Eng.) · Six Sigma Black Belt · Lean Expert</span></div>
+  <div class="wrap"><span>© <span id="yr">2026</span> <span data-brand>Martin Lissner</span></span><span>Operational Excellence Consulting · Riyadh, Saudi Arabia</span></div>
 </footer>
 
 <script>
+/* Company name: enter once after registration, e.g. "Example Consulting Co." Empty keeps "Martin Lissner". */
+const COMPANY = "";
+
 /* Contact details: fill in once. Empty values show "Available on request". */
 const CONTACT = {
-  email: "",
-  phone: "",
+  email: "martin.karriere@web.de",
+  phone: "+966 55 683 0537",
   linkedin: "https://www.linkedin.com/in/martin-lissner-eng",
   location: "Riyadh, Saudi Arabia"
 };
@@ -417,6 +470,7 @@ const CONTACT = {
     list.appendChild(d);
   });
   document.getElementById("yr").textContent = new Date().getFullYear();
+  if (COMPANY) { document.querySelectorAll("[data-brand]").forEach(e => (e.textContent = COMPANY)); document.title = COMPANY; }
 })();
 
 /* Illustrative I-chart: 14 points before improvement, 14 after. Limits computed per phase. */
