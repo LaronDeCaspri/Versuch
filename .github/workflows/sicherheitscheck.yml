@@ -1,0 +1,49 @@
+name: Sicherheitscheck-APK bauen
+
+on:
+  push:
+    paths:
+      - "android-sicherheitscheck/**"
+      - ".github/workflows/sicherheitscheck.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-sicherheitscheck
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: APK bauen
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk Sicherheitscheck.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sicherheitscheck
+          path: android-sicherheitscheck/Sicherheitscheck.apk
+
+      - name: Als Release veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sicherheitscheck-${{ github.run_number }}
+          name: Sicherheitscheck ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          files: android-sicherheitscheck/Sicherheitscheck.apk
+          body: |
+            Sicherheitscheck für Android (ab Android 9). Datei `Sicherheitscheck.apk` auf dem Handy herunterladen und öffnen.
+            Anleitung: android-sicherheitscheck/README.md
