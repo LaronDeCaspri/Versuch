@@ -1,0 +1,13 @@
+{
+  "name": "trading-bot-paper-server",
+  "version": "32.0.0",
+  "private": true,
+  "description": "24/7 paper-trading server for the Trading Bot app. Paper only, no exchange credentials.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node runner.mjs",
+    "mock": "TB_MOCK=1 node runner.mjs",
+    "test": "node --test test.mjs"
+  }
+}

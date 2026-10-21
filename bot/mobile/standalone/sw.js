@@ -1,5 +1,5 @@
-const CACHE = "trading-bot-standalone-v3";
-const ASSETS = ["./", "./app.css", "./app.js", "./lib.js", "./jarvis.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
+const CACHE = "trading-bot-standalone-v4";
+const ASSETS = ["./", "./app.css", "./app.js", "./lib.js", "./pro.js", "./pro-worker.js", "./jarvis.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
     e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).catch(() => {}));
@@ -15,6 +15,8 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
     const url = new URL(e.request.url);
+    // Live server status must never come from the cache
+    if (url.pathname.includes("/api/")) return;
     // Never cache API calls (Binance, F&G, etc.)
     if (/binance\.com|alternative\.me|tradingview\.com|yahoo\.com|stooq\.com|allorigins\.win|frankfurter\.app|exchangerate\.host|open\.er-api\.com|financialmodelingprep\.com/.test(url.hostname)) return;
     e.respondWith(

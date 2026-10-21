@@ -194,7 +194,7 @@ function detectDivergence(closes, oscillator, lookback = 30) {
 
 // Regime detection — trending vs ranging via ADX and Bollinger width
 function detectRegime(h, l, c) {
-    const adxVals = adx(h, l, c, 14);
+    const adxVals = adx(h, l, c, 14).adx;
     const bb = bollinger(c, 20, 2);
     const adxNow = adxVals[adxVals.length - 1];
     const bbWidth = bb.width[bb.width.length - 1];
@@ -657,7 +657,7 @@ function confluenceScore(candles) {
     if (volConfirm && signals.bear.length > signals.bull.length) push("bear", "Volumen-Bestätigung");
 
     // 11. ADX trend strength
-    const adxVals = adx(h, l, c, 14);
+    const adxVals = adx(h, l, c, 14).adx;
     if (adxVals[i] > 25) {
         if (e20[i] > e50[i]) push("bull", "ADX-stark");
         else push("bear", "ADX-stark");
@@ -1248,6 +1248,7 @@ function assessRisk(plan, candles, openPositions, equity) {
 // ---------- paper broker with localStorage persistence ----------
 class PaperBroker {
     static SCHEMA_VERSION = 3;                                // bump when accounting logic changes
+    static COSTS = { feeBps: 7.5, slipBps: 3.0 };
     constructor(startingBalance = 10000, opts = {}) {
         this.startingBalance = startingBalance;
         this.isolated = !!opts.isolated;                       // no localStorage in isolated mode
@@ -1345,28 +1346,47 @@ class PaperBroker {
     realizedPnl() {
         return this.journal.filter((j) => j.kind === "close").reduce((s, j) => s + (j.pnl || 0), 0);
     }
-    submit(symbol, side, qty, price, meta = {}) {
-        // enforce cash-only (no leverage) for spot paper trading
-        const desiredNotional = qty * price;
-        if (side === "long") {
-            const affordable = Math.min(this.cash * 0.99, desiredNotional);
-            if (affordable <= 0) return null;
-            qty = affordable / price;
+    // Realistic execution costs. feeBps per side (Binance taker 0.075% with BNB discount);
+    // slippage comes from slipModel (live order book) or the flat default.
+    _slipBps(symbol, side, notional, isExit) {
+        let bps = PaperBroker.COSTS.slipBps;
+        if (typeof this.slipModel === "function") {
+            try {
+                const m = this.slipModel(symbol, side, notional, isExit);
+                if (Number.isFinite(m) && m >= 0) bps = m;
+            } catch (e) { /* keep default */ }
         }
-        const notional = qty * price;
-        if (side === "long") this.cash -= notional;
-        else this.cash += notional;
+        return bps;
+    }
+    submit(symbol, side, qty, price, meta = {}) {
+        if (!(price > 0) || !(qty > 0)) return null;
+        const feeRate = PaperBroker.COSTS.feeBps / 1e4;
+        const slip = this._slipBps(symbol, side, qty * price, false) / 1e4;
+        const fill = side === "long" ? price * (1 + slip) : price * (1 - slip);
+        // enforce cash-only (no leverage) for spot paper trading, fee included
+        if (side === "long") {
+            const maxQty = (this.cash * 0.99) / (fill * (1 + feeRate));
+            qty = Math.min(qty, maxQty);
+            if (!(qty > 0)) return null;
+        }
+        const notional = qty * fill;
+        const fee = notional * feeRate;
+        if (side === "long") this.cash -= notional + fee;
+        else this.cash += notional - fee;
         this.positions[symbol] = {
-            symbol, side, qty, entry: price,
+            symbol, side, qty, entry: fill,
+            decision_price: price,
+            open_fee: fee,
             stop: meta.stop || 0, original_stop: meta.stop || 0,
             opened_at: new Date().toISOString(),
             take_profits: (meta.take_profits || []).map((t) => ({ price: t.price, qty: qty * t.fraction })),
             original_qty: qty, meta,
             trailing_moves: 0,           // how many times stop moved up
-            peak_price: price,            // highest (long) / lowest (short) since open
+            peak_price: fill,             // highest (long) / lowest (short) since open
         };
         this.journal.push({
-            ts: new Date().toISOString(), kind: "open", symbol, side, price, qty,
+            ts: new Date().toISOString(), kind: "open", symbol, side, price: fill, qty,
+            decision_price: price, fee, slip_cost: Math.abs(fill - price) * qty,
             strategy: meta.strategy || "",
         });
         this.save();
@@ -1374,26 +1394,34 @@ class PaperBroker {
     }
     close(symbol, price, fraction = 1) {
         const p = this.positions[symbol];
-        if (!p) return null;
+        if (!p || !(price > 0)) return null;
         const qty = p.qty * Math.min(fraction, 1);
-        let pnl;
+        const feeRate = PaperBroker.COSTS.feeBps / 1e4;
+        const slip = this._slipBps(symbol, p.side, qty * price, true) / 1e4;
+        const fill = p.side === "long" ? price * (1 - slip) : price * (1 + slip);
+        const exitFee = qty * fill * feeRate;
+        const openFeePart = (p.open_fee || 0) * (qty / p.qty);
+        p.open_fee = (p.open_fee || 0) - openFeePart;
+        let gross;
         if (p.side === "long") {
-            // sell qty units at current price
-            pnl = (price - p.entry) * qty;
-            this.cash += qty * price;
+            gross = (fill - p.entry) * qty;
+            this.cash += qty * fill - exitFee;
         } else {
-            // buy back qty units at current price to close short
-            pnl = (p.entry - price) * qty;
-            this.cash -= qty * price;
+            gross = (p.entry - fill) * qty;
+            this.cash -= qty * fill + exitFee;
         }
+        const fees = exitFee + openFeePart;
+        const pnl = gross - fees;
         p.qty -= qty;
         if (p.qty <= 1e-12) delete this.positions[symbol];
         this.journal.push({
             ts: new Date().toISOString(), kind: "close", symbol, side: p.side,
-            price, qty, pnl, r_multiple: 0,
+            price: fill, qty, pnl, gross_pnl: gross, fees,
+            slip_cost: Math.abs(fill - price) * qty, decision_price: price,
+            strategy: (p.meta && p.meta.strategy) || "", r_multiple: 0,
         });
         this.save();
-        return { pnl, qty };
+        return { pnl, qty, gross, fees };
     }
     onPrice(symbol, price) {
         const p = this.positions[symbol];

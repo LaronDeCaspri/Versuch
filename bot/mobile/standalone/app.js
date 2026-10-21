@@ -4620,7 +4620,7 @@ makePending = function(symbol, sig, candles, price) {
     const i = c.length - 1;
     const rsiVal = window.TB.rsi(c, 14)[i];
     const macdRes = window.TB.macd(c);
-    const adxVal = window.TB.adx(h, l, c, 14)[i];
+    const adxVal = window.TB.adx(h, l, c, 14).adx[i];
     const e20 = window.TB.ema(c, 20)[i], e50 = window.TB.ema(c, 50)[i], e200 = window.TB.ema(c, 200)[i];
     const atrVal = window.TB.atr(h, l, c, 14)[i];
     const atrPct = (atrVal / price) * 100;
@@ -4682,7 +4682,7 @@ function reconstructRationale(symbol, side) {
     const i = c.length - 1;
     const rsiVal = window.TB.rsi(c, 14)[i];
     const macdRes = window.TB.macd(c);
-    const adxVal = window.TB.adx(h, l, c, 14)[i];
+    const adxVal = window.TB.adx(h, l, c, 14).adx[i];
     const e20 = window.TB.ema(c, 20)[i], e50 = window.TB.ema(c, 50)[i], e200 = window.TB.ema(c, 200)[i];
     const atrVal = window.TB.atr(h, l, c, 14)[i];
     const patterns = window.TB.detectPatterns(candles);
@@ -7859,7 +7859,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "26.0";
+const APP_VERSION = "32.0";
 const APP_BUILD = "2026-09-25";
 
 // ---- 1. First-launch splash screen ----
@@ -7881,14 +7881,14 @@ function showSplashIfFirstLaunch() {
                     <strong>1️⃣ Live-Daten</strong><br><span style="color:var(--text-2); font-size:0.85rem;">Echte Preise von Binance — sekundengenau via WebSocket</span>
                 </div>
                 <div style="padding:10px 14px; background:rgba(139,92,246,0.06); border-left:3px solid var(--accent); border-radius:6px; margin-bottom:8px;">
-                    <strong>2️⃣ 16 Trader-Strategien</strong><br><span style="color:var(--text-2); font-size:0.85rem;">Buffett, Soros, Simons, PTJ &amp; Co. — automatisch angewandt</span>
+                    <strong>2️⃣ Getestete Engine</strong><br><span style="color:var(--text-2); font-size:0.85rem;">16 Strategien in 5 Familien, täglich im Walk-Forward nach Kosten geprüft — live wird exakt das gehandelt, was getestet wurde</span>
                 </div>
                 <div style="padding:10px 14px; background:rgba(139,92,246,0.06); border-left:3px solid var(--accent); border-radius:6px;">
                     <strong>3️⃣ Bot handelt selbst</strong><br><span style="color:var(--text-2); font-size:0.85rem;">Vollautomatisch mit 10 000 USDT Spielgeld — du beobachtest und lernst</span>
                 </div>
             </div>
             <div style="padding:10px 14px; background:rgba(245,158,11,0.06); border-left:3px solid var(--amber); border-radius:6px; margin-bottom:16px; font-size:0.82rem;">
-                <strong style="color:var(--amber);">Wichtig:</strong> Alles ist Papier-Handel. Der Bot läuft nur, solange dieser Tab offen ist.
+                <strong style="color:var(--amber);">Wichtig:</strong> Alles ist Papier-Handel, echte Orders sind gesperrt. Im Browser läuft der Bot nur bei offenem Tab — für 24/7 gibt es den Server-Modus (bot/server).
             </div>
             <div class="btn-row">
                 <button id="splash-tour" class="ghost">Tour starten</button>
@@ -8091,7 +8091,7 @@ if (typeof scanSymbol === "function") {
                         const adxVals = window.TB.adx(
                             window.TB.highs(candles),
                             window.TB.lows(candles),
-                            window.TB.closes(candles), 14);
+                            window.TB.closes(candles), 14).adx;
                         const adxNow = adxVals[adxVals.length - 1];
                         if (Number.isFinite(adxNow) && adxNow < 18) {
                             // Ranging market — kill signal, log to feed
@@ -9068,7 +9068,7 @@ V31.cbCheck = function() {
     const monthAgo = now - 30 * 86400000;
     const peak = state.peakEquity || CFG.startEquity || 10000;
 
-    const sumFrom = (since) => trades.filter((t) => (t.closedAt || 0) >= since).reduce((s, t) => s + t.pnl, 0);
+    const sumFrom = (since) => trades.filter((t) => (t.close_ts ? new Date(t.close_ts).getTime() : 0) >= since).reduce((s, t) => s + t.pnl, 0);
     const dayPnl = sumFrom(dayAgo);
     const weekPnl = sumFrom(weekAgo);
     const monthPnl = sumFrom(monthAgo);
@@ -9088,8 +9088,11 @@ V31.cbCheck = function() {
     }
 
     // Verluste in Folge
+    // Trigger once per streak: after the cooldown the same 5 losses must not re-arm it.
     const recent = trades.slice(-V31.circuitBreaker.losingStreakStop);
-    if (recent.length >= V31.circuitBreaker.losingStreakStop && recent.every((t) => t.pnl < 0)) {
+    if (recent.length >= V31.circuitBreaker.losingStreakStop && recent.every((t) => t.pnl < 0)
+        && trades.length !== V31.circuitBreaker.streakArmedAt) {
+        V31.circuitBreaker.streakArmedAt = trades.length;
         V31.circuitBreaker.cooldownUntil = now + 2 * 3600000;
         return { ok: false, reason: `${V31.circuitBreaker.losingStreakStop} Verluste in Folge — 2h Cooldown`, severity: "streak" };
     }
@@ -9111,12 +9114,17 @@ V31.concentrationCheck = function(newSymbol, newSize) {
     }
     const total = values.reduce((a, b) => a + b, 0);
     if (total <= 0) return { ok: true, hhi: 0, max: 0 };
+    // Measured against equity: cash is the diversifier. A single small position
+    // in an otherwise empty book is not concentration.
+    const equity = broker.equity ? broker.equity(prices) : (CFG.startEquity || 10000);
+    const maxPos = equity > 0 ? Math.max(...values) / equity * 100 : 0;
     const weights = values.map((v) => v / total);
-    const hhi = weights.reduce((s, w) => s + w * w, 0) * 10000; // 0..10000
-    const maxPos = Math.max(...weights) * 100;
-    // HHI > 2500 = hoch konzentriert, > 5000 = sehr hoch
-    if (hhi > 5000 || maxPos > 60) {
-        return { ok: false, hhi, max: maxPos, reason: `Konzentration zu hoch: HHI ${hhi.toFixed(0)}, größte Position ${maxPos.toFixed(0)}%` };
+    const hhi = weights.reduce((s, w) => s + w * w, 0) * 10000;
+    if (maxPos > 35) {
+        return { ok: false, hhi, max: maxPos, reason: `Klumpenrisiko: größte Position ${maxPos.toFixed(0)}% des Eigenkapitals (max 35%)` };
+    }
+    if (values.length >= 3 && hhi > 5000) {
+        return { ok: false, hhi, max: maxPos, reason: `Konzentration zu hoch: HHI ${hhi.toFixed(0)} über ${values.length} Positionen` };
     }
     return { ok: true, hhi, max: maxPos };
 };
@@ -9230,18 +9238,18 @@ V31.preTradeGate = function(pending) {
         if (rr < 1.3) return { ok: false, reason: `R:R ${rr.toFixed(2)} < 1.3`, checks };
     }
 
-    // Regime passt zu Richtung?
+    // Regime + Top-Risiko: Pro-Trades nutzen das backtestete Regime-Routing der
+    // Engine, daher hier nur informativ (sonst würde live anders gehandelt als getestet).
     V31.computeRegime();
     const regimeOk = (pending.side === "long" && V31.regime.score >= 45) || (pending.side === "short" && V31.regime.score <= 55);
-    checks.push({ name: "Regime", ok: regimeOk, detail: `${V31.regime.label} ${V31.regime.score.toFixed(0)}/100` });
-    if (!regimeOk) return { ok: false, reason: `Regime ${V31.regime.label} passt nicht zu ${pending.side}`, checks };
+    checks.push({ name: "Regime", ok: regimeOk || !!pending.proApproved, detail: `${V31.regime.label} ${V31.regime.score.toFixed(0)}/100${pending.proApproved ? " (info)" : ""}` });
+    if (!regimeOk && !pending.proApproved) return { ok: false, reason: `Regime ${V31.regime.label} passt nicht zu ${pending.side}`, checks };
 
-    // Market Top Risk für Longs
     if (pending.side === "long") {
         const top = V31.topRisk();
         const topOk = top.score < 75;
-        checks.push({ name: "Top-Risiko", ok: topOk, detail: `${top.zone} (${top.score.toFixed(0)}/100)` });
-        if (!topOk) return { ok: false, reason: `Top-Risiko ${top.zone} ${top.score.toFixed(0)} — Long zu riskant`, checks };
+        checks.push({ name: "Top-Risiko", ok: topOk || !!pending.proApproved, detail: `${top.zone} (${top.score.toFixed(0)}/100)${pending.proApproved ? " (info)" : ""}` });
+        if (!topOk && !pending.proApproved) return { ok: false, reason: `Top-Risiko ${top.zone} ${top.score.toFixed(0)} — Long zu riskant`, checks };
     }
 
     return { ok: true, checks };
@@ -9609,7 +9617,7 @@ function _v31RenderRisk() {
             </div>
             <div class="v31-metric">
                 <div class="v31-metric-value">${(conc.max||0).toFixed(0)}%</div>
-                <div class="v31-metric-label">Max Position</div>
+                <div class="v31-metric-label">Größte Pos. / Equity</div>
             </div>
             <div class="v31-metric">
                 <div class="v31-metric-value" style="color:var(--red);">${(stress.totalPnl||0).toFixed(0)}</div>
@@ -9769,7 +9777,7 @@ if (typeof INFO_DB === "object") {
     };
     INFO_DB["risk-dashboard"] = {
         title: "Risk-Dashboard",
-        body: `<p>Zusammenfassung aller Risiko-Limits:</p><ul><li>Drawdown vs Peak</li><li>HHI (Konzentration) — &gt; 5000 = zu hoch</li><li>Größte Position % — &gt; 60% = zu hoch</li><li>Stress -20%: hypothetischer Verlust bei BTC-Crash</li></ul>
+        body: `<p>Zusammenfassung aller Risiko-Limits:</p><ul><li>Drawdown vs Peak</li><li>HHI (Konzentration der Positionen) — ab 3 Positionen <li>HHI (Konzentration) — &gt; 5000 = zu hoch</li><li>Größte Position % — &gt; 60% = zu hoch</li>gt; 5000 = zu hoch</li><li>Größte Position in % des Eigenkapitals — <li>HHI (Konzentration) — &gt; 5000 = zu hoch</li><li>Größte Position % — &gt; 60% = zu hoch</li>gt; 35% = Klumpenrisiko</li><li>Stress -20%: hypothetischer Verlust bei BTC-Crash</li></ul>
                <p>Circuit Breaker: Tagesverlust &gt; 3% / Woche &gt; 8% / Monat &gt; 15% stoppt neue Trades.</p>`,
     };
     INFO_DB["exposure"] = {
@@ -9787,5 +9795,543 @@ setTimeout(() => {
 
 // Finales Demo-Guard-Reinforcement
 Object.defineProperty(window, "TB_DEMO_ONLY", { value: true, writable: false, configurable: false });
+
+// ============================================================================
+// v32 — Pro-Engine: der Bot handelt exakt das, was er getestet hat
+//  - eine deterministische Signal-Pipeline (pro.js) für Backtest UND Live
+//  - Walk-Forward out-of-sample, nach Kosten, mit Deflated Sharpe
+//  - Inkubation: unbewiesene Setups nur mit 25% Risiko, separat ausgewiesen
+//  - Orderbuch/CVD + Funding/OI/Basis als Execution- und Crowding-Kontrolle
+// ============================================================================
+const PE = window.TB.pro;
+const PRO = (window.PRO = window.PRO || {});
+PRO.enabled = localStorage.getItem("tb_pro_mode") !== "0";
+PRO.strict = localStorage.getItem("tb_pro_strict") === "1";
+PRO.research = (() => { try { return JSON.parse(localStorage.getItem("tb_pro_research_v1") || "null"); } catch (e) { return null; } })();
+PRO.running = false;
+PRO.progress = null;
+PRO.micro = null;
+PRO.deriv = {};
+PRO.rejects = [];
+PRO.selected = null;
+PRO.RESEARCH_DAYS = 180;
+PRO.INCUBATION_FACTOR = 0.25;
+
+const _fmtPct = (x, d = 1) => Number.isFinite(x) ? `${(x * 100).toFixed(d)}%` : "–";
+const _fmtNum = (x, d = 2) => Number.isFinite(x) ? x.toFixed(d) : "–";
+const _signPct = (x, d = 1) => Number.isFinite(x) ? `${x >= 0 ? "+" : ""}${(x * 100).toFixed(d)}%` : "–";
+
+function _proResult(symbol) {
+    return PRO.research && Array.isArray(PRO.research.results)
+        ? PRO.research.results.find((r) => r.symbol === symbol && !r.error) || null
+        : null;
+}
+function _proValidated(symbol) {
+    const r = _proResult(symbol);
+    return !!(r && r.live && r.live.params && (r.verdict.code === "EDGE" || r.verdict.code === "PROMISING"));
+}
+PRO.paramsFor = function(symbol) {
+    const r = _proResult(symbol);
+    if (r && r.live && r.live.params) return r.live.params;
+    return PRO.strict ? null : { ...PE.DEFAULT_PARAMS };
+};
+PRO.engine = new PE.LiveEngine({ interval: CFG.primaryTf, paramsFor: (s) => PRO.paramsFor(s) });
+
+// Fills priced off the live order book when the stream is up
+broker.slipModel = (sym, side, notional, isExit) => PE.slippageBps(PRO.micro, sym, side, notional, isExit);
+
+// Kelly needs a real sample: below 300 closed trades fixed-fractional risk only
+if (typeof dynamicRiskPct === "function" && !dynamicRiskPct._v32) {
+    const _v32Dyn = dynamicRiskPct;
+    dynamicRiskPct = function(score, riskScore) {
+        if (_pairTrades().length < 300) return CFG.baseRiskPct;
+        return _v32Dyn(score, riskScore);
+    };
+    dynamicRiskPct._v32 = true;
+}
+
+function _proReject(symbol, gate, why) {
+    if (typeof logRejection === "function") logRejection(symbol, gate, why);
+    if (typeof feedEvent === "function") feedEvent("info", `${symbol}: Pro-Signal nicht gehandelt — ${why}`);
+    PRO.rejects.unshift({ symbol, gate, why, at: Date.now() });
+    if (PRO.rejects.length > 20) PRO.rejects.length = 20;
+    return null;
+}
+
+function _proBuildPending(symbol, d, candles, price) {
+    if (broker.positions[symbol]) return null;
+    if (Object.keys(broker.positions).length >= CFG.maxOpenPositions) return _proReject(symbol, "Max-Positionen", `bereits ${CFG.maxOpenPositions} Positionen offen`);
+    if (state.halted) return _proReject(symbol, "Kill-Switch", "Kill-Switch aktiv");
+    if (state.vix && state.vix.value > 35) return _proReject(symbol, "VIX-Panik", `VIX ${state.vix.value.toFixed(1)} > 35`);
+    const ctl = PE.liveControls(d.side, PRO.micro ? PRO.micro.metrics(symbol) : null, PRO.deriv[symbol] || null);
+    if (!ctl.ok) return _proReject(symbol, "Execution/Crowding", ctl.reasons.join(" · "));
+    if (!Number.isFinite(d.atr) || d.atr <= 0 || !(price > 0)) return null;
+    const validated = _proValidated(symbol);
+    if (PRO.strict && !validated) return _proReject(symbol, "Edge-Gate", "keine validierte Edge (strenger Modus)");
+    const riskPct = dynamicRiskPct(d.score, 0) * (validated ? 1 : PRO.INCUBATION_FACTOR);
+    const equity = broker.equity(state.prices);
+    const plan = window.TB.planTrade(d.side, price, d.atr, equity, {
+        riskPctPerTrade: riskPct, atrStopMult: d.params.atrStopMult,
+        maxNotionalPctPerPosition: CFG.maxNotionalPctPerPosition, tpMultiples: PE.DEFAULT_SIM.tpMultiples,
+    });
+    if (!plan || plan.size <= 0) return null;
+    const risk = window.TB.assessRisk(plan, candles, broker.positions, equity);
+    risk.rawScore = risk.score;
+    if (Number.isFinite(CFG.softMaxRisk)) risk.score = Math.min(risk.score, CFG.softMaxRisk);
+    return {
+        id: symbol + "_" + Date.now(),
+        symbol, ...plan,
+        score: d.score,
+        signals: d.signals,
+        reasons: d.signals.map((s) => `${PE.FAMILY_LABELS[s.family] || s.family} · ${s.strategy}: ${s.reason}`),
+        strategy: `pro:${d.signals.map((s) => s.family).join("+")}`,
+        forecast: window.TB.forecast(plan),
+        risk, dynRiskPct: riskPct, highCorr: [], newsForSymbol: [],
+        proApproved: true,
+        proTag: validated ? "VALIDIERT" : "INKUBATION",
+        proRegime: d.regime, proParams: d.params,
+        created_ts: Date.now(),
+    };
+}
+
+// Outermost scan wrapper: inner chain still fetches data and manages stops,
+// but the entry decision comes only from the tested engine.
+if (typeof scanSymbol === "function" && !scanSymbol._v32) {
+    const _v32Scan = scanSymbol;
+    scanSymbol = async function(symbol) {
+        const r = await _v32Scan(symbol);
+        if (!PRO.enabled || !r || r.error) return r;
+        const candles = state.candles[symbol];
+        const busy = !!broker.positions[symbol] || (state.pending || []).some((p) => p.symbol === symbol);
+        let d = null;
+        try { d = PRO.engine.onCandles(symbol, candles, busy); }
+        catch (e) { console.warn("[v32] engine", e); }
+        const flat = { symbol, side: null, score: 0, signals: [], price: r.price };
+        if (!d) return flat;
+        if (d.stale) {
+            if (typeof feedEvent === "function") feedEvent("info", `${symbol}: Signal zu spät erkannt (Tab war im Hintergrund) — ausgelassen, damit live = Backtest bleibt`);
+            return flat;
+        }
+        return { symbol, side: d.side, score: d.score, signals: d.signals, price: r.price, pro: d };
+    };
+    scanSymbol._v32 = true;
+}
+
+if (typeof makePending === "function" && !makePending._v32) {
+    const _v32Mkp = makePending;
+    makePending = function(symbol, sig, candles, price) {
+        if (sig && sig.pro) return _proBuildPending(symbol, sig.pro, candles, price);
+        return _v32Mkp(symbol, sig, candles, price);
+    };
+    makePending._v32 = true;
+}
+
+if (typeof passesStrictFilter === "function" && !passesStrictFilter._v32) {
+    const _v32Psf = passesStrictFilter;
+    passesStrictFilter = function(p) {
+        if (p && p.proApproved) return true;
+        return _v32Psf(p);
+    };
+    passesStrictFilter._v32 = true;
+}
+
+// ---- live market structure ----------------------------------------------
+function _proSymbols() { return CFG.symbols.slice(0, 8); }
+function _proStartMicro() {
+    const key = _proSymbols().join(",");
+    if (PRO.micro && PRO._microKey === key) return;
+    if (PRO.micro) PRO.micro.stop();
+    PRO.micro = new PE.MicroStream(_proSymbols());
+    PRO._microKey = key;
+    PRO.micro.start();
+}
+async function _proRefreshDerivs() {
+    for (const s of _proSymbols()) {
+        PRO.deriv[s] = await PE.fetchDerivatives(s);
+    }
+}
+setTimeout(() => { try { _proStartMicro(); } catch (e) { console.warn("[v32] micro", e); } }, 3000);
+setInterval(() => { try { _proStartMicro(); } catch (e) { /* retry next tick */ } }, 5 * 60e3);
+setTimeout(() => { _proRefreshDerivs().catch(() => {}); }, 6000);
+setInterval(() => { _proRefreshDerivs().catch(() => {}); }, 5 * 60e3);
+
+// ---- research: walk-forward in a Web Worker --------------------------------
+function _proResearchStale() {
+    const r = PRO.research;
+    if (!r || !r.computedAt) return true;
+    if (Date.now() - r.computedAt > 24 * 3600e3) return true;
+    const have = (r.results || []).map((x) => x.symbol).join(",");
+    return have !== _proSymbols().slice(0, 6).join(",");
+}
+
+function _proResearchDone(res) {
+    PRO.running = false;
+    PRO.progress = null;
+    PRO.research = res;
+    try { localStorage.setItem("tb_pro_research_v1", JSON.stringify(res)); } catch (e) { /* storage full: keep in memory */ }
+    const p = res.portfolio;
+    if (typeof feedEvent === "function") {
+        feedEvent("info", p
+            ? `Walk-Forward fertig: ${p.verdict.label} · OOS-Sharpe ${_fmtNum(p.stats.sharpe)} netto · ${p.stats.trades} Trades · Buy&Hold ${_fmtNum(p.bench.sharpe)}`
+            : "Walk-Forward fertig: keine auswertbaren Symbole");
+    }
+    _proRenderAll();
+}
+
+PRO.runResearch = function() {
+    if (PRO.running) return;
+    const symbols = _proSymbols().slice(0, 6);
+    const opts = {
+        days: PRO.RESEARCH_DAYS, interval: CFG.primaryTf,
+        sim: { riskPct: CFG.baseRiskPct, maxNotionalPct: CFG.maxNotionalPctPerPosition },
+    };
+    PRO.running = true;
+    PRO.progress = { phase: "Start", pct: 0 };
+    _proRenderAll();
+    const inline = () => {
+        PE.runResearch(symbols, opts, (p) => { PRO.progress = p; _proRenderProgress(); })
+            .then(_proResearchDone)
+            .catch((e) => { PRO.running = false; PRO.progress = null; if (typeof feedEvent === "function") feedEvent("info", `Walk-Forward fehlgeschlagen: ${e.message}`); _proRenderAll(); });
+    };
+    let worker = null;
+    try { worker = new Worker("pro-worker.js"); } catch (e) { worker = null; }
+    if (!worker) return inline();
+    worker.onmessage = (ev) => {
+        const m = ev.data || {};
+        if (m.type === "progress") { PRO.progress = m.p; _proRenderProgress(); }
+        else if (m.type === "done") { worker.terminate(); _proResearchDone(m.result); }
+        else if (m.type === "error") { worker.terminate(); inline(); }
+    };
+    worker.onerror = () => { try { worker.terminate(); } catch (e) { /* noop */ } inline(); };
+    worker.postMessage({ cmd: "research", symbols, opts });
+};
+setTimeout(() => { if (_proResearchStale()) PRO.runResearch(); }, 20000);
+setInterval(() => { if (!PRO.running && _proResearchStale()) PRO.runResearch(); }, 3600e3);
+
+// ---- UI ---------------------------------------------------------------------
+const _PRO_SHORT = { EDGE: "BESTÄTIGT", PROMISING: "VIELVERSPR.", NONE: "KEINE", DATA: "ZU WENIG" };
+function _proChip(label, tone) {
+    const cls = tone === "green" ? "v31-chip-green" : tone === "red" ? "v31-chip-red" : tone === "amber" ? "v31-chip-amber" : "v31-chip-neutral";
+    return `<span class="v31-chip ${cls}">${label}</span>`;
+}
+
+function _proEnsureCards() {
+    const dash = document.querySelector('[data-pane="dashboard"]');
+    if (dash && !document.getElementById("v32-status-card")) {
+        const el = document.createElement("div");
+        el.id = "v32-status-card";
+        el.className = "card v31-card";
+        const anchor = document.getElementById("v31-widgets") || document.getElementById("signal-tile");
+        if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor.id === "v31-widgets" ? anchor : anchor.nextSibling);
+        else dash.appendChild(el);
+    }
+    const analyse = document.querySelector('[data-pane="analyse"]');
+    if (analyse && !document.getElementById("v32-tearsheet")) {
+        const el = document.createElement("div");
+        el.id = "v32-tearsheet";
+        el.className = "card v31-card v32-tearsheet";
+        analyse.insertBefore(el, analyse.firstChild);
+    }
+    const markt = document.querySelector('[data-pane="markt"]');
+    if (markt && !document.getElementById("v32-micro-card")) {
+        const el = document.createElement("div");
+        el.id = "v32-micro-card";
+        el.className = "card v31-card";
+        markt.insertBefore(el, markt.firstChild);
+    }
+    const settings = document.querySelector('[data-pane="einstellungen"]');
+    if (settings && !document.getElementById("v32-settings-card")) {
+        const el = document.createElement("div");
+        el.id = "v32-settings-card";
+        el.className = "card v31-card";
+        settings.insertBefore(el, settings.firstChild);
+        el.addEventListener("change", (e) => {
+            if (e.target.id === "v32-pro-toggle") {
+                PRO.enabled = e.target.checked;
+                localStorage.setItem("tb_pro_mode", PRO.enabled ? "1" : "0");
+                if (typeof feedEvent === "function") feedEvent("info", `Pro-Modus ${PRO.enabled ? "aktiviert — Entscheidungen nur noch aus der getesteten Engine" : "deaktiviert — klassische Signal-Kette"}`);
+            } else if (e.target.id === "v32-strict-toggle") {
+                PRO.strict = e.target.checked;
+                localStorage.setItem("tb_pro_strict", PRO.strict ? "1" : "0");
+                PRO.engine = new PE.LiveEngine({ interval: CFG.primaryTf, paramsFor: (s) => PRO.paramsFor(s) });
+            }
+            _proRenderAll();
+        });
+    }
+}
+document.addEventListener("click", (e) => {
+    const run = e.target.closest && e.target.closest("[data-v32-run]");
+    if (run) { PRO.runResearch(); return; }
+    const pill = e.target.closest && e.target.closest("[data-v32-sym]");
+    if (pill) { PRO.selected = pill.dataset.v32Sym; _proRenderTearSheet(); }
+});
+
+function _proRenderProgress() {
+    const bar = document.getElementById("v32-progress");
+    if (!bar || !PRO.progress) return;
+    const pct = Math.round((PRO.progress.pct || 0) * 100);
+    bar.querySelector(".v32-progress-fill").style.width = `${pct}%`;
+    bar.querySelector(".v32-progress-label").textContent = `${PRO.progress.symbol ? PRO.progress.symbol + " · " : ""}${PRO.progress.phase || ""} · ${pct}%`;
+}
+
+function _proRenderStatus() {
+    const el = document.getElementById("v32-status-card");
+    if (!el) return;
+    if (!PRO.enabled) {
+        el.innerHTML = `<h2>Pro-Engine ${_proChip("AUS", "neutral")}</h2><div class="perf-hint">Klassische Signal-Kette aktiv. In den Einstellungen einschalten.</div>`;
+        return;
+    }
+    const port = PRO.research && PRO.research.portfolio;
+    const rows = _proSymbols().map((s) => {
+        const st = PRO.engine.status(s);
+        const r = _proResult(s);
+        const pre = st && st.lastPre;
+        const regime = pre ? PE.REGIME_LABELS[pre.regime] : "–";
+        const verdict = r ? _proChip(r.verdict.label, r.verdict.tone) : _proChip(PRO.running ? "TEST LÄUFT" : "UNGEPRÜFT", "neutral");
+        const watch = st && st.watch
+            ? `wartet auf ${st.watch.side === "long" ? "Schluss ≥" : "Schluss ≤"} ${_fmtNum(st.watch.trigger, st.watch.trigger < 10 ? 4 : 2)}`
+            : pre ? `L ${_fmtNum(pre.long.score, 1)} / S ${_fmtNum(pre.short.score, 1)}` : "sammle Kerzen";
+        return `<div class="v32-row"><span class="v32-sym">${s.replace("/USDT", "")}</span><span class="v32-muted">${regime}</span><span class="v32-muted v32-grow">${watch}</span>${verdict}</div>`;
+    }).join("");
+    const last = PRO.rejects[0];
+    el.innerHTML = `
+        <h2>Pro-Engine ${port ? _proChip(port.verdict.label, port.verdict.tone) : _proChip(PRO.running ? "TEST LÄUFT" : "UNGEPRÜFT", "neutral")}</h2>
+        <div class="perf-hint">Live wird exakt die Logik gehandelt, die im Walk-Forward getestet wurde. Ungeprüfte Setups laufen als Inkubation mit ${Math.round(PRO.INCUBATION_FACTOR * 100)}% Risiko${PRO.strict ? " — strenger Modus: nur validierte Edge" : ""}.</div>
+        <div class="v32-rows">${rows}</div>
+        ${last ? `<div class="v32-reject">Zuletzt verworfen: <strong>${last.symbol}</strong> — ${last.why}</div>` : ""}
+    `;
+}
+
+function _proEquitySvg(curve, bench) {
+    if (!curve || curve.length < 2) return "";
+    const all = curve.concat(bench || []);
+    const lo = Math.min(...all), hi = Math.max(...all);
+    const span = hi - lo || 1;
+    const pts = (arr) => arr.map((v, i) => `${(i / (arr.length - 1) * 400).toFixed(1)},${(112 - (v - lo) / span * 104).toFixed(1)}`).join(" ");
+    const base = 112 - (100 - lo) / span * 104;
+    return `
+        <svg class="v32-equity" viewBox="0 0 400 120" preserveAspectRatio="none" role="img" aria-label="Equity out-of-sample gegen Buy and Hold">
+            ${base > 0 && base < 120 ? `<line x1="0" x2="400" y1="${base.toFixed(1)}" y2="${base.toFixed(1)}" class="v32-eq-base"/>` : ""}
+            ${bench && bench.length > 1 ? `<polyline points="${pts(bench)}" class="v32-eq-bench"/>` : ""}
+            <polyline points="${pts(curve)}" class="v32-eq-strat"/>
+        </svg>
+        <div class="v32-legend"><span><i class="v32-dot v32-dot-strat"></i>Strategie (netto, OOS)</span><span><i class="v32-dot v32-dot-bench"></i>Buy &amp; Hold</span></div>`;
+}
+
+function _proLiveIncubation() {
+    const closes = (broker.journal || []).filter((e) => e.kind === "close" && String(e.strategy || "").startsWith("pro:"));
+    if (!closes.length) return null;
+    const pnl = closes.reduce((s, e) => s + (e.pnl || 0), 0);
+    const fees = closes.reduce((s, e) => s + (e.fees || 0), 0);
+    const slip = closes.reduce((s, e) => s + (e.slip_cost || 0), 0);
+    const gross = closes.reduce((s, e) => s + (e.gross_pnl || 0), 0);
+    const wins = closes.filter((e) => e.pnl > 0).length;
+    return { n: closes.length, pnl, fees, slip, gross, winRate: wins / closes.length };
+}
+
+function _proRenderTearSheet() {
+    const el = document.getElementById("v32-tearsheet");
+    if (!el) return;
+    const R = PRO.research;
+    const progress = PRO.running ? `
+        <div id="v32-progress" class="v32-progress"><div class="v32-progress-fill" style="width:${Math.round((PRO.progress?.pct || 0) * 100)}%"></div><span class="v32-progress-label">${PRO.progress?.phase || "Start"}</span></div>` : "";
+    if (!R || !R.portfolio) {
+        el.innerHTML = `
+            <h2>Pro Tear Sheet ${_proChip(PRO.running ? "BERECHNE" : "AUSSTEHEND", "neutral")}</h2>
+            <div class="perf-hint">Walk-Forward über ${PRO.RESEARCH_DAYS} Tage echter Binance-Historie, out-of-sample, nach Gebühren und Slippage. Startet automatisch.</div>
+            ${progress}
+            ${PRO.running ? "" : `<button class="primary v32-btn" data-v32-run>Jetzt berechnen</button>`}`;
+        return;
+    }
+    const P = R.portfolio, s = P.stats;
+    const results = R.results.filter((r) => !r.error);
+    if (!PRO.selected || !results.find((r) => r.symbol === PRO.selected)) PRO.selected = results[0] ? results[0].symbol : null;
+    const sel = results.find((r) => r.symbol === PRO.selected);
+    const ci = s.sharpeCI ? `${_fmtNum(s.sharpeCI.lo)} … ${_fmtNum(s.sharpeCI.hi)}` : "–";
+    const kpi = (label, value, sub = "", tone = "") => `<div class="v31-metric"><div class="v31-metric-value ${tone}">${value}</div><div class="v31-metric-label">${label}</div>${sub ? `<div class="v32-sub">${sub}</div>` : ""}</div>`;
+    const inc = _proLiveIncubation();
+    const failed = R.results.filter((r) => r.error);
+    const thin = P.verdict.code === "DATA";
+    el.innerHTML = `
+        <h2>Pro Tear Sheet ${_proChip(P.verdict.label, P.verdict.tone)}</h2>
+        <div class="perf-hint">Portfolio aus ${P.symbols.length} Symbolen · ${s.days} Tage out-of-sample · Stand ${new Date(R.computedAt).toLocaleString("de-DE")}</div>
+        ${thin ? `<div class="v32-reject">Stichprobe zu klein (${s.trades} Trades, ${s.days} Tage) — die Kennzahlen unten sind nicht belastbar und dienen nur zur Orientierung.</div>` : ""}
+        <div class="v32-kpis ${thin ? "v32-dim" : ""}">
+            ${kpi("Sharpe netto", _fmtNum(s.sharpe), `95%-KI ${ci}`, s.sharpe > 0 ? "v32-pos" : "v32-neg")}
+            ${kpi("Deflated Sharpe", _fmtPct(s.dsr, 0), `${s.trials} getestete Varianten`)}
+            ${kpi("Rendite netto", _signPct(s.totalReturn), `Buy&Hold ${_signPct(P.bench.totalReturn)}`, s.totalReturn >= 0 ? "v32-pos" : "v32-neg")}
+            ${kpi("Alpha vs B&H", _signPct(P.alphaReturn), `B&H-Sharpe ${_fmtNum(P.bench.sharpe)}`, P.alphaReturn >= 0 ? "v32-pos" : "v32-neg")}
+            ${kpi("Max Drawdown", _fmtPct(s.maxDD), `B&H ${_fmtPct(P.bench.maxDD)}`)}
+            ${kpi("Trades", String(s.trades), `Trefferquote ${_fmtPct(s.winRate, 0)}`)}
+            ${kpi("Erwartung", `${_fmtNum(s.expectancyR)} R`, "pro Trade nach Kosten")}
+            ${kpi("Kosten bezahlt", money(s.feesPaid), "Gebühren im Test")}
+        </div>
+        <div class="v32-pills">${results.map((r) => `<button class="v32-pill ${r.symbol === PRO.selected ? "active" : ""}" data-v32-sym="${r.symbol}">${r.symbol.replace("/USDT", "")}</button>`).join("")}</div>
+        ${sel ? `
+            ${_proEquitySvg(sel.curve, sel.benchCurve)}
+            <div class="v32-table">
+                <div class="v32-tr v32-th v32-sym-table"><span>Symbol</span><span>Urteil</span><span>Sharpe</span><span>DSR</span><span>Rendite</span><span class="v32-hide-sm">B&amp;H</span><span>Trades</span></div>
+                ${results.map((r) => `<div class="v32-tr v32-sym-table ${r.symbol === PRO.selected ? "v32-sel" : ""} ${r.verdict.code === "DATA" ? "v32-dim" : ""}">
+                    <span>${r.symbol.replace("/USDT", "")}</span><span>${_proChip(_PRO_SHORT[r.verdict.code] || r.verdict.label, r.verdict.tone)}</span>
+                    <span class="num">${_fmtNum(r.stats.sharpe)}</span><span class="num">${_fmtPct(r.stats.dsr, 0)}</span>
+                    <span class="num ${r.stats.totalReturn >= 0 ? "v32-pos" : "v32-neg"}">${_signPct(r.stats.totalReturn)}</span>
+                    <span class="num v32-hide-sm">${_signPct(r.bench.totalReturn)}</span><span class="num">${r.stats.trades}</span></div>`).join("")}
+            </div>
+            <details class="v32-details">
+                <summary>Walk-Forward-Fenster ${sel.symbol} (${sel.folds.length})</summary>
+                <div class="v32-table v32-folds">
+                    <div class="v32-tr v32-th"><span>Test ab</span><span>Parameter</span><span>IS-Sharpe</span><span>OOS</span><span>Trades</span></div>
+                    ${sel.folds.map((f) => `<div class="v32-tr"><span>${new Date(f.oosFrom).toLocaleDateString("de-DE")}</span>
+                        <span>${f.params ? `Score ≥${f.params.minScore} · ${f.params.agreement} Fam. · Stop ${f.params.atrStopMult}×ATR` : "<em>flat — keine In-Sample-Edge</em>"}</span>
+                        <span class="num">${_fmtNum(f.isSharpe)}</span><span class="num ${f.oosReturn >= 0 ? "v32-pos" : "v32-neg"}">${_signPct(f.oosReturn)}</span><span class="num">${f.oosTrades}</span></div>`).join("")}
+                </div>
+                <div class="v32-note">Signal-Korrelation: Ø |r| innerhalb einer Familie ${_fmtNum(sel.correlation.withinFamily)} vs. zwischen Familien ${_fmtNum(sel.correlation.acrossFamily)} — deshalb zählt jede Familie nur einmal.</div>
+                <div class="v32-note">Ergebnis nach Familie: ${Object.entries(sel.famPnl).map(([f, v]) => `${PE.FAMILY_LABELS[f] || f} <span class="${v >= 0 ? "v32-pos" : "v32-neg"}">${v >= 0 ? "+" : ""}${v.toFixed(0)}</span>`).join(" · ") || "–"}</div>
+            </details>` : ""}
+        ${failed.length ? `<div class="v32-note">Nicht auswertbar: ${failed.map((f) => `${f.symbol} (${f.error})`).join(", ")}</div>` : ""}
+        <div class="v32-incubation">
+            <div class="v32-inc-title">Live-Inkubation (Papier, nach Kosten)</div>
+            ${inc ? `<div class="v32-inc-grid">
+                <span>${inc.n} Trades</span><span class="${inc.pnl >= 0 ? "v32-pos" : "v32-neg"}">${inc.pnl >= 0 ? "+" : ""}${money(inc.pnl)}</span>
+                <span>Treffer ${_fmtPct(inc.winRate, 0)} (Test ${_fmtPct(s.winRate, 0)})</span><span>Kosten ${money(inc.fees + inc.slip)}</span>
+            </div>` : `<div class="v32-muted">Noch keine abgeschlossenen Pro-Trades.</div>`}
+        </div>
+        <details class="v32-details">
+            <summary>Methodik</summary>
+            <div class="v32-note">Rollierender Walk-Forward: 30 Tage optimieren, die folgenden 10 Tage blind handeln, weiterrollen. ${PE.PARAM_GRID.length} Parameter-Varianten je Fenster; zeigt kein Fenster In-Sample eine Edge, bleibt der Bot flat. Kosten: ${PE.DEFAULT_SIM.feeBps} bps Gebühr + ${PE.DEFAULT_SIM.slipBps} bps Slippage je Seite. Einstieg zur Eröffnung der Folgekerze nach bestätigtem Schlusskurs, innerhalb einer Kerze wird immer zuerst der Stop angenommen. Deflated Sharpe korrigiert für die Anzahl getesteter Varianten (Bailey &amp; López de Prado). Shorts werden wie Perp-Shorts ohne Funding-Gutschrift simuliert.</div>
+        </details>
+        ${progress}
+        ${PRO.running ? "" : `<button class="ghost v32-btn" data-v32-run>Neu berechnen</button>`}
+    `;
+}
+
+function _proRenderMicro() {
+    const el = document.getElementById("v32-micro-card");
+    if (!el) return;
+    const live = PRO.micro && PRO.micro.lastMsg && Date.now() - PRO.micro.lastMsg < 10000;
+    const fmtUsd = (x) => Number.isFinite(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(x) >= 1e6 ? (Math.abs(x) / 1e6).toFixed(2) + " M" : (Math.abs(x) / 1e3).toFixed(0) + " k"}` : "–";
+    const rows = _proSymbols().map((s) => {
+        const m = PRO.micro ? PRO.micro.metrics(s) : null;
+        const d = PRO.deriv[s];
+        const tone = (x, good) => Number.isFinite(x) ? (x * good >= 0 ? "v32-pos" : "v32-neg") : "";
+        return `<div class="v32-tr">
+            <span>${s.replace("/USDT", "")}</span>
+            <span class="num">${m && Number.isFinite(m.spreadBps) ? m.spreadBps.toFixed(1) : "–"}</span>
+            <span class="num ${tone(m && m.obi, 1)}">${m && Number.isFinite(m.obi) ? Math.round(m.obi * 100) + "%" : "–"}</span>
+            <span class="num ${tone(m && m.cvd5m, 1)}">${m ? fmtUsd(m.cvd5m) : "–"}</span>
+            <span class="num">${d ? (d.funding * 100).toFixed(3) + "%" : "–"}</span>
+            <span class="num">${d && Number.isFinite(d.oiChange1h) ? _signPct(d.oiChange1h) : "–"}</span>
+        </div>`;
+    }).join("");
+    el.innerHTML = `
+        <h2>Orderbuch &amp; Positionierung ${_proChip(live ? "LIVE" : "VERBINDE", live ? "green" : "neutral")}</h2>
+        <div class="perf-hint">Spread (bps) und Orderbuch-Ungleichgewicht (Top 20), Netto-Aggressor-Fluss der letzten 5 Minuten, Perp-Funding je 8h und Open-Interest-Änderung über 1h. Der Bot meidet weite Spreads, starken Gegenfluss und überfüllte Seiten.</div>
+        <div class="v32-table v32-micro">
+            <div class="v32-tr v32-th"><span>Symbol</span><span>Spread</span><span>Buch</span><span>CVD 5m</span><span>Funding</span><span>OI 1h</span></div>
+            ${rows}
+        </div>`;
+}
+
+function _proRenderSettings() {
+    const el = document.getElementById("v32-settings-card");
+    if (!el) return;
+    el.innerHTML = `
+        <h2>Pro-Modus ${_proChip(PRO.enabled ? "AN" : "AUS", PRO.enabled ? "green" : "neutral")}</h2>
+        <label class="v32-toggle"><input type="checkbox" id="v32-pro-toggle" ${PRO.enabled ? "checked" : ""}>
+            <span><strong>Getestete Engine handelt</strong><br><small>Entscheidungen nur aus der Walk-Forward-geprüften Logik. Lern-Modus-Schwellen werden ignoriert.</small></span></label>
+        <label class="v32-toggle"><input type="checkbox" id="v32-strict-toggle" ${PRO.strict ? "checked" : ""}>
+            <span><strong>Nur validierte Edge</strong><br><small>Aus: ungeprüfte Setups laufen als Inkubation mit ${Math.round(PRO.INCUBATION_FACTOR * 100)}% Risiko. An: nur Symbole mit Urteil „Edge bestätigt" oder „vielversprechend".</small></span></label>
+        <div class="v32-note">Kosten im Paper-Broker: ${window.TB.PaperBroker.COSTS.feeBps} bps Gebühr je Seite, Slippage aus dem Live-Orderbuch (Fallback ${window.TB.PaperBroker.COSTS.slipBps} bps). Kelly-Sizing erst ab 300 abgeschlossenen Trades.</div>
+        ${PRO.running ? "" : `<button class="ghost v32-btn" data-v32-run>Walk-Forward neu berechnen</button>`}
+    `;
+}
+
+// ---- 24/7 server (only when the app is served by bot/server/runner.mjs) -------
+PRO.server = null;
+PRO.serverChecked = false;
+async function _proPollServer() {
+    try {
+        const res = await fetch("api/status", { cache: "no-store" });
+        const type = res.headers.get("content-type") || "";
+        if (!res.ok || !type.includes("application/json")) { PRO.serverChecked = true; return false; }
+        const data = await res.json();
+        if (!data || data.demo !== true) return false;
+        PRO.server = data;
+        PRO.serverChecked = true;
+        _proRenderServer();
+        return true;
+    } catch (e) { PRO.serverChecked = true; return false; }
+}
+function _proRenderServer() {
+    const d = PRO.server;
+    if (!d) return;
+    const dash = document.querySelector('[data-pane="dashboard"]');
+    let el = document.getElementById("v32-server-card");
+    if (!el && dash) {
+        el = document.createElement("div");
+        el.id = "v32-server-card";
+        el.className = "card v31-card";
+        const status = document.getElementById("v32-status-card");
+        if (status && status.parentNode) status.parentNode.insertBefore(el, status);
+        else dash.appendChild(el);
+    }
+    if (!el) return;
+    const fresh = d.lastScanAt && Date.now() - d.lastScanAt < 120e3;
+    const pnl = d.equity - d.startingBalance;
+    const p = d.research && d.research.portfolio;
+    el.innerHTML = `
+        <h2>24/7-Server ${_proChip(fresh ? "LÄUFT" : "KEIN SCAN", fresh ? "green" : "red")}</h2>
+        <div class="perf-hint">Dieser Bot läuft auf deinem Server rund um die Uhr weiter, auch wenn das Handy schläft. Papierhandel, Datenquelle: ${d.dataSource}. Der Browser-Bot hier ist eine zweite, unabhängige Papier-Instanz.</div>
+        <div class="v32-kpis">
+            <div class="v31-metric"><div class="v31-metric-value">${money(d.equity)}</div><div class="v31-metric-label">Equity</div><div class="v32-sub ${pnl >= 0 ? "v32-pos" : "v32-neg"}">${pnl >= 0 ? "+" : ""}${money(pnl)}</div></div>
+            <div class="v31-metric"><div class="v31-metric-value">${d.positions.length}</div><div class="v31-metric-label">Positionen</div><div class="v32-sub">${d.recentTrades.length} Trades zuletzt</div></div>
+            <div class="v31-metric"><div class="v31-metric-value">${Math.floor(d.uptimeSec / 3600)} h</div><div class="v31-metric-label">Laufzeit</div><div class="v32-sub">${d.scans} Scans</div></div>
+            <div class="v31-metric"><div class="v31-metric-value">${p ? _fmtNum(p.stats.sharpe) : "–"}</div><div class="v31-metric-label">OOS-Sharpe</div><div class="v32-sub">${p ? p.verdict.label : d.researchRunning ? "Test läuft" : "–"}</div></div>
+        </div>
+        ${d.positions.length ? `<div class="v32-rows">${d.positions.map((x) => `<div class="v32-row"><span class="v32-sym">${x.symbol.replace("/USDT", "")}</span><span class="v32-muted">${x.side === "long" ? "LONG" : "SHORT"}</span><span class="v32-grow num">${_fmtNum(x.entry, x.entry < 10 ? 4 : 2)} → ${_fmtNum(x.mark, x.mark < 10 ? 4 : 2)}</span><span class="num ${x.unrealized >= 0 ? "v32-pos" : "v32-neg"}">${x.unrealized >= 0 ? "+" : ""}${x.unrealized.toFixed(2)}</span></div>`).join("")}</div>` : ""}
+    `;
+}
+setTimeout(async () => {
+    if (await _proPollServer()) setInterval(_proPollServer, 30e3);
+}, 2000);
+
+function _proRenderAll() {
+    try {
+        _proEnsureCards();
+        _proRenderServer();
+        _proRenderStatus();
+        _proRenderTearSheet();
+        _proRenderMicro();
+        _proRenderSettings();
+        const v30 = document.getElementById("v30-preentry-card");
+        if (v30) v30.style.display = PRO.enabled ? "none" : "";
+    } catch (e) { console.warn("[v32] render", e); }
+}
+
+if (typeof renderAll === "function" && !renderAll._v32) {
+    const _v32Render = renderAll;
+    renderAll = function() {
+        _v32Render();
+        _proRenderAll();
+    };
+    renderAll._v32 = true;
+}
+setInterval(() => {
+    const pane = document.querySelector('[data-pane="markt"].active');
+    if (pane) _proRenderMicro();
+}, 3000);
+setTimeout(_proRenderAll, 1500);
+
+if (typeof INFO_DB === "object") {
+    INFO_DB["pro-engine"] = {
+        title: "Pro-Engine",
+        body: `<p>Eine einzige Signal-Pipeline für Backtest und Live. Korrelierte Indikatoren sind in Familien gebündelt (Trend, Breakout, Momentum, Mean-Reversion, Makro) und jede Familie zählt nur einmal. Das Regime (ADX) schaltet Trendfolger in Seitwärtsphasen ab und Mean-Reversion in Trends.</p>
+               <p>Jede Nacht prüft ein Walk-Forward-Test, ob das System auf jedem Symbol out-of-sample nach Kosten Geld verdient hätte. Nur dann gilt die Edge als validiert.</p>`,
+    };
+}
+
+setTimeout(() => {
+    if (typeof feedEvent === "function") feedEvent("info", `v32 Pro-Engine ${PRO.enabled ? "aktiv" : "aus"}: Live = Backtest · Kosten im Broker · Walk-Forward mit Deflated Sharpe · Orderbuch- und Funding-Kontrollen`);
+}, 6500);
 
 })();
