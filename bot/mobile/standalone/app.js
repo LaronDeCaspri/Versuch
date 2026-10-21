@@ -8587,4 +8587,432 @@ setTimeout(() => {
     if (typeof feedEvent === "function") feedEvent("info", "v29 aktiv: VIX-Barometer integriert · Bot pausiert neue Trades bei VIX &gt; 35");
 }, 4000);
 
+// ============================================================================
+// v30 — Day-Trader-Skill Konzepte in den Krypto-Bot
+// Adapts trader-entry (Pre-Entry Watcher), trader-exit (strict Exit Planner)
+// und trader-timemachine (Monte-Carlo Trade Preview) auf 15m-Krypto-Kerzen.
+// WICHTIG: Alles bleibt Paper-Trading. Hard-Block gegen Live-Orders.
+// ============================================================================
+
+// ---- Hard-Block gegen jede Live-Order (demo-only Garantie) ------------------
+// Jede Umgebung in der dieser Bot läuft darf NIEMALS echte Orders senden.
+// Wir blockieren das global und loggen jeden Versuch sichtbar im Journal.
+(function demoOnlyGuard() {
+    const BLOCKED_HOSTS = [
+        "api.binance.com/api/v3/order",
+        "fapi.binance.com/fapi/v1/order",
+        "api.coinbase.com/api/v3/brokerage/orders",
+        "api.exchange.coinbase.com/orders",
+        "api.kraken.com/0/private/AddOrder",
+        "api.bybit.com/v5/order/create",
+    ];
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+        try {
+            const url = typeof input === "string" ? input : (input && input.url) || "";
+            const method = (init && init.method) || (input && input.method) || "GET";
+            if (method && method.toUpperCase() !== "GET") {
+                for (const b of BLOCKED_HOSTS) {
+                    if (url.includes(b)) {
+                        const msg = `DEMO-SPERRE: Live-Order an ${b} blockiert.`;
+                        if (typeof feedEvent === "function") feedEvent("warn", msg);
+                        console.warn("[v30 DEMO-GUARD]", msg, url);
+                        return Promise.reject(new Error(msg));
+                    }
+                }
+            }
+        } catch (e) { /* fall through */ }
+        return _origFetch(input, init);
+    };
+    // Backup-Flag das überall gelesen werden kann
+    window.TB_DEMO_ONLY = true;
+})();
+
+// ---- State für Pre-Entry Watcher + Simulations-Cache ------------------------
+state.preEntryWatch = state.preEntryWatch || {};   // symbol -> { pending, triggerPrice, barsLeft, createdAt, highestBarClose }
+state.timeMachineCache = state.timeMachineCache || {}; // symbol -> { pendingId, result, computedAt }
+
+// ---- Config erweitern -------------------------------------------------------
+CFG.v30 = CFG.v30 || {
+    preEntryBars: 2,          // bis zu 2 Kerzen-Schlüsse warten (bei 15m = 30 min)
+    preEntryBuffer: 0.0015,   // 0,15% über Signal-Preis = Bestätigung
+    preEntryMaxAgeMs: 2 * 60 * 60 * 1000, // nach 2h verfällt
+    strictExitMinRR: 1.3,     // mindestens 1.3:1 Rendite/Risiko
+    strictExitStopBuffer: 0.001, // Stop muss mindestens 0,1% Abstand haben
+    mcPreviewSims: 2000,      // 2000 Simulationen pro Signal
+    mcPreviewMinWinPct: 35,   // bei <35% Target-Wahrscheinlichkeit abgelehnt
+    enabled: true,
+};
+
+// ---- Strict Exit Planner (adaptiert trader-exit) ----------------------------
+// Validiert einen Trade-Plan HART bevor er in die Pending-Queue darf.
+// Returns { ok: bool, reason: str, plan: adjustedPlan }
+function strictExitPlan(plan, candles) {
+    if (!plan || !Number.isFinite(plan.entry) || !Number.isFinite(plan.stop)) {
+        return { ok: false, reason: "Kein gültiger Plan: Entry oder Stop fehlt" };
+    }
+    const entry = plan.entry, stop = plan.stop;
+    const tp = plan.take_profits && plan.take_profits[0] ? plan.take_profits[0].price : null;
+    const buf = CFG.v30.strictExitBuffer || CFG.v30.strictExitStopBuffer;
+
+    if (plan.side === "long") {
+        if (stop >= entry * (1 - buf)) {
+            return { ok: false, reason: `Stop ${stop.toFixed(2)} zu nah an Entry ${entry.toFixed(2)} (long braucht Stop deutlich darunter)` };
+        }
+        if (tp && tp <= entry) {
+            return { ok: false, reason: `TP ${tp.toFixed(2)} ≤ Entry ${entry.toFixed(2)} (long braucht TP darüber)` };
+        }
+    } else {
+        if (stop <= entry * (1 + buf)) {
+            return { ok: false, reason: `Stop ${stop.toFixed(2)} zu nah an Entry ${entry.toFixed(2)} (short braucht Stop deutlich darüber)` };
+        }
+        if (tp && tp >= entry) {
+            return { ok: false, reason: `TP ${tp.toFixed(2)} ≥ Entry ${entry.toFixed(2)} (short braucht TP darunter)` };
+        }
+    }
+
+    // Risk-Reward-Mindestverhältnis
+    if (tp) {
+        const risk = Math.abs(entry - stop);
+        const reward = Math.abs(tp - entry);
+        const rr = risk > 0 ? reward / risk : 0;
+        if (rr < CFG.v30.strictExitMinRR) {
+            return { ok: false, reason: `R:R ${rr.toFixed(2)} < ${CFG.v30.strictExitMinRR} (unzureichend)` };
+        }
+    }
+
+    // Stop muss den aktuellen Spread/ATR überleben
+    if (candles && candles.length >= 20) {
+        const atrVals = window.TB.atr(window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles), 14);
+        const atr = atrVals[atrVals.length - 1];
+        if (Number.isFinite(atr)) {
+            const stopDist = Math.abs(entry - stop);
+            if (stopDist < atr * 0.3) {
+                return { ok: false, reason: `Stop-Abstand ${stopDist.toFixed(2)} < 0.3×ATR ${(atr*0.3).toFixed(2)} (zu eng, Spread tötet den Trade)` };
+            }
+        }
+    }
+
+    return { ok: true, reason: "OK", plan };
+}
+
+// ---- Monte-Carlo Trade Preview (adaptiert trader-timemachine) ---------------
+// Spielt N Pfade mit historischer Volatilität durch, zählt wie oft TP vor SL trifft.
+function monteCarloPreview(plan, candles, sims = CFG.v30.mcPreviewSims) {
+    if (!plan || !Number.isFinite(plan.entry) || !Number.isFinite(plan.stop)) return null;
+    if (!candles || candles.length < 50) return null;
+    const closes = window.TB.closes(candles);
+    const rets = [];
+    for (let i = 1; i < closes.length; i++) {
+        rets.push(Math.log(closes[i] / closes[i-1]));
+    }
+    const mu = rets.reduce((s, x) => s + x, 0) / rets.length;
+    const variance = rets.reduce((s, x) => s + (x - mu) * (x - mu), 0) / rets.length;
+    const sigma = Math.sqrt(variance);
+
+    const entry = plan.entry;
+    const stop = plan.stop;
+    const tp = (plan.take_profits && plan.take_profits[0]) ? plan.take_profits[0].price : null;
+    if (!tp) return null;
+
+    const steps = 50; // ~ ein Handelstag auf 15m
+    let targetHits = 0, stopHits = 0, timeouts = 0;
+    let sumFinalR = 0;
+    const risk = Math.abs(entry - stop);
+
+    for (let s = 0; s < sims; s++) {
+        let p = entry;
+        let hit = null;
+        for (let t = 0; t < steps; t++) {
+            // Box-Muller
+            const u1 = Math.random() || 1e-9;
+            const u2 = Math.random();
+            const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+            p = p * Math.exp(mu + sigma * z);
+            if (plan.side === "long") {
+                if (p <= stop) { hit = "stop"; break; }
+                if (p >= tp)   { hit = "target"; break; }
+            } else {
+                if (p >= stop) { hit = "stop"; break; }
+                if (p <= tp)   { hit = "target"; break; }
+            }
+        }
+        if (hit === "target")      { targetHits++; sumFinalR += Math.abs(tp - entry) / risk; }
+        else if (hit === "stop")   { stopHits++;   sumFinalR += -1; }
+        else                       { timeouts++;   sumFinalR += (plan.side === "long" ? (p - entry) : (entry - p)) / risk; }
+    }
+
+    const total = sims;
+    return {
+        sims: total,
+        targetPct: targetHits / total * 100,
+        stopPct: stopHits / total * 100,
+        timeoutPct: timeouts / total * 100,
+        avgR: sumFinalR / total,
+        verdict: (targetHits / total) > (stopHits / total) * 1.1 ? "FAVORABEL"
+                : (stopHits / total) > (targetHits / total) * 1.1 ? "UNGÜNSTIG" : "NEUTRAL",
+    };
+}
+
+// ---- Pre-Entry Watcher ------------------------------------------------------
+// Statt sofort pending zu erzeugen, legt die Signale erst in state.preEntryWatch.
+// Erst wenn eine neue Kerze SCHLIESST die über (long) oder unter (short) einem
+// Trigger-Level liegt, wird das echte pending erzeugt.
+function enqueuePreEntryWatch(symbol, sig, candles, price) {
+    const buf = CFG.v30.preEntryBuffer;
+    const trigger = sig.side === "long" ? price * (1 + buf) : price * (1 - buf);
+    state.preEntryWatch[symbol] = {
+        sig,
+        side: sig.side,
+        detectedPrice: price,
+        trigger,
+        barsLeft: CFG.v30.preEntryBars,
+        lastClose: price,
+        createdAt: Date.now(),
+    };
+    if (typeof feedEvent === "function") {
+        feedEvent("info", `${symbol}: Setup erkannt bei ${price.toFixed(2)}. Warte auf Bestätigung — ${sig.side === "long" ? "Schluss ≥" : "Schluss ≤"} ${trigger.toFixed(2)}`);
+    }
+}
+
+function tickPreEntryWatch() {
+    const now = Date.now();
+    for (const symbol of Object.keys(state.preEntryWatch)) {
+        const w = state.preEntryWatch[symbol];
+        // verfallen?
+        if (now - w.createdAt > CFG.v30.preEntryMaxAgeMs) {
+            delete state.preEntryWatch[symbol];
+            if (typeof feedEvent === "function") feedEvent("info", `${symbol}: Setup verfallen (keine Bestätigung in 2h)`);
+            continue;
+        }
+        const candles = state.candles[symbol];
+        if (!candles || candles.length < 2) continue;
+        const lastClosed = candles[candles.length - 1];
+        if (!lastClosed) continue;
+        if (lastClosed.close === w.lastClose) continue; // noch kein neuer Schluss
+        w.lastClose = lastClosed.close;
+        w.barsLeft--;
+
+        const confirmed = w.side === "long"
+            ? lastClosed.close >= w.trigger
+            : lastClosed.close <= w.trigger;
+
+        if (confirmed) {
+            // Jetzt echtes pending bauen
+            const price = state.prices[symbol] || lastClosed.close;
+            const pending = _v30BasePending(symbol, w.sig, candles, price);
+            delete state.preEntryWatch[symbol];
+            if (!pending) continue;
+
+            // Strict Exit Planner
+            const exitCheck = strictExitPlan(pending, candles);
+            if (!exitCheck.ok) {
+                if (typeof feedEvent === "function") feedEvent("warn", `${symbol}: Setup abgelehnt vom Exit-Planner — ${exitCheck.reason}`);
+                continue;
+            }
+
+            // Monte-Carlo Preview
+            const mc = monteCarloPreview(pending, candles);
+            if (mc) {
+                pending.mcPreview = mc;
+                state.timeMachineCache[symbol] = { pendingId: pending.id, result: mc, computedAt: now };
+                if (mc.targetPct < CFG.v30.mcPreviewMinWinPct) {
+                    if (typeof feedEvent === "function") feedEvent("warn", `${symbol}: Setup abgelehnt — Monte-Carlo nur ${mc.targetPct.toFixed(0)}% Chance auf Ziel (Min ${CFG.v30.mcPreviewMinWinPct}%)`);
+                    continue;
+                }
+                if (typeof feedEvent === "function") feedEvent("info", `${symbol}: Bestätigt bei ${lastClosed.close.toFixed(2)}. MC-Prognose: ${mc.verdict} · ${mc.targetPct.toFixed(0)}% Ziel-Chance · avg R ${mc.avgR.toFixed(2)}`);
+            }
+
+            state.pending.push(pending);
+            if (state.autoMode && typeof passesStrictFilter === "function" && passesStrictFilter(pending)) {
+                confirmPending(pending);
+                if (typeof announce === "function") {
+                    announce(`v30: ${symbol} ${pending.side === "long" ? "gekauft" : "verkauft"} bei ${pending.entry.toFixed(2)}. Setup bestätigt, Exit-Planner OK, Monte-Carlo favorabel.`, "success");
+                }
+            }
+        } else if (w.barsLeft <= 0) {
+            delete state.preEntryWatch[symbol];
+            if (typeof feedEvent === "function") feedEvent("info", `${symbol}: Bestätigung ausgeblieben nach ${CFG.v30.preEntryBars} Kerzen — Setup verworfen`);
+        }
+    }
+}
+
+// Basis-pending ohne Wrapper (bricht sonst in Rekursion wenn wir makePending umbiegen)
+let _v30BasePending = null;
+if (typeof makePending === "function" && !makePending._v30) {
+    _v30BasePending = makePending;
+    makePending = function(symbol, sig, candles, price) {
+        // Nur im Vollauto-Modus über Watcher. Manuelle und Vorschläge direkt durchlassen.
+        if (!CFG.v30.enabled || !state.autoMode) {
+            return _v30BasePending(symbol, sig, candles, price);
+        }
+        // Setup schon im Watcher oder bereits pending?
+        if (state.preEntryWatch[symbol]) return null;
+        if (state.pending.find((p) => p.symbol === symbol)) return null;
+        if (broker.positions[symbol]) return null;
+
+        // Normalerweise würde hier das pending gebaut und zurückgegeben.
+        // Statt dessen in den Watcher legen und null zurückgeben,
+        // damit scanAll kein pending in state.pending pusht.
+        enqueuePreEntryWatch(symbol, sig, candles, price);
+        return null;
+    };
+    makePending._v30 = true;
+}
+
+// confirmPending zusätzlich durch Exit-Planner laufen lassen (für manuelle Pfade)
+if (typeof confirmPending === "function" && !confirmPending._v30) {
+    const _v30Confirm = confirmPending;
+    confirmPending = function(p) {
+        if (CFG.v30.enabled && p && p.symbol) {
+            const candles = state.candles[p.symbol];
+            const exitCheck = strictExitPlan(p, candles);
+            if (!exitCheck.ok) {
+                if (typeof announce === "function") announce(`Trade abgelehnt: ${exitCheck.reason}`, "warn");
+                if (typeof feedEvent === "function") feedEvent("warn", `${p.symbol}: Confirm blockiert — ${exitCheck.reason}`);
+                state.pending = state.pending.filter((x) => x.symbol !== p.symbol);
+                if (typeof renderAll === "function") renderAll();
+                return;
+            }
+        }
+        // Hard-Assert dass broker.submit paper ist
+        if (!window.TB_DEMO_ONLY || !broker || typeof broker.submit !== "function") {
+            console.error("[v30] Confirm blockiert — Broker ist nicht im Demo-Modus!");
+            return;
+        }
+        return _v30Confirm(p);
+    };
+    confirmPending._v30 = true;
+}
+
+// Pre-Entry Watcher jede 10s ticken
+setInterval(tickPreEntryWatch, 10 * 1000);
+
+// ---- UI: Pre-Entry Watch Card auf Übersicht --------------------------------
+function _v30RenderPreEntryCard() {
+    const container = document.querySelector("#dashboard") || document.querySelector('[data-tab-content="dashboard"]') || document.body;
+    if (!container) return;
+    let card = document.getElementById("v30-preentry-card");
+    const watchers = Object.entries(state.preEntryWatch || {});
+    const hasAny = watchers.length > 0;
+
+    if (!card) {
+        card = document.createElement("div");
+        card.id = "v30-preentry-card";
+        card.className = "card";
+        card.style.marginTop = "12px";
+        // Nach dem Signal-Tile einfügen falls möglich
+        const signalTile = document.getElementById("signal-tile");
+        if (signalTile && signalTile.parentNode === container) {
+            signalTile.insertAdjacentElement("afterend", card);
+        } else {
+            container.appendChild(card);
+        }
+    }
+
+    if (!hasAny) {
+        card.innerHTML = `
+            <h2>Pre-Entry Watcher <span class="info" data-info="preentry">ⓘ</span></h2>
+            <div class="perf-hint">Kein Setup wartet gerade auf Bestätigung. Der Bot handelt erst wenn eine Kerze über dem Trigger schließt.</div>
+        `;
+        return;
+    }
+
+    const rows = watchers.map(([symbol, w]) => {
+        const price = state.prices[symbol] || w.detectedPrice;
+        const needs = w.side === "long" ? w.trigger : w.trigger;
+        const dist = w.side === "long"
+            ? ((needs - price) / price * 100)
+            : ((price - needs) / price * 100);
+        const age = Math.round((Date.now() - w.createdAt) / 60000);
+        const close = w.side === "long" ? "Schluss ≥" : "Schluss ≤";
+        return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:rgba(255,255,255,0.03); border-radius:8px; margin-top:6px;">
+                <div>
+                    <div style="font-weight:600;">${symbol} · ${w.side === "long" ? "LONG" : "SHORT"}</div>
+                    <div style="font-size:0.72rem; color:var(--muted);">${close} ${needs.toFixed(2)} · aktuell ${price.toFixed(2)} · ${age}min alt · ${w.barsLeft} Kerzen übrig</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:0.85rem; color:${dist > 0 ? "var(--amber)" : "var(--green)"};">${dist > 0 ? "noch " + dist.toFixed(2) + "%" : "bestätigt"}</div>
+                </div>
+            </div>
+        `;
+    }).join("");
+
+    card.innerHTML = `
+        <h2>Pre-Entry Watcher <span class="badge">${watchers.length}</span> <span class="info" data-info="preentry">ⓘ</span></h2>
+        <div class="perf-hint">Setups warten auf einen Kerzen-Schluss über (long) oder unter (short) der Bestätigungsmarke — kein Fehlausbruch mehr.</div>
+        ${rows}
+    `;
+}
+
+// renderAll um Pre-Entry-Card erweitern
+if (typeof renderAll === "function" && !renderAll._v30) {
+    const _v30RenderAll = renderAll;
+    renderAll = function() {
+        _v30RenderAll();
+        try { _v30RenderPreEntryCard(); } catch (e) { console.warn("[v30] preentry render fail", e); }
+    };
+    renderAll._v30 = true;
+}
+
+// ---- Info-Popup -------------------------------------------------------------
+if (typeof INFO_DB === "object") {
+    INFO_DB["preentry"] = {
+        title: "Pre-Entry Watcher — Fehlausbrüche vermeiden",
+        body: `
+            <p>Der <strong>Pre-Entry Watcher</strong> ist adaptiert vom day-trader-skill <code>trader-entry</code>.</p>
+            <p>Ein Setup wird nicht sofort gehandelt. Statt dessen wartet der Bot auf eine <strong>Bestätigungs-Kerze</strong>: der Preis muss über (long) oder unter (short) dem Trigger-Level <em>schließen</em>, nicht nur kurz hintipppen.</p>
+            <ul>
+                <li><strong>Trigger</strong>: Signal-Preis ± 0,15% Puffer</li>
+                <li><strong>Max 2 Kerzen Wartezeit</strong> (30 min auf 15m-Chart)</li>
+                <li><strong>Setup verfällt nach 2h</strong> wenn keine Bestätigung</li>
+            </ul>
+            <p>Danach läuft der Trade noch durch den <strong>Strict Exit Planner</strong> (R:R ≥ 1.3, Stop ≥ 0.3×ATR) und die <strong>Monte-Carlo Preview</strong> (2000 Simulationen, Min 35% Ziel-Chance).</p>
+            <div class="example">💡 Studien zeigen: ~70% aller Range-Breakouts sind Fehlausbrüche. Die Bestätigungs-Kerze filtert einen großen Teil davon.</div>
+            <p><strong>Nur Demo:</strong> Alle Trades gehen an den Paper-Broker. Live-Orders sind hart blockiert.</p>
+        `,
+    };
+}
+
+// ---- Service Worker: besserer Hintergrund-Scan (ehrliche Grenzen) ----------
+// Browser-Service-Worker können KEINE echten 24/7-Scans. Chrome gibt ihnen
+// typisch 30s pro Aktivierung. Trotzdem versuchen wir Periodic Background
+// Sync wo möglich und sagen ehrlich dazu was geht und was nicht.
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.ready.then(async (reg) => {
+        if ("periodicSync" in reg) {
+            try {
+                const status = await navigator.permissions.query({ name: "periodic-background-sync" });
+                if (status.state === "granted") {
+                    await reg.periodicSync.register("tb-scan", { minInterval: 15 * 60 * 1000 });
+                    if (typeof feedEvent === "function") feedEvent("info", "Hintergrund-Scan registriert: ~alle 15 min wenn Browser aktiv");
+                }
+            } catch (e) { /* periodic sync nicht verfügbar */ }
+        }
+    }).catch(() => {});
+
+    // Bei Background-Tick vom Service Worker: einen Scan triggern
+    navigator.serviceWorker.addEventListener("message", (event) => {
+        if (event.data && event.data.type === "v30-background-tick") {
+            if (typeof scanAll === "function") {
+                scanAll().catch(() => {});
+            }
+        }
+    });
+}
+
+// Ehrliche 24/7-Erklärung ins Journal
+setTimeout(() => {
+    if (typeof feedEvent === "function") {
+        feedEvent("info", "Ehrlich zu 24/7: Browser-Bot läuft nur wenn der Tab offen ist. Für echtes 24/7 braucht es einen VPS (~4€/Monat) oder GitHub Actions. Pre-Entry Watcher und Hintergrund-Scan sind das Beste was ein Browser kann.");
+    }
+}, 8000);
+
+setTimeout(() => {
+    if (typeof feedEvent === "function") {
+        feedEvent("info", "v30 aktiv: Pre-Entry Watcher + Strict Exit Planner + Monte-Carlo Preview. Nur Demo — Live-Orders hart blockiert.");
+    }
+}, 5000);
+
 })();

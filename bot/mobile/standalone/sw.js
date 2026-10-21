@@ -1,4 +1,4 @@
-const CACHE = "trading-bot-standalone-v2";
+const CACHE = "trading-bot-standalone-v3";
 const ASSETS = ["./", "./app.css", "./app.js", "./lib.js", "./jarvis.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -16,8 +16,31 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
     const url = new URL(e.request.url);
     // Never cache API calls (Binance, F&G, etc.)
-    if (/binance\.com|alternative\.me|tradingview\.com/.test(url.hostname)) return;
+    if (/binance\.com|alternative\.me|tradingview\.com|yahoo\.com|stooq\.com|allorigins\.win|frankfurter\.app|exchangerate\.host|open\.er-api\.com|financialmodelingprep\.com/.test(url.hostname)) return;
     e.respondWith(
         caches.match(e.request).then((r) => r || fetch(e.request).catch(() => caches.match("./")))
     );
+});
+
+// v30: Periodic Background Sync — Browser gibt uns typisch ~30s pro Aktivierung
+// alle 15 min. Das ist kein echtes 24/7, aber hilft wenn Tab im Hintergrund läuft.
+self.addEventListener("periodicsync", (event) => {
+    if (event.tag === "tb-scan") {
+        event.waitUntil((async () => {
+            try {
+                // Wecke alle offenen Clients auf damit sie scannen
+                const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+                for (const client of clients) {
+                    client.postMessage({ type: "v30-background-tick", at: Date.now() });
+                }
+            } catch (e) { /* ignore */ }
+        })());
+    }
+});
+
+// Message vom Client für Debug/Trigger
+self.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "ping") {
+        event.source && event.source.postMessage({ type: "pong", at: Date.now() });
+    }
 });
