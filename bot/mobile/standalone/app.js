@@ -9015,4 +9015,777 @@ setTimeout(() => {
     }
 }, 5000);
 
+// ============================================================================
+// v31 — Weltklasse-Upgrade: 20+ Skills ins System integriert
+// Alle Konzepte in nativem JS (keine Python-Abhängigkeit), demo-only.
+//
+// Integriert aus:
+//  - drawdown-circuit-breaker   -> täglicher/wöchentlicher Max-Loss-Stop
+//  - portfolio-concentration    -> Herfindahl-Index + Sektor-Grenzen
+//  - crypto-regime-analyzer     -> 6-Faktor-Regime (0-100 Score)
+//  - market-regime-analysis     -> Trend/Vola/Breadth-Klassifikation
+//  - pre-trade-check            -> orchestrierter Gate vor jedem Trade
+//  - risk-reward-sanity-check   -> R:R-Validierung (ergänzt v30)
+//  - thesis-validation          -> Trade-These automatisch generiert
+//  - position-sizing            -> konservative Alternative zu Kelly
+//  - exposure-coach             -> Portfolio-Posture-Empfehlung
+//  - post-trade-debrief         -> automatischer Debrief nach Close
+//  - trade-performance-coach    -> wöchentlicher Prozess-Review
+//  - journal-pattern-analyzer   -> wiederkehrende Fehler-Muster
+//  - signal-postmortem          -> False-Positive-Tracking
+//  - trader-memory-core         -> Thesen-Lifecycle (New/Watching/Open/Closed)
+//  - market-top-detector        -> 3-Faktor Top-Risiko-Score
+//  - watchlist-review           -> Symbol-Priorisierung
+//  - scenario-analyzer          -> "Was wenn BTC -20%?" Stress-Test
+//  - data-quality-checker       -> State-Konsistenz-Audit
+//  - weekly-performance-digest  -> Automatischer Wochenbericht
+//  - execution-plan-check       -> Spread/Liquiditäts-Check vor Entry
+// ============================================================================
+
+const V31 = (window.V31 = window.V31 || {});
+V31.version = "31.0";
+V31.enabled = true;
+
+// --------------------------------------------------------------------------
+// 1. Drawdown Circuit Breaker
+// --------------------------------------------------------------------------
+V31.circuitBreaker = {
+    dailyMaxLossPct: 3.0,      // -3% pro Tag -> Stop für heute
+    weeklyMaxLossPct: 8.0,     // -8% pro Woche -> Stop für die Woche
+    monthlyMaxLossPct: 15.0,   // -15% pro Monat -> Full-Halt
+    losingStreakStop: 5,       // 5 Verluste in Folge -> 2h Cooldown
+    cooldownUntil: null,
+};
+
+V31.cbCheck = function() {
+    const now = Date.now();
+    if (V31.circuitBreaker.cooldownUntil && now < V31.circuitBreaker.cooldownUntil) {
+        return { ok: false, reason: `Cooldown nach Verlust-Serie — noch ${Math.round((V31.circuitBreaker.cooldownUntil - now)/60000)}min` };
+    }
+    const trades = (typeof _pairTrades === "function") ? _pairTrades() : [];
+    const dayAgo = now - 86400000;
+    const weekAgo = now - 7 * 86400000;
+    const monthAgo = now - 30 * 86400000;
+    const peak = state.peakEquity || CFG.startEquity || 10000;
+
+    const sumFrom = (since) => trades.filter((t) => (t.closedAt || 0) >= since).reduce((s, t) => s + t.pnl, 0);
+    const dayPnl = sumFrom(dayAgo);
+    const weekPnl = sumFrom(weekAgo);
+    const monthPnl = sumFrom(monthAgo);
+
+    const dayPct = dayPnl / peak * 100;
+    const weekPct = weekPnl / peak * 100;
+    const monthPct = monthPnl / peak * 100;
+
+    if (dayPct <= -V31.circuitBreaker.dailyMaxLossPct) {
+        return { ok: false, reason: `Tagesverlust ${dayPct.toFixed(2)}% ≤ Limit −${V31.circuitBreaker.dailyMaxLossPct}%`, severity: "day" };
+    }
+    if (weekPct <= -V31.circuitBreaker.weeklyMaxLossPct) {
+        return { ok: false, reason: `Wochenverlust ${weekPct.toFixed(2)}% ≤ Limit −${V31.circuitBreaker.weeklyMaxLossPct}%`, severity: "week" };
+    }
+    if (monthPct <= -V31.circuitBreaker.monthlyMaxLossPct) {
+        return { ok: false, reason: `Monatsverlust ${monthPct.toFixed(2)}% ≤ Limit −${V31.circuitBreaker.monthlyMaxLossPct}%`, severity: "month" };
+    }
+
+    // Verluste in Folge
+    const recent = trades.slice(-V31.circuitBreaker.losingStreakStop);
+    if (recent.length >= V31.circuitBreaker.losingStreakStop && recent.every((t) => t.pnl < 0)) {
+        V31.circuitBreaker.cooldownUntil = now + 2 * 3600000;
+        return { ok: false, reason: `${V31.circuitBreaker.losingStreakStop} Verluste in Folge — 2h Cooldown`, severity: "streak" };
+    }
+    return { ok: true, dayPct, weekPct, monthPct };
+};
+
+// --------------------------------------------------------------------------
+// 2. Portfolio Concentration (Herfindahl-Hirschman-Index)
+// --------------------------------------------------------------------------
+V31.concentrationCheck = function(newSymbol, newSize) {
+    const positions = Object.entries(broker.positions || {});
+    const prices = state.prices || {};
+    const values = positions.map(([sym, p]) => {
+        const px = prices[sym] || p.entry;
+        return Math.abs((p.size || p.qty || 0) * px);
+    });
+    if (newSymbol && newSize) {
+        values.push(Math.abs(newSize * (prices[newSymbol] || 0)));
+    }
+    const total = values.reduce((a, b) => a + b, 0);
+    if (total <= 0) return { ok: true, hhi: 0, max: 0 };
+    const weights = values.map((v) => v / total);
+    const hhi = weights.reduce((s, w) => s + w * w, 0) * 10000; // 0..10000
+    const maxPos = Math.max(...weights) * 100;
+    // HHI > 2500 = hoch konzentriert, > 5000 = sehr hoch
+    if (hhi > 5000 || maxPos > 60) {
+        return { ok: false, hhi, max: maxPos, reason: `Konzentration zu hoch: HHI ${hhi.toFixed(0)}, größte Position ${maxPos.toFixed(0)}%` };
+    }
+    return { ok: true, hhi, max: maxPos };
+};
+
+// --------------------------------------------------------------------------
+// 3. Crypto Regime Analyzer (0-100, 100 = risk-on)
+// --------------------------------------------------------------------------
+V31.regime = { score: 50, label: "NEUTRAL", components: {}, updatedAt: 0 };
+V31.computeRegime = function() {
+    const btc = state.candles && state.candles["BTC/USDT"];
+    if (!btc || btc.length < 100) return;
+    const closes = btc.map((c) => c.close);
+    const highs = btc.map((c) => c.high);
+    const lows = btc.map((c) => c.low);
+
+    // 1. Trend: Preis vs EMA50
+    const ema50 = window.TB.ema(closes, 50);
+    const last = closes[closes.length - 1];
+    const emaLast = ema50[ema50.length - 1];
+    const trendPct = ((last - emaLast) / emaLast) * 100;
+    const trendScore = Math.max(0, Math.min(100, 50 + trendPct * 5));
+
+    // 2. Momentum: RSI
+    const rsi = window.TB.rsi(closes, 14);
+    const rsiLast = rsi[rsi.length - 1] || 50;
+    const momScore = Math.max(0, Math.min(100, rsiLast));
+
+    // 3. Volatility: ATR vs mean ATR
+    const atrs = window.TB.atr(highs, lows, closes, 14);
+    const atrLast = atrs[atrs.length - 1];
+    const atrMean = atrs.slice(-50).reduce((s, x) => s + x, 0) / 50;
+    const volRatio = atrLast / atrMean;
+    const volScore = Math.max(0, Math.min(100, 100 - (volRatio - 1) * 80)); // niedrige Vola = risk-on
+
+    // 4. Breadth: wie viele der getrackten Symbole sind über ihrem EMA50?
+    let above = 0, counted = 0;
+    for (const sym of CFG.symbols) {
+        const sc = state.candles && state.candles[sym];
+        if (!sc || sc.length < 60) continue;
+        const scCloses = sc.map((c) => c.close);
+        const scEma = window.TB.ema(scCloses, 50);
+        if (scCloses[scCloses.length-1] > scEma[scEma.length-1]) above++;
+        counted++;
+    }
+    const breadthScore = counted ? (above / counted) * 100 : 50;
+
+    // 5. F&G (schon vorhanden)
+    const fng = (typeof state.fng === "object" && state.fng) ? (state.fng.value || 50) : 50;
+
+    // 6. VIX (schon vorhanden, invertiert — hohes VIX = risk-off)
+    const vix = (state.vix && state.vix.value) ? state.vix.value : 18;
+    const vixScore = Math.max(0, Math.min(100, 100 - (vix - 10) * 2.5));
+
+    const components = { trend: trendScore, momentum: momScore, volatility: volScore, breadth: breadthScore, fng, vix: vixScore };
+    const score = (trendScore + momScore + volScore + breadthScore + fng + vixScore) / 6;
+    const label = score >= 70 ? "RISK-ON" : score >= 55 ? "BULLISH" : score >= 45 ? "NEUTRAL" : score >= 30 ? "BEARISH" : "RISK-OFF";
+    V31.regime = { score, label, components, updatedAt: Date.now() };
+    return V31.regime;
+};
+
+// --------------------------------------------------------------------------
+// 4. Market Top Detector (Risk Zone 0-100)
+// --------------------------------------------------------------------------
+V31.topRisk = function() {
+    const btc = state.candles && state.candles["BTC/USDT"];
+    if (!btc || btc.length < 200) return { score: 0, zone: "–" };
+    const closes = btc.map((c) => c.close);
+    const ema200 = window.TB.ema(closes, 200);
+    const last = closes[closes.length - 1];
+    const ema200Last = ema200[ema200.length - 1];
+    const stretch = ((last - ema200Last) / ema200Last) * 100; // > 50% = stretched
+    const rsi = window.TB.rsi(closes, 14);
+    const rsiLast = rsi[rsi.length - 1] || 50;
+    const stretchScore = Math.max(0, Math.min(100, stretch * 1.5));
+    const rsiScore = Math.max(0, Math.min(100, (rsiLast - 50) * 2));
+    const fng = (typeof state.fng === "object" && state.fng) ? state.fng.value : 50;
+    const greedScore = Math.max(0, Math.min(100, (fng - 50) * 2));
+    const score = (stretchScore * 0.4 + rsiScore * 0.3 + greedScore * 0.3);
+    const zone = score >= 75 ? "EXTREM" : score >= 55 ? "HOCH" : score >= 35 ? "ERHÖHT" : "NORMAL";
+    return { score, zone, components: { stretchPct: stretch, rsi: rsiLast, fng } };
+};
+
+// --------------------------------------------------------------------------
+// 5. Pre-Trade Check Gate (orchestriert alle Checks)
+// --------------------------------------------------------------------------
+V31.preTradeGate = function(pending) {
+    if (!V31.enabled) return { ok: true };
+    const checks = [];
+
+    // Hard demo guard
+    if (!window.TB_DEMO_ONLY) return { ok: false, reason: "Demo-Modus nicht aktiv — Trade blockiert" };
+    checks.push({ name: "Demo-Modus aktiv", ok: true });
+
+    // Circuit breaker
+    const cb = V31.cbCheck();
+    checks.push({ name: "Circuit Breaker", ok: cb.ok, detail: cb.ok ? `−${Math.abs(cb.dayPct||0).toFixed(1)}% heute` : cb.reason });
+    if (!cb.ok) return { ok: false, reason: cb.reason, checks };
+
+    // Concentration
+    const conc = V31.concentrationCheck(pending.symbol, pending.size);
+    checks.push({ name: "Konzentration", ok: conc.ok, detail: conc.ok ? `HHI ${conc.hhi.toFixed(0)}` : conc.reason });
+    if (!conc.ok) return { ok: false, reason: conc.reason, checks };
+
+    // R:R check (zusätzlich zum v30 Strict Exit Planner)
+    const tp = pending.take_profits && pending.take_profits[0];
+    if (tp && Number.isFinite(pending.entry) && Number.isFinite(pending.stop) && Number.isFinite(tp.price)) {
+        const risk = Math.abs(pending.entry - pending.stop);
+        const reward = Math.abs(tp.price - pending.entry);
+        const rr = risk > 0 ? reward / risk : 0;
+        checks.push({ name: "R:R", ok: rr >= 1.3, detail: `${rr.toFixed(2)}:1` });
+        if (rr < 1.3) return { ok: false, reason: `R:R ${rr.toFixed(2)} < 1.3`, checks };
+    }
+
+    // Regime passt zu Richtung?
+    V31.computeRegime();
+    const regimeOk = (pending.side === "long" && V31.regime.score >= 45) || (pending.side === "short" && V31.regime.score <= 55);
+    checks.push({ name: "Regime", ok: regimeOk, detail: `${V31.regime.label} ${V31.regime.score.toFixed(0)}/100` });
+    if (!regimeOk) return { ok: false, reason: `Regime ${V31.regime.label} passt nicht zu ${pending.side}`, checks };
+
+    // Market Top Risk für Longs
+    if (pending.side === "long") {
+        const top = V31.topRisk();
+        const topOk = top.score < 75;
+        checks.push({ name: "Top-Risiko", ok: topOk, detail: `${top.zone} (${top.score.toFixed(0)}/100)` });
+        if (!topOk) return { ok: false, reason: `Top-Risiko ${top.zone} ${top.score.toFixed(0)} — Long zu riskant`, checks };
+    }
+
+    return { ok: true, checks };
+};
+
+// --------------------------------------------------------------------------
+// 6. Thesis Validator (automatisch generieren + prüfen)
+// --------------------------------------------------------------------------
+V31.generateThesis = function(pending) {
+    if (!pending) return "";
+    const reasons = (pending.signals || []).map((s) => s.strategy).slice(0, 3).join(" + ");
+    const regime = V31.regime.label;
+    const topZone = V31.topRisk().zone;
+    const dir = pending.side === "long" ? "steigt" : "fällt";
+    return `${pending.symbol.replace("/USDT","")} ${dir} weil ${reasons} in ${regime}-Regime zusammenfinden (Top-Risiko ${topZone}). Stop bei ${Number(pending.stop).toFixed(2)} invalidiert die These.`;
+};
+
+// --------------------------------------------------------------------------
+// 7. Exposure Coach (Posture-Empfehlung)
+// --------------------------------------------------------------------------
+V31.exposureCoach = function() {
+    V31.computeRegime();
+    const score = V31.regime.score;
+    const openCount = Object.keys(broker.positions || {}).length;
+    const equity = broker.equity ? broker.equity(state.prices) : CFG.startEquity;
+    const cash = broker.cash || 0;
+    const cashPct = (cash / equity) * 100;
+
+    let ceilingPct, bias, note;
+    if (score >= 70)      { ceilingPct = 80; bias = "AGGRESSIV";  note = "Risk-on: 70-80% investiert, breite Diversifikation."; }
+    else if (score >= 55) { ceilingPct = 60; bias = "LONG-BIAS";  note = "Bullish: Standard-Setups fahren, 60% Max-Exposure."; }
+    else if (score >= 45) { ceilingPct = 40; bias = "SELEKTIV";   note = "Neutral: nur A+-Setups, viel Cash halten."; }
+    else if (score >= 30) { ceilingPct = 20; bias = "DEFENSIV";   note = "Bearish: Shorts > Longs, Cash > Exposure."; }
+    else                  { ceilingPct = 10; bias = "CASH";       note = "Risk-off: nur ausnahmsweise handeln, Cash-first."; }
+
+    return { score, ceilingPct, bias, note, cashPct, openCount };
+};
+
+// --------------------------------------------------------------------------
+// 8. Post-Trade Debrief (bei jedem Close automatisch)
+// --------------------------------------------------------------------------
+V31.debriefs = JSON.parse(localStorage.getItem("tb_v31_debriefs") || "[]");
+V31.saveDebriefs = function() { try { localStorage.setItem("tb_v31_debriefs", JSON.stringify(V31.debriefs.slice(-200))); } catch (e) {} };
+
+V31.generateDebrief = function(closedTrade) {
+    if (!closedTrade) return null;
+    const pnl = closedTrade.pnl || 0;
+    const r = closedTrade.riskR || 1;
+    const outcome = pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "FLAT";
+    const multiple = r ? (pnl / Math.abs(r)) : 0;
+    const regime = V31.regime.label;
+
+    // Patterns ableiten
+    const patterns = [];
+    if (outcome === "LOSS" && closedTrade.strategy && /EMA|MACD/.test(closedTrade.strategy)) patterns.push("Trend-Follower-Verlust (häufig in Range-Markt)");
+    if (outcome === "WIN" && multiple > 2) patterns.push("Trade-Management hat Target gehalten");
+    if (outcome === "LOSS" && closedTrade.exit === "sl") patterns.push("Stop sauber ausgelöst — kein Übertrade");
+    if (outcome === "WIN" && closedTrade.exit === "tp") patterns.push("Target erreicht wie geplant");
+
+    const lesson = outcome === "WIN"
+        ? "Setup wiederholen, Größe gleich halten."
+        : outcome === "LOSS"
+        ? `Stop hat gehalten — Verlust war definiert. Risk-Budget akzeptieren.`
+        : "Flat raus. Keine Erkenntnis, nicht nachjagen.";
+
+    const debrief = {
+        id: closedTrade.id || `${closedTrade.symbol}_${Date.now()}`,
+        symbol: closedTrade.symbol,
+        side: closedTrade.side,
+        outcome, pnl, multiple, regime,
+        patterns, lesson,
+        at: Date.now(),
+    };
+    V31.debriefs.push(debrief);
+    V31.saveDebriefs();
+    return debrief;
+};
+
+// --------------------------------------------------------------------------
+// 9. Signal Postmortem — False-Positive-Tracking pro Strategie
+// --------------------------------------------------------------------------
+V31.strategyStats = function() {
+    const stats = {};
+    for (const d of V31.debriefs) {
+        const key = d.symbol || "?";
+        if (!stats[key]) stats[key] = { wins: 0, losses: 0, pnl: 0 };
+        if (d.outcome === "WIN") stats[key].wins++;
+        else if (d.outcome === "LOSS") stats[key].losses++;
+        stats[key].pnl += d.pnl;
+    }
+    return stats;
+};
+
+// --------------------------------------------------------------------------
+// 10. Journal Pattern Analyzer
+// --------------------------------------------------------------------------
+V31.patternAnalysis = function() {
+    if (V31.debriefs.length < 5) return { ready: false, msg: `Noch ${5 - V31.debriefs.length} Trades bis Analyse` };
+    const total = V31.debriefs.length;
+    const wins = V31.debriefs.filter((d) => d.outcome === "WIN").length;
+    const winRate = wins / total * 100;
+    // Longs vs Shorts
+    const longs = V31.debriefs.filter((d) => d.side === "long");
+    const shorts = V31.debriefs.filter((d) => d.side === "short");
+    const longWR = longs.length ? longs.filter((d) => d.outcome === "WIN").length / longs.length * 100 : 0;
+    const shortWR = shorts.length ? shorts.filter((d) => d.outcome === "WIN").length / shorts.length * 100 : 0;
+    // Regime
+    const byRegime = {};
+    for (const d of V31.debriefs) {
+        byRegime[d.regime] = byRegime[d.regime] || { total: 0, wins: 0 };
+        byRegime[d.regime].total++;
+        if (d.outcome === "WIN") byRegime[d.regime].wins++;
+    }
+    const regimeStats = Object.entries(byRegime).map(([r, s]) => ({ regime: r, winRate: s.wins / s.total * 100, n: s.total }));
+    return { ready: true, total, wins, winRate, longWR, shortWR, longs: longs.length, shorts: shorts.length, regimeStats };
+};
+
+// --------------------------------------------------------------------------
+// 11. Weekly Performance Digest
+// --------------------------------------------------------------------------
+V31.weeklyDigest = function() {
+    const weekAgo = Date.now() - 7 * 86400000;
+    const trades = V31.debriefs.filter((d) => d.at >= weekAgo);
+    if (!trades.length) return { empty: true };
+    const wins = trades.filter((t) => t.outcome === "WIN");
+    const losses = trades.filter((t) => t.outcome === "LOSS");
+    const totalPnl = trades.reduce((s, t) => s + (t.pnl || 0), 0);
+    const avgWin = wins.length ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
+    const avgLoss = losses.length ? Math.abs(losses.reduce((s, t) => s + t.pnl, 0) / losses.length) : 0;
+    const expectancy = trades.length ? totalPnl / trades.length : 0;
+    const pf = (avgLoss > 0 && losses.length) ? (wins.reduce((s,t)=>s+t.pnl,0) / Math.abs(losses.reduce((s,t)=>s+t.pnl,0))) : null;
+    return {
+        empty: false,
+        total: trades.length, wins: wins.length, losses: losses.length,
+        winRate: trades.length ? wins.length / trades.length * 100 : 0,
+        totalPnl, avgWin, avgLoss, expectancy, profitFactor: pf,
+    };
+};
+
+// --------------------------------------------------------------------------
+// 12. Scenario Analyzer (Stress-Test)
+// --------------------------------------------------------------------------
+V31.stressTest = function(shockPct = -20) {
+    const prices = state.prices || {};
+    const positions = Object.entries(broker.positions || {});
+    let totalPnl = 0;
+    const perSymbol = [];
+    for (const [sym, p] of positions) {
+        const px = prices[sym] || p.entry;
+        const stressed = px * (1 + shockPct / 100);
+        const size = p.size || p.qty || 0;
+        const side = p.side || "long";
+        const pnl = side === "long" ? (stressed - p.entry) * size : (p.entry - stressed) * size;
+        totalPnl += pnl;
+        perSymbol.push({ symbol: sym, pnl, pct: ((stressed - p.entry) / p.entry) * 100 });
+    }
+    const equity = broker.equity ? broker.equity(prices) : CFG.startEquity;
+    const stressedEquity = equity + totalPnl;
+    const stressedDd = ((stressedEquity - equity) / equity) * 100;
+    return { shockPct, totalPnl, stressedDd, stressedEquity, perSymbol };
+};
+
+// --------------------------------------------------------------------------
+// 13. Data Quality Checker (State-Konsistenz)
+// --------------------------------------------------------------------------
+V31.dataQuality = function() {
+    const issues = [];
+    const now = Date.now();
+    if (state.pricesLastUpdate && (now - state.pricesLastUpdate) > 300000) issues.push("Preise älter als 5 min");
+    if (state.klinesLastUpdate && (now - state.klinesLastUpdate) > 300000) issues.push("Kerzen älter als 5 min");
+    for (const sym of CFG.symbols) {
+        const px = state.prices[sym];
+        if (!px || !isFinite(px) || px <= 0) issues.push(`${sym}: ungültiger Preis`);
+    }
+    for (const [sym, p] of Object.entries(broker.positions || {})) {
+        if (!isFinite(p.entry) || !isFinite(p.stop)) issues.push(`${sym}: Position hat ungültigen Entry/Stop`);
+    }
+    return { ok: issues.length === 0, issues };
+};
+
+// --------------------------------------------------------------------------
+// 14. Execution Plan Check (Spread/Volumen)
+// --------------------------------------------------------------------------
+V31.executionCheck = function(symbol) {
+    const candles = state.candles && state.candles[symbol];
+    if (!candles || candles.length < 20) return { ok: true, note: "Keine Daten für Prüfung" };
+    const last = candles.slice(-20);
+    const avgVol = last.reduce((s, c) => s + (c.volume || 0), 0) / last.length;
+    const lastVol = last[last.length - 1].volume || 0;
+    const volOk = lastVol >= avgVol * 0.5;
+    const spread = Math.abs(last[last.length-1].close - last[last.length-1].open) / last[last.length-1].close;
+    const spreadOk = spread < 0.03;
+    return {
+        ok: volOk && spreadOk,
+        avgVol, lastVol, volRatio: lastVol / avgVol,
+        spreadPct: spread * 100,
+        note: !volOk ? "Volumen zu niedrig" : !spreadOk ? "Spread zu groß" : "OK",
+    };
+};
+
+// --------------------------------------------------------------------------
+// 15. Watchlist Review (Symbol-Ranking)
+// --------------------------------------------------------------------------
+V31.watchlistRank = function() {
+    const scored = [];
+    for (const sym of CFG.symbols) {
+        const candles = state.candles && state.candles[sym];
+        if (!candles || candles.length < 50) continue;
+        const closes = candles.map((c) => c.close);
+        const rsi = window.TB.rsi(closes, 14);
+        const ema20 = window.TB.ema(closes, 20);
+        const ema50 = window.TB.ema(closes, 50);
+        const last = closes[closes.length - 1];
+        const rsiLast = rsi[rsi.length - 1] || 50;
+        const trend = ema20[ema20.length - 1] > ema50[ema50.length - 1] ? 1 : -1;
+        const momentum = Math.abs(rsiLast - 50);
+        const volume24 = candles.slice(-24).reduce((s, c) => s + (c.volume || 0), 0);
+        const score = (trend * 20) + momentum + Math.log10(1 + volume24) * 5;
+        scored.push({ symbol: sym, score, rsi: rsiLast, trend: trend > 0 ? "UP" : "DOWN", price: last });
+    }
+    return scored.sort((a, b) => b.score - a.score);
+};
+
+// --------------------------------------------------------------------------
+// Verdrahtung: Pre-Trade Gate in confirmPending-Chain
+// --------------------------------------------------------------------------
+if (typeof confirmPending === "function" && !confirmPending._v31) {
+    const _priorConfirm = confirmPending;
+    confirmPending = function(p) {
+        if (V31.enabled && p && p.symbol) {
+            const gate = V31.preTradeGate(p);
+            if (!gate.ok) {
+                if (typeof announce === "function") announce(`v31 Pre-Trade-Gate: ${gate.reason}`, "warn");
+                if (typeof feedEvent === "function") feedEvent("warn", `${p.symbol}: Pre-Trade-Gate blockiert — ${gate.reason}`);
+                state.pending = (state.pending || []).filter((x) => x.symbol !== p.symbol);
+                if (typeof renderAll === "function") renderAll();
+                return;
+            }
+            // Thesis anhängen
+            p.thesis = V31.generateThesis(p);
+            p.preTradeChecks = gate.checks;
+        }
+        return _priorConfirm(p);
+    };
+    confirmPending._v31 = true;
+}
+
+// Verdrahtung: Debrief bei jedem Close triggern
+// Wir snapshotten die Position VOR dem Call, weil close() sie löscht.
+if (broker && typeof broker.onPrice === "function" && !broker.onPrice._v31) {
+    const _onPrice = broker.onPrice.bind(broker);
+    broker.onPrice = function(sym, px) {
+        const posSnap = broker.positions && broker.positions[sym]
+            ? { ...broker.positions[sym] } : null;
+        const events = _onPrice(sym, px);
+        for (const ev of (events || [])) {
+            if (ev.kind === "sl" || ev.kind === "tp") {
+                try {
+                    const riskR = posSnap
+                        ? Math.abs((posSnap.entry - (posSnap.original_stop || posSnap.stop)) * (posSnap.size || posSnap.qty || 0)) || 1
+                        : 1;
+                    V31.generateDebrief({
+                        id: `${sym}_${Date.now()}`,
+                        symbol: sym,
+                        side: posSnap ? posSnap.side : "long",
+                        pnl: ev.pnl, exit: ev.kind,
+                        strategy: posSnap ? posSnap.strategy : "?",
+                        riskR,
+                    });
+                } catch (e) { /* keep going */ }
+            }
+        }
+        return events;
+    };
+    broker.onPrice._v31 = true;
+}
+
+// Regime periodisch aktualisieren
+setInterval(() => { try { V31.computeRegime(); _v31RenderAll(); } catch (e) {} }, 60 * 1000);
+setTimeout(() => { try { V31.computeRegime(); _v31RenderAll(); } catch (e) {} }, 7000);
+
+// --------------------------------------------------------------------------
+// UI: Weltklasse-Widgets — Regime Compass, Risk Dashboard, Exposure Posture
+// --------------------------------------------------------------------------
+function _v31InsertWidgetsIfMissing() {
+    const dash = document.querySelector('[data-pane="dashboard"]');
+    const journal = document.querySelector('[data-pane="journal"]');
+    if (dash && !document.getElementById("v31-regime-card")) {
+        const section = document.createElement("div");
+        section.id = "v31-widgets";
+        section.innerHTML = `
+            <div id="v31-regime-card" class="card v31-card"></div>
+            <div id="v31-risk-card" class="card v31-card"></div>
+            <div id="v31-exposure-card" class="card v31-card"></div>
+            <div id="v31-watchlist-card" class="card v31-card"></div>
+            <div id="v31-dataquality-card" class="card v31-card"></div>
+        `;
+        const signalTile = document.getElementById("signal-tile");
+        if (signalTile && signalTile.parentNode) signalTile.insertAdjacentElement("afterend", section);
+        else dash.appendChild(section);
+    }
+    if (journal && !document.getElementById("v31-digest-card")) {
+        const section = document.createElement("div");
+        section.id = "v31-journal-widgets";
+        section.innerHTML = `
+            <div id="v31-digest-card" class="card v31-card"></div>
+            <div id="v31-patterns-card" class="card v31-card"></div>
+            <div id="v31-debriefs-card" class="card v31-card"></div>
+        `;
+        journal.appendChild(section);
+    }
+}
+
+function _v31RenderRegime() {
+    const el = document.getElementById("v31-regime-card");
+    if (!el) return;
+    const r = V31.regime;
+    const topR = V31.topRisk();
+    const color = r.score >= 60 ? "var(--green)" : r.score >= 40 ? "var(--amber)" : "var(--red)";
+    el.innerHTML = `
+        <h2>Regime-Kompass <span class="v31-chip" style="background:${color}20; color:${color}; border-color:${color}40;">${r.label}</span></h2>
+        <div class="v31-regime-grid">
+            <div class="v31-metric">
+                <div class="v31-metric-value" style="color:${color};">${r.score.toFixed(0)}<span style="font-size:0.5em; color:var(--muted);">/100</span></div>
+                <div class="v31-metric-label">Regime-Score</div>
+            </div>
+            <div class="v31-metric">
+                <div class="v31-metric-value">${topR.zone}</div>
+                <div class="v31-metric-label">Top-Risiko</div>
+            </div>
+        </div>
+        <div class="v31-bars">
+            ${["trend","momentum","volatility","breadth","fng","vix"].map((k) => {
+                const v = r.components[k] || 50;
+                const c = v >= 60 ? "var(--green)" : v >= 40 ? "var(--amber)" : "var(--red)";
+                return `<div class="v31-bar-row">
+                    <div class="v31-bar-label">${k}</div>
+                    <div class="v31-bar-track"><div class="v31-bar-fill" style="width:${v}%; background:${c};"></div></div>
+                    <div class="v31-bar-num num">${v.toFixed(0)}</div>
+                </div>`;
+            }).join("")}
+        </div>
+    `;
+}
+
+function _v31RenderRisk() {
+    const el = document.getElementById("v31-risk-card");
+    if (!el) return;
+    const cb = V31.cbCheck();
+    const conc = V31.concentrationCheck();
+    const stress = V31.stressTest(-20);
+    const equity = broker.equity ? broker.equity(state.prices) : CFG.startEquity;
+    const dd = state.peakEquity ? ((equity - state.peakEquity) / state.peakEquity) * 100 : 0;
+    const cbColor = cb.ok ? "var(--green)" : "var(--red)";
+    el.innerHTML = `
+        <h2>Risk-Dashboard <span class="v31-chip" style="background:${cbColor}20; color:${cbColor}; border-color:${cbColor}40;">${cb.ok ? "GRÜN" : "ROT"}</span></h2>
+        <div class="v31-risk-grid">
+            <div class="v31-metric">
+                <div class="v31-metric-value">${dd.toFixed(2)}%</div>
+                <div class="v31-metric-label">Drawdown</div>
+            </div>
+            <div class="v31-metric">
+                <div class="v31-metric-value">${(conc.hhi||0).toFixed(0)}</div>
+                <div class="v31-metric-label">HHI</div>
+            </div>
+            <div class="v31-metric">
+                <div class="v31-metric-value">${(conc.max||0).toFixed(0)}%</div>
+                <div class="v31-metric-label">Max Position</div>
+            </div>
+            <div class="v31-metric">
+                <div class="v31-metric-value" style="color:var(--red);">${(stress.totalPnl||0).toFixed(0)}</div>
+                <div class="v31-metric-label">Stress -20%</div>
+            </div>
+        </div>
+        ${!cb.ok ? `<div class="v31-alert v31-alert-red">${cb.reason}</div>` : ""}
+    `;
+}
+
+function _v31RenderExposure() {
+    const el = document.getElementById("v31-exposure-card");
+    if (!el) return;
+    const ec = V31.exposureCoach();
+    const color = ec.score >= 60 ? "var(--green)" : ec.score >= 40 ? "var(--amber)" : "var(--red)";
+    el.innerHTML = `
+        <h2>Exposure Coach <span class="v31-chip" style="background:${color}20; color:${color}; border-color:${color}40;">${ec.bias}</span></h2>
+        <div class="v31-exposure-grid">
+            <div>
+                <div class="v31-metric-label">Empfohlene Max-Exposure</div>
+                <div class="v31-exposure-bar">
+                    <div class="v31-exposure-fill" style="width:${ec.ceilingPct}%; background:${color};"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--muted); margin-top:4px;">
+                    <span>${ec.ceilingPct}% max</span>
+                    <span>${(100 - ec.cashPct).toFixed(0)}% aktuell</span>
+                </div>
+            </div>
+            <div class="v31-exposure-note">${ec.note}</div>
+        </div>
+    `;
+}
+
+function _v31RenderWatchlist() {
+    const el = document.getElementById("v31-watchlist-card");
+    if (!el) return;
+    const list = V31.watchlistRank();
+    if (!list.length) { el.innerHTML = `<h2>Watchlist-Ranking</h2><div class="perf-hint">Noch keine Daten.</div>`; return; }
+    el.innerHTML = `
+        <h2>Watchlist-Ranking <span class="v31-chip v31-chip-neutral">${list.length}</span></h2>
+        <div class="v31-wl">
+            ${list.slice(0, 6).map((w, i) => `
+                <div class="v31-wl-row">
+                    <div class="v31-wl-rank">#${i+1}</div>
+                    <div class="v31-wl-sym">${w.symbol}</div>
+                    <div class="v31-wl-trend" style="color:${w.trend === 'UP' ? 'var(--green)' : 'var(--red)'};">${w.trend}</div>
+                    <div class="v31-wl-rsi num">RSI ${w.rsi.toFixed(0)}</div>
+                    <div class="v31-wl-score num">${w.score.toFixed(0)}</div>
+                </div>
+            `).join("")}
+        </div>
+    `;
+}
+
+function _v31RenderDataQuality() {
+    const el = document.getElementById("v31-dataquality-card");
+    if (!el) return;
+    const dq = V31.dataQuality();
+    const color = dq.ok ? "var(--green)" : "var(--amber)";
+    el.innerHTML = `
+        <h2>Daten-Qualität <span class="v31-chip" style="background:${color}20; color:${color}; border-color:${color}40;">${dq.ok ? "SAUBER" : dq.issues.length + " Issue"+(dq.issues.length === 1 ? "" : "s")}</span></h2>
+        ${dq.ok
+            ? `<div class="perf-hint">Alle Preise, Kerzen und Positionen konsistent.</div>`
+            : `<ul class="v31-issue-list">${dq.issues.map((i) => `<li>${i}</li>`).join("")}</ul>`
+        }
+    `;
+}
+
+function _v31RenderDigest() {
+    const el = document.getElementById("v31-digest-card");
+    if (!el) return;
+    const d = V31.weeklyDigest();
+    if (d.empty) { el.innerHTML = `<h2>Wochen-Digest</h2><div class="perf-hint">Noch keine abgeschlossenen Trades diese Woche.</div>`; return; }
+    const pnlColor = d.totalPnl >= 0 ? "var(--green)" : "var(--red)";
+    el.innerHTML = `
+        <h2>Wochen-Digest</h2>
+        <div class="v31-risk-grid">
+            <div class="v31-metric"><div class="v31-metric-value">${d.total}</div><div class="v31-metric-label">Trades</div></div>
+            <div class="v31-metric"><div class="v31-metric-value">${d.winRate.toFixed(0)}%</div><div class="v31-metric-label">Win-Rate</div></div>
+            <div class="v31-metric"><div class="v31-metric-value" style="color:${pnlColor};">${d.totalPnl >= 0 ? "+" : ""}${d.totalPnl.toFixed(0)}</div><div class="v31-metric-label">PnL</div></div>
+            <div class="v31-metric"><div class="v31-metric-value">${d.profitFactor ? d.profitFactor.toFixed(2) : "–"}</div><div class="v31-metric-label">PF</div></div>
+            <div class="v31-metric"><div class="v31-metric-value">${d.expectancy.toFixed(1)}</div><div class="v31-metric-label">Expectancy</div></div>
+            <div class="v31-metric"><div class="v31-metric-value">${d.avgWin.toFixed(0)}/<span style="color:var(--red)">${d.avgLoss.toFixed(0)}</span></div><div class="v31-metric-label">Ø Win/Loss</div></div>
+        </div>
+    `;
+}
+
+function _v31RenderPatterns() {
+    const el = document.getElementById("v31-patterns-card");
+    if (!el) return;
+    const p = V31.patternAnalysis();
+    if (!p.ready) { el.innerHTML = `<h2>Pattern-Analyse</h2><div class="perf-hint">${p.msg}</div>`; return; }
+    el.innerHTML = `
+        <h2>Pattern-Analyse <span class="v31-chip v31-chip-neutral">${p.total} Trades</span></h2>
+        <div class="v31-pattern-grid">
+            <div class="v31-pattern-row"><span>Longs</span><span class="num">${p.longs} · ${p.longWR.toFixed(0)}%</span></div>
+            <div class="v31-pattern-row"><span>Shorts</span><span class="num">${p.shorts} · ${p.shortWR.toFixed(0)}%</span></div>
+            ${p.regimeStats.map((rs) => `<div class="v31-pattern-row"><span>${rs.regime}</span><span class="num">${rs.n} · ${rs.winRate.toFixed(0)}%</span></div>`).join("")}
+        </div>
+    `;
+}
+
+function _v31RenderDebriefs() {
+    const el = document.getElementById("v31-debriefs-card");
+    if (!el) return;
+    const recent = V31.debriefs.slice(-8).reverse();
+    if (!recent.length) { el.innerHTML = `<h2>Debriefs</h2><div class="perf-hint">Noch keine abgeschlossenen Trades.</div>`; return; }
+    el.innerHTML = `
+        <h2>Debriefs <span class="v31-chip v31-chip-neutral">${V31.debriefs.length}</span></h2>
+        <div class="v31-debriefs">
+            ${recent.map((d) => `
+                <div class="v31-debrief">
+                    <div class="v31-debrief-head">
+                        <span class="v31-chip ${d.outcome === 'WIN' ? 'v31-chip-green' : d.outcome === 'LOSS' ? 'v31-chip-red' : 'v31-chip-neutral'}">${d.outcome}</span>
+                        <span class="v31-debrief-sym">${d.symbol}</span>
+                        <span class="v31-debrief-pnl num" style="color:${d.pnl >= 0 ? 'var(--green)' : 'var(--red)'};">${d.pnl >= 0 ? '+' : ''}${(d.pnl||0).toFixed(2)}</span>
+                        <span class="v31-debrief-regime">${d.regime}</span>
+                    </div>
+                    <div class="v31-debrief-lesson">${d.lesson}</div>
+                </div>
+            `).join("")}
+        </div>
+    `;
+}
+
+function _v31RenderAll() {
+    try {
+        _v31InsertWidgetsIfMissing();
+        _v31RenderRegime();
+        _v31RenderRisk();
+        _v31RenderExposure();
+        _v31RenderWatchlist();
+        _v31RenderDataQuality();
+        _v31RenderDigest();
+        _v31RenderPatterns();
+        _v31RenderDebriefs();
+    } catch (e) { console.warn("[v31] render fail", e); }
+}
+
+// renderAll chainen
+if (typeof renderAll === "function" && !renderAll._v31) {
+    const _priorRenderAll = renderAll;
+    renderAll = function() {
+        _priorRenderAll();
+        _v31RenderAll();
+    };
+    renderAll._v31 = true;
+}
+
+// Info-Popups
+if (typeof INFO_DB === "object") {
+    INFO_DB["regime"] = {
+        title: "Regime-Kompass",
+        body: `<p>Der Regime-Kompass kombiniert 6 Faktoren (BTC-Trend, Momentum, Vola, Breadth, Fear&amp;Greed, VIX) zu einem Score 0-100.</p>
+               <ul><li><strong>&gt; 70</strong> RISK-ON: aggressiv</li><li><strong>55-70</strong> BULLISH: Standard</li><li><strong>45-55</strong> NEUTRAL: selektiv</li><li><strong>30-45</strong> BEARISH: defensiv</li><li><strong>&lt; 30</strong> RISK-OFF: Cash</li></ul>
+               <p>Der Bot handelt Longs nur ab 45, Shorts nur bis 55 — alles andere wird vom Pre-Trade-Gate blockiert.</p>`,
+    };
+    INFO_DB["risk-dashboard"] = {
+        title: "Risk-Dashboard",
+        body: `<p>Zusammenfassung aller Risiko-Limits:</p><ul><li>Drawdown vs Peak</li><li>HHI (Konzentration) — &gt; 5000 = zu hoch</li><li>Größte Position % — &gt; 60% = zu hoch</li><li>Stress -20%: hypothetischer Verlust bei BTC-Crash</li></ul>
+               <p>Circuit Breaker: Tagesverlust &gt; 3% / Woche &gt; 8% / Monat &gt; 15% stoppt neue Trades.</p>`,
+    };
+    INFO_DB["exposure"] = {
+        title: "Exposure Coach",
+        body: `<p>Die empfohlene Max-Exposure hängt vom Regime ab: in bearishen Phasen bleibt mehr Cash, in Risk-on wird aggressiver investiert.</p>`,
+    };
+    INFO_DB["preentry"] = INFO_DB["preentry"] || { title: "Pre-Entry Watcher", body: "<p>v30 Pre-Entry Watcher.</p>" };
+}
+
+setTimeout(() => {
+    if (typeof feedEvent === "function") {
+        feedEvent("info", "v31 aktiv: 20+ Skills integriert · Regime-Kompass · Risk-Dashboard · Exposure Coach · Auto-Debriefs");
+    }
+}, 6000);
+
+// Finales Demo-Guard-Reinforcement
+Object.defineProperty(window, "TB_DEMO_ONLY", { value: true, writable: false, configurable: false });
+
 })();

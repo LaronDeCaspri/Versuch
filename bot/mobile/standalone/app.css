@@ -1815,3 +1815,409 @@ h2 .info { vertical-align: baseline; position: relative; top: -1px; }
 #why-body h3 { margin: 14px 0 8px; }
 #why-body ul { padding-left: 20px; }
 #why-body li { margin-bottom: 6px; }
+
+/* ============================================================================
+   v31 — Weltklasse-Optik (21st.dev / shadcn / Linear-inspiriert)
+   Design-Tokens, Glass-Cards, Micro-Interactions, Status-Chips
+   ============================================================================ */
+
+:root {
+    --v31-glass-bg: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+    --v31-glass-border: rgba(255,255,255,0.08);
+    --v31-glass-shadow: 0 1px 0 0 rgba(255,255,255,0.05) inset, 0 8px 24px -8px rgba(0,0,0,0.6);
+    --v31-chip-radius: 999px;
+    --v31-focus-ring: 0 0 0 2px rgba(139, 92, 246, 0.25);
+    --v31-grad-green: linear-gradient(135deg, #10b981, #059669);
+    --v31-grad-red:   linear-gradient(135deg, #ef4444, #dc2626);
+    --v31-grad-amber: linear-gradient(135deg, #f59e0b, #d97706);
+    --v31-grad-violet: linear-gradient(135deg, #8b5cf6, #7c3aed);
+}
+
+/* Smooth global transitions */
+.card, .pill, .tab-btn, .pulse-action, button, .signal-tile {
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* v31 card: glass + subtle hover lift */
+.v31-card {
+    position: relative;
+    background: var(--v31-glass-bg), var(--surface);
+    border: 1px solid var(--v31-glass-border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-top: 12px;
+    box-shadow: var(--v31-glass-shadow);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+.v31-card h2 {
+    margin: 0 0 10px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    color: var(--text-2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+/* Status chips (21st.dev style) */
+.v31-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: var(--v31-chip-radius);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    background: rgba(255,255,255,0.06);
+    color: var(--text-2);
+    border: 1px solid rgba(255,255,255,0.08);
+    font-variant-numeric: tabular-nums;
+}
+.v31-chip-green   { background: rgba(16, 185, 129, 0.12); color: #34d399; border-color: rgba(16, 185, 129, 0.3); }
+.v31-chip-red     { background: rgba(239, 68, 68, 0.12); color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
+.v31-chip-amber   { background: rgba(245, 158, 11, 0.12); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3); }
+.v31-chip-neutral { background: rgba(139, 92, 246, 0.10); color: #c4b5fd; border-color: rgba(139, 92, 246, 0.25); }
+
+/* Metric block: huge number + tiny label */
+.v31-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.v31-metric-value {
+    font-family: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: var(--text);
+    line-height: 1.1;
+}
+.v31-metric-label {
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Regime card grid */
+.v31-regime-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+}
+.v31-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.v31-bar-row {
+    display: grid;
+    grid-template-columns: 70px 1fr 32px;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.72rem;
+}
+.v31-bar-label {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    font-size: 0.62rem;
+    font-weight: 600;
+}
+.v31-bar-track {
+    height: 6px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 999px;
+    overflow: hidden;
+    position: relative;
+}
+.v31-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 8px currentColor;
+}
+.v31-bar-num {
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Risk card grid */
+.v31-risk-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+}
+@media (min-width: 480px) {
+    .v31-risk-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+.v31-alert {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    border-left: 3px solid;
+}
+.v31-alert-red {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: var(--red);
+    color: #fca5a5;
+}
+
+/* Exposure */
+.v31-exposure-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.v31-exposure-bar {
+    position: relative;
+    height: 8px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+.v31-exposure-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    border-radius: 999px;
+    box-shadow: 0 0 10px currentColor;
+}
+.v31-exposure-note {
+    font-size: 0.76rem;
+    color: var(--text-2);
+    padding: 10px 12px;
+    background: rgba(139, 92, 246, 0.06);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    line-height: 1.5;
+}
+
+/* Watchlist */
+.v31-wl {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.v31-wl-row {
+    display: grid;
+    grid-template-columns: 32px 1fr 50px 70px 50px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    font-size: 0.78rem;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+}
+.v31-wl-row:hover {
+    background: rgba(255,255,255,0.04);
+    border-color: var(--border-strong);
+    transform: translateX(2px);
+}
+.v31-wl-rank {
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+.v31-wl-sym {
+    font-weight: 600;
+    color: var(--text);
+}
+.v31-wl-trend {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.v31-wl-rsi, .v31-wl-score {
+    color: var(--text-2);
+    font-size: 0.72rem;
+    text-align: right;
+}
+
+/* Data quality list */
+.v31-issue-list {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 0.78rem;
+    color: var(--amber);
+}
+.v31-issue-list li {
+    margin-bottom: 4px;
+}
+
+/* Pattern analysis */
+.v31-pattern-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.v31-pattern-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 10px;
+    background: rgba(255,255,255,0.02);
+    border-radius: 6px;
+    font-size: 0.78rem;
+}
+.v31-pattern-row span:first-child {
+    color: var(--text-2);
+}
+
+/* Debriefs */
+.v31-debriefs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.v31-debrief {
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.02);
+    border-left: 2px solid var(--accent);
+    border-radius: 6px;
+}
+.v31-debrief-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+}
+.v31-debrief-sym {
+    font-weight: 600;
+    color: var(--text);
+}
+.v31-debrief-pnl {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+.v31-debrief-regime {
+    font-size: 0.64rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.v31-debrief-lesson {
+    font-size: 0.74rem;
+    color: var(--text-2);
+    line-height: 1.5;
+}
+
+/* Permanent DEMO watermark - belt and suspenders */
+body::before {
+    content: "DEMO · PAPER TRADING · KEIN ECHTGELD";
+    position: fixed;
+    bottom: 60px;
+    right: -40px;
+    transform: rotate(-45deg);
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.95), rgba(217, 119, 6, 0.95));
+    color: #000;
+    padding: 4px 60px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    z-index: 9999;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    opacity: 0.4;
+}
+
+/* 21st.dev-style focus rings */
+button:focus-visible, .pill:focus-visible, .tab-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--v31-focus-ring);
+}
+
+/* Shimmer for pending/loading states */
+@keyframes v31-shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+}
+.v31-shimmer {
+    background: linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.02) 100%);
+    background-size: 200% 100%;
+    animation: v31-shimmer 1.8s infinite;
+    border-radius: 6px;
+}
+
+/* Hover micro-lift on cards */
+.card:hover:not(.v31-card), .v31-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.08) inset, 0 12px 32px -8px rgba(0,0,0,0.7);
+}
+
+/* Smooth scroll + inertia on mobile */
+html { scroll-behavior: smooth; }
+main { -webkit-overflow-scrolling: touch; }
+
+/* Button micro-interactions */
+button.primary:active, .pulse-action:active {
+    transform: scale(0.97);
+}
+
+/* Pulsing live-dot refinement */
+.live-dot {
+    position: relative;
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 999px;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+}
+.live-dot::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: 999px;
+    background: var(--green);
+    opacity: 0.4;
+    animation: v31-pulse 2s infinite;
+}
+@keyframes v31-pulse {
+    0%   { transform: scale(0.8); opacity: 0.6; }
+    70%  { transform: scale(2.2); opacity: 0;   }
+    100% { transform: scale(2.2); opacity: 0;   }
+}
+
+/* Mobile tweaks */
+@media (max-width: 400px) {
+    .v31-metric-value { font-size: 1.2rem; }
+    .v31-regime-grid { gap: 8px; }
+    .v31-wl-row { grid-template-columns: 28px 1fr 44px 60px 44px; gap: 6px; font-size: 0.72rem; }
+}
+
+/* v31 Demo-Lock Banner refinement */
+.v31-demo-lock {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(245, 158, 11, 0.03)) !important;
+    border: 1px solid rgba(245, 158, 11, 0.25) !important;
+    position: relative;
+    overflow: hidden;
+}
+.v31-demo-lock::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--amber), transparent);
+}
+.v31-demo-lock .rb-icon {
+    filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.4));
+}
