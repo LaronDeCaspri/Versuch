@@ -215,8 +215,6 @@ function signalFrom(pre, params) {
 // 3. Signal state machine — single source of truth (backtest == live)
 // ---------------------------------------------------------------------
 const DEFAULT_PARAMS = { minScore: 1.5, agreement: 2, atrStopMult: 2.0 };
-// Lern-Modus: looser but still inside the walk-forward grid, so it stays testable
-const LEARN_PARAMS = { minScore: 1.0, agreement: 1, atrStopMult: 2.0 };
 const DEFAULT_SIM = {
     feeBps: 7.5,            // Binance taker incl. BNB discount, per side
     slipBps: 3.0,           // conservative for majors when no live book
@@ -907,7 +905,7 @@ async function runResearch(symbols, o = {}, onProgress = () => {}) {
 TB.pro = {
     version: "32.0",
     installDemoGuard, isBlockedRequest,
-    FAMILIES, FAMILY_LABELS, REGIME_LABELS, REGIME_WEIGHTS, PARAM_GRID, DEFAULT_PARAMS, LEARN_PARAMS, DEFAULT_SIM, WINDOW, TF_MS,
+    FAMILIES, FAMILY_LABELS, REGIME_LABELS, REGIME_WEIGHTS, PARAM_GRID, DEFAULT_PARAMS, DEFAULT_SIM, WINDOW, TF_MS,
     regimeOf, evaluateBar, signalFrom, SignalMachine,
     fetchKlinesRange, precompute, simulate, walkForward, portfolioSummary, runResearch,
     dailyReturns, tearSheet, probabilisticSharpe, expectedMaxSharpe, expectedMaxSharpeFromVar, bootstrapSharpeCI,

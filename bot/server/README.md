@@ -42,7 +42,7 @@ Der Port ist absichtlich nur lokal gebunden. Für Zugriff vom Handy einen Tunnel
 - scannt alle 30 Sekunden die 15-Minuten-Kerzen und prüft Stops/Targets bei jedem Trade-Tick aus dem Binance-Stream
 - trifft Entscheidungen ausschließlich mit der Signal-Logik, die im Walk-Forward getestet wurde
 - rechnet jeden Fill mit 7,5 bps Gebühr und Slippage aus dem Live-Orderbuch
-- handelt ungeprüfte Setups nur als Inkubation mit 25 % Risiko
+- handelt jeden Trade mit regulärer Größe: 0,5 % Risiko des Depots bis zum Stop
 - stoppt neue Einstiege bei 3 % Tagesverlust, überfülltem Funding, weitem Spread oder starkem Gegenfluss
 - schreibt jedes Ereignis nach `state/events.log`
 

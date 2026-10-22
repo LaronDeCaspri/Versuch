@@ -7450,7 +7450,9 @@ if (typeof makePending === "function" && !makePending._v21tag) {
 // =====================================================================
 
 // Default ON — user can turn off in Einstellungen for stricter behaviour
-state.learnMode = localStorage.getItem("tb_learn_mode") === "0" ? false : true;
+// Lern-Modus abgeschafft: der Bot handelt ausschließlich mit den regulären, getesteten Regeln.
+state.learnMode = false;
+try { localStorage.setItem("tb_learn_mode", "0"); } catch (e) { /* storage unavailable */ }
 
 // Live event feed — every meaningful bot action gets a plain-German entry
 state.eventFeed = state.eventFeed || [];
@@ -7561,7 +7563,7 @@ if (broker && !broker._v22feed) {
 }
 
 // Feed initial event on load
-setTimeout(() => feedEvent("info", `Bot gestartet · Lern-Modus ${state.learnMode ? "AN" : "AUS"} · ${CFG.symbols.length} Symbole aktiv`), 1500);
+setTimeout(() => feedEvent("info", `Bot gestartet · reguläre Regeln · ${CFG.symbols.length} Symbole aktiv · Papierhandel`), 1500);
 
 function renderEventFeed() {
     const el = document.getElementById("event-feed");
@@ -7600,10 +7602,6 @@ function ensureLearnCards() {
     activity.innerHTML = `
         <h2 style="display:flex; justify-content:space-between; align-items:center;">
             <span>Was der Bot gerade tut</span>
-            <label style="display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:normal; font-size:0.72rem; color:var(--muted); cursor:pointer;">
-                <input type="checkbox" id="learn-mode-toggle" ${state.learnMode ? "checked" : ""} style="width:14px; height:14px;">
-                Lern-Modus (weniger strenge Filter, mehr Trades zum Beobachten)
-            </label>
         </h2>
         <div id="current-activity" style="font-size:0.95rem; padding:12px; background:rgba(139, 92, 246, 0.06); border-left:3px solid var(--accent); border-radius:6px;">${state.currentActivity}</div>
         <div class="btn-row" style="margin-top:10px;">
@@ -9800,7 +9798,7 @@ Object.defineProperty(window, "TB_DEMO_ONLY", { value: true, writable: false, co
 // v32 — Pro-Engine: der Bot handelt exakt das, was er getestet hat
 //  - eine deterministische Signal-Pipeline (pro.js) für Backtest UND Live
 //  - Walk-Forward out-of-sample, nach Kosten, mit Deflated Sharpe
-//  - Inkubation: unbewiesene Setups nur mit 25% Risiko, separat ausgewiesen
+//  - reguläre Positionsgröße für jeden Trade (fester Risikoanteil je Trade)
 //  - Orderbuch/CVD + Funding/OI/Basis als Execution- und Crowding-Kontrolle
 // ============================================================================
 const PE = window.TB.pro;
@@ -9815,7 +9813,6 @@ PRO.deriv = {};
 PRO.rejects = [];
 PRO.selected = null;
 PRO.RESEARCH_DAYS = 180;
-PRO.INCUBATION_FACTOR = 0.25;
 
 const _fmtPct = (x, d = 1) => Number.isFinite(x) ? `${(x * 100).toFixed(d)}%` : "–";
 const _fmtNum = (x, d = 2) => Number.isFinite(x) ? x.toFixed(d) : "–";
@@ -9833,12 +9830,7 @@ function _proValidated(symbol) {
 PRO.paramsFor = function(symbol) {
     const r = _proResult(symbol);
     if (r && r.live && r.live.params) return r.live.params;
-    if (PRO.strict) return null;
-    return state.learnMode ? { ...PE.LEARN_PARAMS } : { ...PE.DEFAULT_PARAMS };
-};
-PRO.isLearnParams = (symbol) => {
-    const r = _proResult(symbol);
-    return !(r && r.live && r.live.params) && !PRO.strict && !!state.learnMode;
+    return PRO.strict ? null : { ...PE.DEFAULT_PARAMS };
 };
 PRO.engine = new PE.LiveEngine({ interval: CFG.primaryTf, paramsFor: (s) => PRO.paramsFor(s) });
 
@@ -9873,7 +9865,7 @@ function _proBuildPending(symbol, d, candles, price) {
     if (!Number.isFinite(d.atr) || d.atr <= 0 || !(price > 0)) return null;
     const validated = _proValidated(symbol);
     if (PRO.strict && !validated) return _proReject(symbol, "Edge-Gate", "keine validierte Edge (strenger Modus)");
-    const riskPct = dynamicRiskPct(d.score, 0) * (validated ? 1 : PRO.INCUBATION_FACTOR);
+    const riskPct = dynamicRiskPct(d.score, 0);
     const equity = broker.equity(state.prices);
     const plan = window.TB.planTrade(d.side, price, d.atr, equity, {
         riskPctPerTrade: riskPct, atrStopMult: d.params.atrStopMult,
@@ -9893,7 +9885,7 @@ function _proBuildPending(symbol, d, candles, price) {
         forecast: window.TB.forecast(plan),
         risk, dynRiskPct: riskPct, highCorr: [], newsForSymbol: [],
         proApproved: true,
-        proTag: validated ? "VALIDIERT" : PRO.isLearnParams(symbol) ? "LERN" : "INKUBATION",
+        proTag: validated ? "VALIDIERT" : "REGULÄR",
         proRegime: d.regime, proParams: d.params,
         created_ts: Date.now(),
     };
@@ -9985,9 +9977,9 @@ function _proExpectedPerDay() {
     for (const s of syms) {
         const r = _proResult(s);
         if (r && r.stats && r.stats.days > 0 && r.live && r.live.params) sum += r.stats.trades / r.stats.days;
-        else sum += PRO.isLearnParams(s) ? 1.9 : 1.2;   // measured backtest rates of the default/learn thresholds
+        else if (!PRO.strict) sum += 1.2;   // measured backtest rate of the default thresholds
     }
-    return R ? sum : syms.length * (state.learnMode ? 1.9 : 1.2);
+    return R ? sum : (PRO.strict ? 0 : syms.length * 1.2);
 }
 setInterval(() => {
     const el = document.getElementById("v32-countdown");
@@ -10182,7 +10174,7 @@ function _proRenderStatus() {
             <div><span class="v32-muted">Zuletzt geprüft</span><strong class="num">${lastEval ? `${Math.max(0, Math.round((Date.now() - lastEval) / 60000))} Min` : "–"}</strong></div>
             <div><span class="v32-muted">Erwartet laut Test</span><strong class="num">${every ? `≈ 1 Trade / ${every < 1 ? Math.round(every * 60) + " Min" : every.toFixed(1).replace(".", ",") + " h"}` : "–"}</strong></div>
         </div>
-        <div class="perf-hint">Der Bot entscheidet nur bei Kerzenschluss (alle 15 Min). Einstieg erst bei ${need}. Ruhige Phasen ohne Trade sind normal${state.learnMode && !PRO.strict ? " — Lern-Modus aktiv: lockerere Schwellen, kleine Positionen" : ""}.</div>
+        <div class="perf-hint">Der Bot entscheidet nur bei Kerzenschluss (alle 15 Min). Einstieg erst bei ${need}. Ruhige Phasen ohne Trade sind normal.</div>
         <div class="v32-rows">${rows}</div>
         ${pausedNote}
         ${last ? `<div class="v32-reject">Zuletzt verworfen: <strong>${last.symbol}</strong> — ${last.why}</div>` : ""}
@@ -10277,7 +10269,7 @@ function _proRenderTearSheet() {
             </details>` : ""}
         ${failed.length ? `<div class="v32-note">Nicht auswertbar: ${failed.map((f) => `${f.symbol} (${f.error})`).join(", ")}</div>` : ""}
         <div class="v32-incubation">
-            <div class="v32-inc-title">Live-Inkubation (Papier, nach Kosten)</div>
+            <div class="v32-inc-title">Live-Ergebnis (Demo-Konto, nach Kosten)</div>
             ${inc ? `<div class="v32-inc-grid">
                 <span>${inc.n} Trades</span><span class="${inc.pnl >= 0 ? "v32-pos" : "v32-neg"}">${inc.pnl >= 0 ? "+" : ""}${money(inc.pnl)}</span>
                 <span>Treffer ${_fmtPct(inc.winRate, 0)} (Test ${_fmtPct(s.winRate, 0)})</span><span>Kosten ${money(inc.fees + inc.slip)}</span>
@@ -10325,9 +10317,9 @@ function _proRenderSettings() {
     el.innerHTML = `
         <h2>Pro-Modus ${_proChip(PRO.enabled ? "AN" : "AUS", PRO.enabled ? "green" : "neutral")}</h2>
         <label class="v32-toggle"><input type="checkbox" id="v32-pro-toggle" ${PRO.enabled ? "checked" : ""}>
-            <span><strong>Getestete Engine handelt</strong><br><small>Entscheidungen nur aus der Walk-Forward-geprüften Logik. Lern-Modus-Schwellen werden ignoriert.</small></span></label>
+            <span><strong>Getestete Engine handelt</strong><br><small>Entscheidungen nur aus der Walk-Forward-geprüften Logik.</small></span></label>
         <label class="v32-toggle"><input type="checkbox" id="v32-strict-toggle" ${PRO.strict ? "checked" : ""}>
-            <span><strong>Nur validierte Edge</strong><br><small>Aus: ungeprüfte Setups laufen als Inkubation mit ${Math.round(PRO.INCUBATION_FACTOR * 100)}% Risiko. An: nur Symbole mit Urteil „Edge bestätigt" oder „vielversprechend".</small></span></label>
+            <span><strong>Nur validierte Edge</strong><br><small>Aus: alle Symbole werden mit den regulären Regeln gehandelt. An: nur Symbole mit Urteil „Edge bestätigt" oder „vielversprechend".</small></span></label>
         <label class="v32-toggle"><input type="checkbox" id="v32-wakelock-toggle" ${PRO.wakeLockWanted ? "checked" : ""}>
             <span><strong>Bildschirm wach halten</strong><br><small>Solange die App offen ist, geht der Bildschirm nicht aus und der Bot handelt weiter, z. B. nachts am Ladekabel. Im Hintergrund oder bei gesperrtem Handy pausiert jeder Browser den Bot.${PRO.wakeLockWanted ? (PRO.wakeLock ? " · aktiv" : PRO.wakeLockError ? ` · nicht möglich: ${PRO.wakeLockError}` : " · wird aktiviert") : ""}</small></span></label>
         <div class="v32-note">Kosten im Paper-Broker: ${window.TB.PaperBroker.COSTS.feeBps} bps Gebühr je Seite, Slippage aus dem Live-Orderbuch (Fallback ${window.TB.PaperBroker.COSTS.slipBps} bps). Kelly-Sizing erst ab 300 abgeschlossenen Trades.</div>

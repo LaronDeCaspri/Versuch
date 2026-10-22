@@ -21,7 +21,6 @@ const SCAN_MS = 30e3;
 const MAX_POSITIONS = 6;
 const MAX_NOTIONAL_PCT = 12;
 const BASE_RISK_PCT = 0.5;
-const INCUBATION = 0.25;
 const DAILY_LOSS_LIMIT_PCT = 3;
 
 // ---- demo-only: refuse to run next to exchange credentials -------------------
@@ -91,7 +90,7 @@ function tryEnter(symbol, d, candles, price) {
     if (!ctl.ok) return reject(symbol, ctl.reasons.join(" · "));
     const isValid = validated(symbol);
     if (STRICT && !isValid) return reject(symbol, "keine validierte Edge (strenger Modus)");
-    const riskPct = BASE_RISK_PCT * (isValid ? 1 : INCUBATION);
+    const riskPct = BASE_RISK_PCT;
     const plan = TB.planTrade(d.side, price, d.atr, equity, {
         riskPctPerTrade: riskPct, atrStopMult: d.params.atrStopMult,
         maxNotionalPctPerPosition: MAX_NOTIONAL_PCT, tpMultiples: P.DEFAULT_SIM.tpMultiples,
@@ -99,7 +98,7 @@ function tryEnter(symbol, d, candles, price) {
     if (!plan || plan.size <= 0) return;
     const strategy = `pro:${d.signals.map((s) => s.family).join("+")}`;
     const pos = broker.submit(symbol, d.side, plan.size, price, { stop: plan.stop, take_profits: plan.take_profits, strategy });
-    if (pos) log("open", `${symbol} ${d.side.toUpperCase()} ${isValid ? "VALIDIERT" : "INKUBATION"} @ ${pos.entry.toFixed(4)} Stop ${plan.stop.toFixed(4)}`, { symbol, side: d.side, riskPct, regime: d.regime, score: d.score });
+    if (pos) log("open", `${symbol} ${d.side.toUpperCase()} ${isValid ? "VALIDIERT" : "REGULÄR"} @ ${pos.entry.toFixed(4)} Stop ${plan.stop.toFixed(4)}`, { symbol, side: d.side, riskPct, regime: d.regime, score: d.score });
 }
 
 async function scanOnce() {
