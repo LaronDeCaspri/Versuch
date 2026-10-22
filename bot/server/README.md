@@ -30,7 +30,7 @@ Der Port ist absichtlich nur lokal gebunden. Für Zugriff vom Handy einen Tunnel
 
 | Variable | Standard | Bedeutung |
 |---|---|---|
-| `TB_SYMBOLS` | `BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT` | gehandelte Paare |
+| `TB_SYMBOLS` | `BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,AVAX/USDT,LINK/USDT` | gehandelte Paare |
 | `TB_STRICT` | `0` | `1` = nur Symbole mit validierter Edge handeln |
 | `TB_RESEARCH_DAYS` | `180` | Historie für den täglichen Walk-Forward |
 | `TB_STATE_DIR` | `server/state` | Depot, Journal, Ereignis-Log |

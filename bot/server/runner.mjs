@@ -12,7 +12,7 @@ const env = process.env;
 const STATE_DIR = path.resolve(env.TB_STATE_DIR || path.join(here, "state"));
 const PORT = Number(env.PORT || 8787);
 const HOST = env.TB_HOST || "127.0.0.1";
-const SYMBOLS = (env.TB_SYMBOLS || "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+const SYMBOLS = (env.TB_SYMBOLS || "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,AVAX/USDT,LINK/USDT").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 const INTERVAL = "15m";
 const MOCK = env.TB_MOCK === "1";
 const STRICT = env.TB_STRICT === "1";

@@ -115,3 +115,24 @@ test("walk-forward on a random walk does not claim an edge", async () => {
     const port = P.portfolioSummary([wf]);
     assert.ok(port && Number.isFinite(port.stats.sharpe));
 });
+
+test("pause in the background: missed entries are counted, entries before the pause match", () => {
+    const params = { minScore: 1.0, agreement: 1, atrStopMult: 2 };
+    const from = prepared.first;
+    const sim = P.simulate(candles, prepared.pre, params, { from });
+    const hasPos = (i) => sim.trades.some((t) => t.entryIdx <= i && i < t.exitIdx);
+    const anchor = sim.trades[Math.min(2, sim.trades.length - 1)].entryIdx;
+    const g0 = Math.max(from + 5, anchor - 15), g1 = g0 + 40;   // app paused for 40 bars (10 h) around a known entry
+    const live = new P.LiveEngine({ paramsFor: () => params, warmReplay: false });
+    const executed = [];
+    for (let i = from; i < g0; i++) {
+        const d = live.onCandles("SYN/USDT", candles.slice(0, i + 1), hasPos(i), candles[i].ts + 900e3 + 1000);
+        if (d) executed.push(i + 1);
+    }
+    assert.deepEqual(executed, sim.trades.map((t) => t.entryIdx).filter((e) => e - 1 < g0), "identical before the pause");
+    // back in the foreground: a missed signal never became a position
+    live.onCandles("SYN/USDT", candles.slice(0, g1 + 1), false, candles[g1].ts + 900e3 + 1000);
+    const inGap = sim.trades.filter((t) => t.entryIdx - 1 >= g0 && t.entryIdx - 1 < g1).length;
+    assert.ok(inGap > 0, "gap must contain at least one backtest entry");
+    assert.ok((live.status("SYN/USDT").missed || 0) >= inGap, `missed ${live.status("SYN/USDT").missed} >= ${inGap}`);
+});

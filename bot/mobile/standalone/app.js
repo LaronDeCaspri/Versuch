@@ -19,7 +19,7 @@ const ALL_SYMBOLS = [
 // =====================================================================
 const TRADER_CONSENSUS = {
     // Buffett/Ackman: focus on the 4 majors with deepest liquidity + fundamentals
-    symbols: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"],
+    symbols: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT"],
     primaryTf: "15m",
     scanIntervalSec: 30,
     priceIntervalSec: 10,
@@ -9833,7 +9833,12 @@ function _proValidated(symbol) {
 PRO.paramsFor = function(symbol) {
     const r = _proResult(symbol);
     if (r && r.live && r.live.params) return r.live.params;
-    return PRO.strict ? null : { ...PE.DEFAULT_PARAMS };
+    if (PRO.strict) return null;
+    return state.learnMode ? { ...PE.LEARN_PARAMS } : { ...PE.DEFAULT_PARAMS };
+};
+PRO.isLearnParams = (symbol) => {
+    const r = _proResult(symbol);
+    return !(r && r.live && r.live.params) && !PRO.strict && !!state.learnMode;
 };
 PRO.engine = new PE.LiveEngine({ interval: CFG.primaryTf, paramsFor: (s) => PRO.paramsFor(s) });
 
@@ -9888,7 +9893,7 @@ function _proBuildPending(symbol, d, candles, price) {
         forecast: window.TB.forecast(plan),
         risk, dynRiskPct: riskPct, highCorr: [], newsForSymbol: [],
         proApproved: true,
-        proTag: validated ? "VALIDIERT" : "INKUBATION",
+        proTag: validated ? "VALIDIERT" : PRO.isLearnParams(symbol) ? "LERN" : "INKUBATION",
         proRegime: d.regime, proParams: d.params,
         created_ts: Date.now(),
     };
@@ -9935,6 +9940,62 @@ if (typeof passesStrictFilter === "function" && !passesStrictFilter._v32) {
     passesStrictFilter._v32 = true;
 }
 
+// ---- background pauses + screen wake lock ------------------------------------
+// Browsers freeze timers when the app is hidden or the screen is off. We measure
+// it, scan immediately on return, and can keep the screen awake on request.
+PRO.hiddenSince = document.hidden ? Date.now() : null;
+PRO.lastPauseMs = 0;
+PRO.pausedTotalMs = 0;
+PRO.wakeLockWanted = localStorage.getItem("tb_wakelock") === "1";
+PRO.wakeLock = null;
+PRO.wakeLockError = null;
+async function _proApplyWakeLock() {
+    try {
+        if (PRO.wakeLockWanted && !document.hidden && !PRO.wakeLock) {
+            if (!("wakeLock" in navigator)) { PRO.wakeLockError = "Dieser Browser unterstützt das nicht"; return; }
+            PRO.wakeLock = await navigator.wakeLock.request("screen");
+            PRO.wakeLockError = null;
+            PRO.wakeLock.addEventListener("release", () => { PRO.wakeLock = null; });
+        } else if (!PRO.wakeLockWanted && PRO.wakeLock) {
+            await PRO.wakeLock.release();
+            PRO.wakeLock = null;
+        }
+    } catch (e) { PRO.wakeLockError = e.message || String(e); }
+}
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { PRO.hiddenSince = Date.now(); return; }
+    if (PRO.hiddenSince) {
+        PRO.lastPauseMs = Date.now() - PRO.hiddenSince;
+        PRO.pausedTotalMs += PRO.lastPauseMs;
+        PRO.hiddenSince = null;
+    }
+    _proApplyWakeLock();
+    if (PRO.lastPauseMs > 20e3 && typeof scanAll === "function") setTimeout(() => scanAll().catch(() => {}), 300);
+});
+setTimeout(_proApplyWakeLock, 1000);
+
+function _proNextCloseMs() {
+    const tf = PE.TF_MS[CFG.primaryTf] || 900e3;
+    return tf - (Date.now() % tf);
+}
+function _proExpectedPerDay() {
+    const syms = _proSymbols();
+    const R = PRO.research;
+    let sum = 0;
+    for (const s of syms) {
+        const r = _proResult(s);
+        if (r && r.stats && r.stats.days > 0 && r.live && r.live.params) sum += r.stats.trades / r.stats.days;
+        else sum += PRO.isLearnParams(s) ? 1.9 : 1.2;   // measured backtest rates of the default/learn thresholds
+    }
+    return R ? sum : syms.length * (state.learnMode ? 1.9 : 1.2);
+}
+setInterval(() => {
+    const el = document.getElementById("v32-countdown");
+    if (!el) return;
+    const ms = _proNextCloseMs();
+    el.textContent = `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+}, 1000);
+
 // ---- live market structure ----------------------------------------------
 function _proSymbols() { return CFG.symbols.slice(0, 8); }
 function _proStartMicro() {
@@ -9961,7 +10022,7 @@ function _proResearchStale() {
     if (!r || !r.computedAt) return true;
     if (Date.now() - r.computedAt > 24 * 3600e3) return true;
     const have = (r.results || []).map((x) => x.symbol).join(",");
-    return have !== _proSymbols().slice(0, 6).join(",");
+    return have !== _proSymbols().join(",");
 }
 
 function _proResearchDone(res) {
@@ -9980,7 +10041,7 @@ function _proResearchDone(res) {
 
 PRO.runResearch = function() {
     if (PRO.running) return;
-    const symbols = _proSymbols().slice(0, 6);
+    const symbols = _proSymbols();
     const opts = {
         days: PRO.RESEARCH_DAYS, interval: CFG.primaryTf,
         sim: { riskPct: CFG.baseRiskPct, maxNotionalPct: CFG.maxNotionalPctPerPosition },
@@ -10050,6 +10111,10 @@ function _proEnsureCards() {
                 PRO.enabled = e.target.checked;
                 localStorage.setItem("tb_pro_mode", PRO.enabled ? "1" : "0");
                 if (typeof feedEvent === "function") feedEvent("info", `Pro-Modus ${PRO.enabled ? "aktiviert — Entscheidungen nur noch aus der getesteten Engine" : "deaktiviert — klassische Signal-Kette"}`);
+            } else if (e.target.id === "v32-wakelock-toggle") {
+                PRO.wakeLockWanted = e.target.checked;
+                localStorage.setItem("tb_wakelock", PRO.wakeLockWanted ? "1" : "0");
+                _proApplyWakeLock().then(_proRenderSettings);
             } else if (e.target.id === "v32-strict-toggle") {
                 PRO.strict = e.target.checked;
                 localStorage.setItem("tb_pro_strict", PRO.strict ? "1" : "0");
@@ -10088,16 +10153,38 @@ function _proRenderStatus() {
         const pre = st && st.lastPre;
         const regime = pre ? PE.REGIME_LABELS[pre.regime] : "–";
         const verdict = r ? _proChip(r.verdict.label, r.verdict.tone) : _proChip(PRO.running ? "TEST LÄUFT" : "UNGEPRÜFT", "neutral");
-        const watch = st && st.watch
+        const pos = broker.positions[s];
+        const mark = state.prices[s];
+        const posPct = pos && mark ? ((mark - pos.entry) / pos.entry) * (pos.side === "long" ? 1 : -1) : null;
+        const watch = pos
+            ? `<span class="${posPct >= 0 ? "v32-pos" : "v32-neg"}">${pos.side === "long" ? "LONG" : "SHORT"} offen ${posPct != null ? _signPct(posPct, 2) : ""}</span>`
+            : st && st.watch
             ? `wartet auf ${st.watch.side === "long" ? "Schluss ≥" : "Schluss ≤"} ${_fmtNum(st.watch.trigger, st.watch.trigger < 10 ? 4 : 2)}`
-            : pre ? `L ${_fmtNum(pre.long.score, 1)} / S ${_fmtNum(pre.short.score, 1)}` : "sammle Kerzen";
+            : pre ? `kein Signal · L ${_fmtNum(pre.long.score, 1)} / S ${_fmtNum(pre.short.score, 1)}` : "wartet auf ersten Kerzenschluss";
         return `<div class="v32-row"><span class="v32-sym">${s.replace("/USDT", "")}</span><span class="v32-muted">${regime}</span><span class="v32-muted v32-grow">${watch}</span>${verdict}</div>`;
     }).join("");
     const last = PRO.rejects[0];
+    const sts = _proSymbols().map((s) => PRO.engine.status(s)).filter(Boolean);
+    const missed = sts.reduce((n, st) => n + (st.missed || 0), 0);
+    const lastEval = Math.max(0, ...sts.map((st) => st.lastEvalAt || 0));
+    const perDay = _proExpectedPerDay();
+    const every = perDay > 0 ? 24 / perDay : null;
+    const p0 = PRO.paramsFor(_proSymbols()[0]);
+    const need = p0 ? `Score ≥ ${p0.minScore} aus ≥ ${p0.agreement} Familie${p0.agreement > 1 ? "n" : ""}, danach Schlusskurs über/unter der Bestätigungsmarke` : "nur validierte Edge (strenger Modus)";
+    const ms = _proNextCloseMs();
+    const pausedNote = PRO.lastPauseMs > 60e3
+        ? `<div class="v32-reject">Die App war zuletzt ${Math.round(PRO.lastPauseMs / 60000)} Min im Hintergrund. In dieser Zeit pausiert der Browser den Bot${missed ? ` — ${missed} Signal${missed > 1 ? "e" : ""} verpasst` : ""}. Für durchgehenden Betrieb: „Bildschirm wach halten" in den Einstellungen oder den 24/7-Server.</div>`
+        : missed ? `<div class="v32-reject">${missed} Signal${missed > 1 ? "e" : ""} verpasst, weil die App im Hintergrund war.</div>` : "";
     el.innerHTML = `
         <h2>Pro-Engine ${port ? _proChip(port.verdict.label, port.verdict.tone) : _proChip(PRO.running ? "TEST LÄUFT" : "UNGEPRÜFT", "neutral")}</h2>
-        <div class="perf-hint">Live wird exakt die Logik gehandelt, die im Walk-Forward getestet wurde. Ungeprüfte Setups laufen als Inkubation mit ${Math.round(PRO.INCUBATION_FACTOR * 100)}% Risiko${PRO.strict ? " — strenger Modus: nur validierte Edge" : ""}.</div>
+        <div class="v32-pulse">
+            <div><span class="v32-muted">Nächster Kerzenschluss</span><strong class="num" id="v32-countdown">${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}</strong></div>
+            <div><span class="v32-muted">Zuletzt geprüft</span><strong class="num">${lastEval ? `${Math.max(0, Math.round((Date.now() - lastEval) / 60000))} Min` : "–"}</strong></div>
+            <div><span class="v32-muted">Erwartet laut Test</span><strong class="num">${every ? `≈ 1 Trade / ${every < 1 ? Math.round(every * 60) + " Min" : every.toFixed(1).replace(".", ",") + " h"}` : "–"}</strong></div>
+        </div>
+        <div class="perf-hint">Der Bot entscheidet nur bei Kerzenschluss (alle 15 Min). Einstieg erst bei ${need}. Ruhige Phasen ohne Trade sind normal${state.learnMode && !PRO.strict ? " — Lern-Modus aktiv: lockerere Schwellen, kleine Positionen" : ""}.</div>
         <div class="v32-rows">${rows}</div>
+        ${pausedNote}
         ${last ? `<div class="v32-reject">Zuletzt verworfen: <strong>${last.symbol}</strong> — ${last.why}</div>` : ""}
     `;
 }
@@ -10241,6 +10328,8 @@ function _proRenderSettings() {
             <span><strong>Getestete Engine handelt</strong><br><small>Entscheidungen nur aus der Walk-Forward-geprüften Logik. Lern-Modus-Schwellen werden ignoriert.</small></span></label>
         <label class="v32-toggle"><input type="checkbox" id="v32-strict-toggle" ${PRO.strict ? "checked" : ""}>
             <span><strong>Nur validierte Edge</strong><br><small>Aus: ungeprüfte Setups laufen als Inkubation mit ${Math.round(PRO.INCUBATION_FACTOR * 100)}% Risiko. An: nur Symbole mit Urteil „Edge bestätigt" oder „vielversprechend".</small></span></label>
+        <label class="v32-toggle"><input type="checkbox" id="v32-wakelock-toggle" ${PRO.wakeLockWanted ? "checked" : ""}>
+            <span><strong>Bildschirm wach halten</strong><br><small>Solange die App offen ist, geht der Bildschirm nicht aus und der Bot handelt weiter, z. B. nachts am Ladekabel. Im Hintergrund oder bei gesperrtem Handy pausiert jeder Browser den Bot.${PRO.wakeLockWanted ? (PRO.wakeLock ? " · aktiv" : PRO.wakeLockError ? ` · nicht möglich: ${PRO.wakeLockError}` : " · wird aktiviert") : ""}</small></span></label>
         <div class="v32-note">Kosten im Paper-Broker: ${window.TB.PaperBroker.COSTS.feeBps} bps Gebühr je Seite, Slippage aus dem Live-Orderbuch (Fallback ${window.TB.PaperBroker.COSTS.slipBps} bps). Kelly-Sizing erst ab 300 abgeschlossenen Trades.</div>
         ${PRO.running ? "" : `<button class="ghost v32-btn" data-v32-run>Walk-Forward neu berechnen</button>`}
     `;

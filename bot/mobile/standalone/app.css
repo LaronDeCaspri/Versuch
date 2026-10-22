@@ -2450,3 +2450,8 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 @container (min-width: 541px) {
     .v32-kpis { grid-template-columns: repeat(4, 1fr); }
 }
+.v32-pulse { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.v32-pulse > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.025); border: 1px solid var(--border); min-width: 0; }
+.v32-pulse strong { font-size: 0.9rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v32-pulse .v32-muted { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.4px; }
+@container (max-width: 360px) { .v32-pulse { grid-template-columns: 1fr 1fr; } .v32-pulse > div:last-child { grid-column: 1 / -1; } }

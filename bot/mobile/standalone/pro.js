@@ -215,6 +215,8 @@ function signalFrom(pre, params) {
 // 3. Signal state machine — single source of truth (backtest == live)
 // ---------------------------------------------------------------------
 const DEFAULT_PARAMS = { minScore: 1.5, agreement: 2, atrStopMult: 2.0 };
+// Lern-Modus: looser but still inside the walk-forward grid, so it stays testable
+const LEARN_PARAMS = { minScore: 1.0, agreement: 1, atrStopMult: 2.0 };
 const DEFAULT_SIM = {
     feeBps: 7.5,            // Binance taker incl. BNB discount, per side
     slipBps: 3.0,           // conservative for majors when no live book
@@ -675,9 +677,13 @@ class LiveEngine {
         // On a cold start, replay the last few bars to rebuild a pending watch.
         let startIdx = this.opts.warmReplay === false ? closed.length - 1 : closed.length - 1 - cb;
         if (st.lastTs) {
+            // Bars closed while the app was paused are replayed (max one day) so the
+            // watch state stays exact and missed entries can be reported honestly.
             const idx = closed.findIndex((c) => c.ts > st.lastTs);
-            if (idx >= 0 && closed.length - idx <= cb + 1) startIdx = idx;
-            else st.machine.reset();
+            if (idx >= 0) {
+                startIdx = Math.max(idx, closed.length - 96);
+                if (startIdx > idx) st.machine.reset();
+            } else st.machine.reset();
         }
         startIdx = Math.max(startIdx, 261);
         let decision = null;
@@ -687,6 +693,10 @@ class LiveEngine {
             const isLast = k === closed.length - 1;
             const res = st.machine.onBarClose(pre, closed[k].close, hasPosition);
             if (isLast) st.lastPre = pre;
+            if (res && !isLast && st.lastTs) {
+                st.missed = (st.missed || 0) + 1;
+                st.lastMissedAt = closed[k].ts + tf;
+            }
             if (res && isLast) {
                 decision = {
                     symbol, side: res.side, atr: pre.atr, regime: pre.regime, adx: pre.adx,
@@ -697,6 +707,8 @@ class LiveEngine {
             }
         }
         st.lastTs = lastBar.ts;
+        st.lastEvalAt = now;
+        if (decision) st.lastDecision = { side: decision.side, at: now, stale: decision.stale };
         st.watch = st.machine.watch ? { side: st.machine.watch.side, trigger: st.machine.watch.trigger, barsLeft: st.machine.watch.barsLeft } : null;
         return decision;
     }
@@ -895,7 +907,7 @@ async function runResearch(symbols, o = {}, onProgress = () => {}) {
 TB.pro = {
     version: "32.0",
     installDemoGuard, isBlockedRequest,
-    FAMILIES, FAMILY_LABELS, REGIME_LABELS, REGIME_WEIGHTS, PARAM_GRID, DEFAULT_PARAMS, DEFAULT_SIM, WINDOW, TF_MS,
+    FAMILIES, FAMILY_LABELS, REGIME_LABELS, REGIME_WEIGHTS, PARAM_GRID, DEFAULT_PARAMS, LEARN_PARAMS, DEFAULT_SIM, WINDOW, TF_MS,
     regimeOf, evaluateBar, signalFrom, SignalMachine,
     fetchKlinesRange, precompute, simulate, walkForward, portfolioSummary, runResearch,
     dailyReturns, tearSheet, probabilisticSharpe, expectedMaxSharpe, expectedMaxSharpeFromVar, bootstrapSharpeCI,
