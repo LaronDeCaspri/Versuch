@@ -7943,11 +7943,11 @@ function showAchievement(a) {
     // Toast
     const toast = document.createElement("div");
     toast.style.cssText = `
-        position:fixed; top:20px; right:20px; z-index:2000;
+        position:fixed; top:calc(env(safe-area-inset-top) + 64px); right:max(16px, env(safe-area-inset-right)); z-index:2000;
         background:var(--bg-2); border:1px solid var(--accent);
         border-left:4px solid var(--accent);
         padding:12px 16px; border-radius:8px; box-shadow:var(--shadow-lg);
-        display:flex; align-items:center; gap:12px; max-width:340px;
+        display:flex; align-items:center; gap:12px; max-width:min(340px, calc(100vw - 32px)); box-sizing:border-box;
         animation:slideIn 0.4s ease-out;
     `;
     toast.innerHTML = `
@@ -7960,7 +7960,7 @@ function showAchievement(a) {
     `;
     document.body.appendChild(toast);
     setTimeout(() => {
-        toast.style.transition = "all 0.4s"; toast.style.opacity = "0"; toast.style.transform = "translateX(20px)";
+        toast.style.transition = "all 0.4s"; toast.style.opacity = "0"; toast.style.transform = "translateY(-8px)";
         setTimeout(() => toast.remove(), 400);
     }, 5000);
 }
@@ -8049,7 +8049,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // Inject animation
 const style = document.createElement("style");
 style.textContent = `
-    @keyframes slideIn { from { opacity:0; transform:translateX(30px);} to {opacity:1; transform:translateX(0);} }
+    @keyframes slideIn { from { opacity:0; transform:translateY(-8px);} to {opacity:1; transform:translateY(0);} }
 `;
 document.head.appendChild(style);
 
@@ -10295,9 +10295,24 @@ setTimeout(async () => {
     if (await _proPollServer()) setInterval(_proPollServer, 30e3);
 }, 2000);
 
+// Wichtigstes zuerst: Entscheidung und Engine-Status direkt unter die Status-Banner,
+// egal welche Karten später dynamisch davor eingefügt wurden.
+function _proPrioritize() {
+    const anchor = document.getElementById("health-pulse") || document.getElementById("reality-banner");
+    if (!anchor || !anchor.parentNode) return;
+    let after = anchor;
+    for (const id of ["v32-server-card", "signal-tile", "v32-status-card"]) {
+        const el = document.getElementById(id);
+        if (!el || el.parentNode !== anchor.parentNode) continue;
+        if (after.nextElementSibling !== el) after.parentNode.insertBefore(el, after.nextElementSibling);
+        after = el;
+    }
+}
+
 function _proRenderAll() {
     try {
         _proEnsureCards();
+        _proPrioritize();
         _proRenderServer();
         _proRenderStatus();
         _proRenderTearSheet();
