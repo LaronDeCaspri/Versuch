@@ -1,5 +1,5 @@
-const CACHE = "trading-bot-standalone-v8";
-const ASSETS = ["./", "./app.css", "./app.js", "./lib.js", "./pro.js", "./radar.js", "./pro-worker.js", "./jarvis.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
+const CACHE = "trading-bot-standalone-v9";
+const ASSETS = ["./", "./app.css", "./app.js", "./lib.js", "./pro.js", "./radar.js", "./pro-worker.js", "./jarvis.js", "./jarvis-tts-worker.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
     e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).catch(() => {}));
@@ -8,7 +8,8 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
     e.waitUntil(caches.keys().then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+        // Only old app caches — the downloaded Jarvis voice ("jarvis-voice-*") must survive updates.
+        Promise.all(keys.filter((k) => k !== CACHE && k.startsWith("trading-bot-standalone")).map((k) => caches.delete(k)))
     ));
     self.clients.claim();
 });
@@ -18,7 +19,7 @@ self.addEventListener("fetch", (e) => {
     // Live server status must never come from the cache
     if (url.pathname.includes("/api/")) return;
     // Never cache API calls (Binance, F&G, etc.)
-    if (/binance\.com|alternative\.me|tradingview\.com|yahoo\.com|stooq\.com|allorigins\.win|frankfurter\.app|exchangerate\.host|open\.er-api\.com|financialmodelingprep\.com/.test(url.hostname)) return;
+    if (/binance\.com|alternative\.me|tradingview\.com|yahoo\.com|stooq\.com|allorigins\.win|frankfurter\.app|huggingface\.co|exchangerate\.host|open\.er-api\.com|financialmodelingprep\.com/.test(url.hostname)) return;
     if (e.request.method !== "GET" || url.origin !== self.location.origin) return;
     // Network first: every app update arrives immediately; the cache is only the offline fallback.
     e.respondWith(

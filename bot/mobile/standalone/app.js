@@ -3705,10 +3705,12 @@ const INFO_DB = {
         `,
     },
     "jarvis": {
-        title: "Jarvis — Sprach-KI",
+        title: "Jarvis — Sprachassistent",
         body: `
-            <p>Jarvis spricht dir auf Deutsch <strong>jedes Signal</strong>, jeden Stop-Loss und Take-Profit vor. Läuft komplett im Browser mit der Web-Speech-API — keine Cloud, keine Kosten.</p>
-            <p>Aktivieren, Stimme wählen, fertig. Perfekt wenn du nebenbei arbeitest — dein Handy sagt Bescheid wenn was passiert.</p>
+            <p><strong>Stimme:</strong> Neurale deutsche Stimme (Piper „Thorsten“), die komplett im Browser auf deinem Gerät läuft — kein Server, kein Konto, keine Kosten. Einmal laden (63 MB, HD 114 MB), danach offline gespeichert. Bis dahin nutzt Jarvis automatisch die beste Systemstimme deines Geräts.</p>
+            <p><strong>Ansagen:</strong> Trades, Stops, Alarme, Eilmeldungen geprüfter Redaktionen und Radar-HYPE — einzeln abschaltbar. Unwichtiges wird weggelassen, damit er nicht nervt.</p>
+            <p><strong>Sprachbefehle</strong> (Knopf „Sprechen“ oder Wake-Word „Jarvis …“): „Lagebericht“, „Positionen“, „Wie steht Bitcoin?“, „Was zeigt das Radar?“, „Gibt es News?“, „Ergebnis heute“, „Bot pausieren“, „Automatik an“, „leiser“, „stopp“.</p>
+            <p><strong>Sicherheit:</strong> Jarvis kann den Bot pausieren, aber niemals eine Order auslösen. Gehandelt wird ausschließlich im Demo-Konto. Spracherkennung nutzt die Web-Speech-API des Browsers (Chrome/Edge senden Audio dafür an den Browser-Hersteller).</p>
         `,
     },
     "positions": {
@@ -8033,7 +8035,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "40.0";
+const APP_VERSION = "41.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -10777,6 +10779,8 @@ async function _rdRefresh() {
     if (!RADAR.selected || !RADAR.bySymbol[RADAR.selected]) RADAR.selected = RADAR.coins[0] ? RADAR.coins[0].symbol : null;
     const newHype = RADAR.coins.filter((c) => c.level === "HYPE" && c.tracked && !(RADAR._lastHype || []).includes(c.symbol));
     if (newHype.length && typeof feedEvent === "function") feedEvent("info", `Aufmerksamkeits-Radar: HYPE bei ${newHype.map((c) => c.symbol).join(", ")} — ${newHype[0].advice}`);
+    if (newHype.length) window.dispatchEvent(new CustomEvent("jarvis", { detail: { kind: "radar", level: "info",
+        text: `Radar: ungewöhnlich viel Aufmerksamkeit bei ${newHype.map((c) => c.name).join(" und ")}. ${newHype[0].advice}` } }));
     RADAR._lastHype = RADAR.coins.filter((c) => c.level === "HYPE").map((c) => c.symbol);
     RADAR.sources = sources;
     RADAR.updatedAt = now;
@@ -11066,6 +11070,9 @@ function _npCheck() {
     NP.shown = [...cand, ...NP.shown];
     NP.queue = [...NP.shown.splice(NP.max), ...NP.queue].slice(0, 12);
     _npRender();
+    const top = cand[0], coins = _npCoins(top).map(_jvName);
+    window.dispatchEvent(new CustomEvent("jarvis", { detail: { kind: "news", level: "news",
+        text: `Neue Meldung von ${top.trusted.replace(" · via CMC", "")}${coins.length ? ` zu ${coins.join(" und ")}` : ""}.${cand.length > 1 ? ` Insgesamt ${cand.length} neue Meldungen.` : ""}` } }));
 }
 
 function _npRender() {
@@ -11142,6 +11149,125 @@ if (typeof INFO_DB === "object") {
                <p>Sicherheit: Titel werden als reiner Text angezeigt, Links nur mit http(s) und öffnen in einem neuen Tab ohne Zugriff auf die App. News beeinflussen keine Trades.</p>`,
     });
 }
+
+// ============================================================================
+// v41 — Jarvis-Gehirn: beantwortet Sprachbefehle mit echten Daten aus dem Bot.
+// Darf den Bot pausieren/fortsetzen (Papierhandel), aber niemals Orders auslösen.
+// ============================================================================
+const _JV_COINS = {
+    BTC: ["bitcoin", "btc"], ETH: ["ethereum", "ether", "eth"], SOL: ["solana", "sol"], BNB: ["binance", "bnb"],
+    XRP: ["ripple", "xrp"], ADA: ["cardano", "ada"], AVAX: ["avalanche", "avax"], LINK: ["chainlink", "link"],
+    DOGE: ["dogecoin", "doge"], PEPE: ["pepe"],
+};
+function _jvCoinIn(t) {
+    for (const [sym, words] of Object.entries(_JV_COINS)) if (words.some((w) => new RegExp(`\\b${w}\\b`).test(t))) return sym;
+    return null;
+}
+function _jvName(sym) { return (window.TB.radar && window.TB.radar.NAMES[sym]) || sym; }
+function _jvMoney(n) {
+    if (!Number.isFinite(n)) return "unbekannt";
+    const a = Math.abs(n);
+    return `${n < 0 ? "minus " : ""}${a >= 100 ? Math.round(a) : a.toFixed(2)} Dollar`;
+}
+function _jvDelta(n) { return Math.abs(n) < 0.5 ? "unverändert" : `${n >= 0 ? "plus" : "minus"} ${_jvMoney(Math.abs(n))}`; }
+function _jvPct(n) { return Number.isFinite(n) ? `${n >= 0 ? "plus" : "minus"} ${Math.abs(n).toFixed(1)} Prozent` : ""; }
+function _jvPositions() {
+    return Object.entries(broker.positions).map(([sym, p]) => {
+        const mark = state.prices[sym] || p.entry;
+        const upnl = (mark - p.entry) * p.qty * (p.side === "long" ? 1 : -1);
+        return { sym, side: p.side, upnl, pct: (mark / p.entry - 1) * 100 * (p.side === "long" ? 1 : -1) };
+    });
+}
+function _jvChange24(sym) {
+    const c = RADAR.bySymbol && RADAR.bySymbol[sym];
+    return c && Number.isFinite(c.change24h) ? c.change24h : null;
+}
+function _jvBriefing() {
+    const h = new Date().getHours();
+    const hello = h < 11 ? "Guten Morgen." : h < 18 ? "Guten Tag." : "Guten Abend.";
+    const eq = broker.equity(state.prices);
+    const day = eq - state.dayStartEquity;
+    const pos = _jvPositions();
+    const parts = [hello];
+    parts.push(`Das Demo-Depot steht bei ${_jvMoney(eq)}, heute ${_jvDelta(day)}.`);
+    if (pos.length) {
+        const u = pos.reduce((s, p) => s + p.upnl, 0);
+        parts.push(`${pos.length === 1 ? "Eine Position ist" : `${pos.length} Positionen sind`} offen, zusammen ${_jvMoney(u)}.`);
+    } else parts.push("Keine Position offen.");
+    if (state.halted) parts.push("Achtung: Der Kill-Switch hat den Handel pausiert.");
+    else parts.push(state.autoMode ? "Die Vollautomatik läuft." : "Der Bot ist im manuellen Modus.");
+    const results = (PRO.research && PRO.research.results) || [];
+    const validated = results.filter((r) => !r.error && r.live && r.live.params).map((r) => r.symbol.replace("/USDT", ""));
+    if (PRO.research) parts.push(validated.length ? `Validierte Edge bei ${validated.map(_jvName).join(", ")}.` : "Aktuell hat keine Strategie den Walk-Forward-Test bestanden, deshalb wartet der Bot.");
+    const btc = state.prices["BTC/USDT"];
+    if (btc) { const ch = _jvChange24("BTC"); parts.push(`Bitcoin steht bei ${Math.round(btc)} Dollar${ch != null ? `, ${_jvPct(ch)} in 24 Stunden` : ""}.`); }
+    const hot = (RADAR.coins || []).filter((c) => c.level !== "RUHIG" && c.score > 0).slice(0, 2);
+    if (hot.length) parts.push(`Auf dem Radar: ${hot.map((c) => `${c.name} mit ${c.score} Punkten`).join(" und ")}.`);
+    return parts.join(" ");
+}
+function _jvAnswer(raw) {
+    const t = String(raw || "").toLowerCase().replace(/[?!.,]/g, " ").replace(/\s+/g, " ").trim();
+    if (!t) return null;
+    if (/hilfe|was kannst du|befehle/.test(t))
+        return "Frag mich zum Beispiel: Lagebericht. Positionen. Wie steht Bitcoin. Was zeigt das Radar. Gibt es News. Wie ist das Ergebnis heute. Oder sag: Bot pausieren, beziehungsweise Automatik an.";
+    if (/danke/.test(t)) return "Gern geschehen.";
+    if (/uhrzeit|wie spät/.test(t)) return `Es ist ${new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr.`;
+    if (/(bot|handel|automatik|trading)\b.*\b(pause|pausier|stopp|stop|anhalten|aus)|^(pause|pausieren)$|manueller modus/.test(t)) {
+        if (!state.autoMode) return "Der Bot ist bereits im manuellen Modus. Es werden keine automatischen Trades eröffnet.";
+        $("#mode-toggle").click();
+        return "Verstanden. Vollautomatik pausiert. Offene Positionen behalten ihre Stops.";
+    }
+    if (/(automatik|bot|handel|trading)\b.*\b(an|ein|starten|start|fortsetzen|weiter)|^(weiter|fortsetzen)$/.test(t)) {
+        if (state.autoMode) return "Die Vollautomatik läuft bereits. Gehandelt wird nur im Demo-Konto.";
+        $("#mode-toggle").click();
+        return "Vollautomatik wieder aktiv. Gehandelt wird weiterhin nur mit Spielgeld.";
+    }
+    if (/(kauf|verkauf|order|long|short)\w*/.test(t) && !/position/.test(t))
+        return "Per Sprache eröffne ich keine Trades. Das entscheidet die geprüfte Strategie, und gehandelt wird nur im Demo-Konto.";
+    if (/position|offen/.test(t)) {
+        const pos = _jvPositions();
+        if (!pos.length) return "Keine Position offen.";
+        return pos.map((p) => `${_jvName(p.sym.replace("/USDT", ""))} ${p.side === "long" ? "long" : "short"}, ${_jvMoney(p.upnl)}, ${_jvPct(p.pct)}`).join(". ") + ".";
+    }
+    if (/ergebnis|gewinn|verlust|pnl|performance|bilanz|heute/.test(t)) {
+        const eq = broker.equity(state.prices);
+        const day = eq - state.dayStartEquity;
+        const closed = broker.journal.filter((j) => j.kind === "close");
+        const wins = closed.filter((j) => (j.pnl || 0) > 0).length;
+        const real = broker.realizedPnl();
+        return `Heute ${_jvDelta(day)}. Realisiert insgesamt ${Math.abs(real) < 0.5 ? "noch nichts" : _jvMoney(real)}${closed.length ? ` aus ${closed.length} Trades, Trefferquote ${Math.round(wins / closed.length * 100)} Prozent` : ""}.`;
+    }
+    const coin = _jvCoinIn(t);
+    if (coin && /kurs|preis|steht|stand|wie|was macht|^\w+$/.test(t)) {
+        const px = state.prices[`${coin}/USDT`] || (RADAR.bySymbol[coin] && RADAR.bySymbol[coin].price);
+        if (!px) return `Für ${_jvName(coin)} habe ich gerade keinen Kurs.`;
+        const ch = _jvChange24(coin);
+        const rd = RADAR.bySymbol[coin];
+        return `${_jvName(coin)} steht bei ${px >= 100 ? Math.round(px) : px.toFixed(px >= 1 ? 2 : 4)} Dollar${ch != null ? `, ${_jvPct(ch)} in 24 Stunden` : ""}.${rd && rd.level !== "RUHIG" ? ` Aufmerksamkeit: ${rd.level === "HYPE" ? "sehr hoch" : "erhöht"}.` : ""}`;
+    }
+    if (/radar|aufmerksam|hype|trend|worauf/.test(t)) {
+        const top = (RADAR.coins || []).filter((c) => c.score > 0).slice(0, 3);
+        if (!top.length) return "Das Radar hat gerade keine verwertbaren Daten.";
+        return "Die meiste Aufmerksamkeit haben gerade " + top.map((c) => `${c.name} mit ${c.score} Punkten`).join(", ") + ". " + (top[0].level === "HYPE" ? top[0].advice : "Nichts Auffälliges.");
+    }
+    if (/news|nachricht|neuigkeit|meldung|schlagzeile/.test(t)) {
+        const items = (state.news || []).map((n) => ({ ...n, trusted: _newsTrusted(n) })).filter((n) => n.trusted).slice(0, 3);
+        if (!items.length) return "Keine neuen Meldungen von geprüften Redaktionen.";
+        return `Die letzten Meldungen: ${items.map((n) => {
+            const coins = _npCoins(n).map(_jvName);
+            return `${n.trusted.replace(" · via CMC", "")}, ${_npAgo(n.ts)}${coins.length ? `, zu ${coins.join(" und ")}` : ""}`;
+        }).join(". ")}. Die Schlagzeilen stehen im News-Bereich.`;
+    }
+    if (/lage|status|bericht|überblick|update|wie läuft|wie steht|zusammenfassung|briefing/.test(t)) return _jvBriefing();
+    if (/engine|strategie|edge|walk/.test(t)) {
+        const results = (PRO.research && PRO.research.results) || [];
+        if (!results.length) return "Der Walk-Forward-Test läuft noch oder hat noch kein Ergebnis.";
+        const ok = results.filter((r) => !r.error && r.live && r.live.params).map((r) => _jvName(r.symbol.replace("/USDT", "")));
+        return ok.length ? `Validierte Edge nach Kosten bei ${ok.join(", ")}. Nur diese Märkte werden gehandelt.` : "Keine Strategie hat den Test nach Kosten bestanden. Der Bot wartet lieber, als Geld zu verbrennen.";
+    }
+    return null;
+}
+window.TBJarvisBrain = { answer: _jvAnswer, briefing: _jvBriefing };
 
 (function showVersion() {
     const f = document.querySelector("footer");

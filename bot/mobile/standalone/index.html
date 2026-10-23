@@ -194,20 +194,39 @@
         <div id="killswitch"></div>
     </div>
 
-    <div class="card">
-        <h2>Jarvis · Sprach-KI <span class="badge" id="jarvis-badge">deaktiviert</span> <span class="info" data-info="jarvis">ⓘ</span></h2>
-        <div id="jarvis-panel">
-            <div id="jarvis-orb">J</div>
-            <div id="jarvis-status">
-                <div class="title">Jarvis bereit</div>
-                <div class="subtitle">Spricht Signale und Trades auf Deutsch.</div>
+    <div class="card v31-card jv2-card" id="jarvis-card" data-phase="idle">
+        <h2>Jarvis <span class="badge" id="jarvis-badge">aus</span> <span class="info" data-info="jarvis">ⓘ</span></h2>
+        <div class="jv2-stage">
+            <canvas id="jv2-orb" class="jv2-orb" aria-hidden="true"></canvas>
+            <div class="jv2-state" aria-live="polite">
+                <div class="jv2-title" id="jv2-title">Ausgeschaltet</div>
+                <div class="jv2-sub" id="jv2-sub">Aktivieren, damit Jarvis spricht und zuhört.</div>
+                <div class="jv2-transcript" id="jv2-transcript" hidden></div>
             </div>
         </div>
-        <div id="jarvis-controls">
-            <button id="jarvis-toggle">Jarvis aktivieren</button>
-            <select id="jarvis-voice-picker" title="Stimme"></select>
+        <div class="jv2-actions">
+            <button id="jarvis-toggle" class="primary">Jarvis aktivieren</button>
+            <button id="jv2-mic" class="jv2-mic" disabled><span aria-hidden="true">●</span> Sprechen</button>
+            <button id="jv2-brief">Lagebericht</button>
         </div>
-        <div id="jarvis-log"></div>
+        <div class="jv2-voice" id="jv2-voice"></div>
+        <details class="jv2-settings">
+            <summary>Stimme &amp; Einstellungen</summary>
+            <label class="jv2-field"><span>Stimme</span><select id="jarvis-voice-picker" title="Stimme"></select></label>
+            <label class="jv2-field"><span>Tempo</span><input type="range" id="jv2-rate" min="0.7" max="1.4" step="0.05"></label>
+            <label class="jv2-field"><span>Lautstärke</span><input type="range" id="jv2-vol" min="0.1" max="1" step="0.05"></label>
+            <div class="jv2-checks">
+                <label><input type="checkbox" id="jv2-wake"> Wake-Word „Jarvis“ (Mikrofon hört mit)</label>
+                <label><input type="checkbox" id="jv2-brief-auto"> Tages-Briefing beim ersten Öffnen</label>
+                <label><input type="checkbox" id="jv2-say-trades"> Trades ansagen</label>
+                <label><input type="checkbox" id="jv2-say-alerts"> Alarme ansagen</label>
+                <label><input type="checkbox" id="jv2-say-news"> Eilmeldungen ansagen</label>
+                <label><input type="checkbox" id="jv2-say-radar"> Radar-HYPE ansagen</label>
+                <label><input type="checkbox" id="jv2-say-info"> Sonstige Hinweise</label>
+            </div>
+            <div class="jv2-row-btns"><button class="ghost" data-jv="test">Stimme testen</button><button class="ghost" data-jv="purge">Neurale Stimme vom Gerät löschen</button></div>
+        </details>
+        <div id="jarvis-log" aria-label="Jarvis-Protokoll"></div>
     </div>
 
     <div class="card">
