@@ -3821,7 +3821,7 @@ const INFO_DB = {
     "news": {
         title: "Live-News",
         body: `
-            <p>Aktuelle Kryptowährungs-News aus mehreren Quellen (CoinDesk, Cointelegraph, Decrypt, Reddit). Wird alle 5 Min aktualisiert.</p>
+            <p>Aktuelle Krypto-News aus mehreren Quellen (CoinDesk, CryptoCompare, Cointelegraph, Decrypt, Bitcoin Magazine, The Block, Reddit). Die Quellen werden parallel abgefragt und zusammengeführt; fällt eine aus, springen die anderen ein. Aktualisierung alle 5 Min.</p><p>Es gibt keinen Schalter: Sind alle Quellen gleichzeitig nicht erreichbar, zeigt der Status-Tab „Live-News“ rot. Der Bot handelt davon unabhängig, denn News fließen nicht in die Entscheidungen der Pro-Engine ein.</p>
         `,
     },
     "risk-metrics": {
