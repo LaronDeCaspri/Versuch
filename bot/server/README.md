@@ -31,7 +31,8 @@ Der Port ist absichtlich nur lokal gebunden. Für Zugriff vom Handy einen Tunnel
 | Variable | Standard | Bedeutung |
 |---|---|---|
 | `TB_SYMBOLS` | `BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,AVAX/USDT,LINK/USDT` | gehandelte Paare |
-| `TB_STRICT` | `0` | `1` = nur Symbole mit validierter Edge handeln |
+| `TB_TIMEFRAME` | `auto` | `auto` = Sieger des Walk-Forward-Vergleichs 15 Min vs. 1 Std, oder fest `15m` / `1h` |
+| `TB_STRICT` | `1` | Profi-Einstellung: nur Symbole mit validierter Edge handeln; `0` = alle Symbole |
 | `TB_RESEARCH_DAYS` | `180` | Historie für den täglichen Walk-Forward |
 | `TB_STATE_DIR` | `server/state` | Depot, Journal, Ereignis-Log |
 | `PORT` / `TB_HOST` | `8787` / `127.0.0.1` | Server-Adresse |
@@ -39,7 +40,8 @@ Der Port ist absichtlich nur lokal gebunden. Für Zugriff vom Handy einen Tunnel
 
 ## Was der Server tut
 
-- scannt alle 30 Sekunden die 15-Minuten-Kerzen und prüft Stops/Targets bei jedem Trade-Tick aus dem Binance-Stream
+- vergleicht täglich 15-Minuten- und 1-Stunden-Kerzen im Walk-Forward und handelt auf dem besseren Zeitrahmen (ohne nachgewiesene Edge: 1 Stunde)
+- scannt alle 30 Sekunden die Kerzen und prüft Stops/Targets bei jedem Trade-Tick aus dem Binance-Stream
 - trifft Entscheidungen ausschließlich mit der Signal-Logik, die im Walk-Forward getestet wurde
 - rechnet jeden Fill mit 7,5 bps Gebühr und Slippage aus dem Live-Orderbuch
 - handelt jeden Trade mit regulärer Größe: Ziel 0,5 % Risiko bis zum Stop, aber jede Position höchstens 12 % des Depots (Spot ohne Hebel) — auf 15-Minuten-Kerzen ergibt das meist rund 0,1–0,2 % Risiko pro Trade

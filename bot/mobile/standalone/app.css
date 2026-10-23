@@ -2455,3 +2455,29 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 .v32-pulse strong { font-size: 0.9rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v32-pulse .v32-muted { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.4px; }
 @container (max-width: 360px) { .v32-pulse { grid-template-columns: 1fr 1fr; } .v32-pulse > div:last-child { grid-column: 1 / -1; } }
+
+/* v36: Zeitrahmen-Vergleich + Profi-Profil */
+.v32-tfs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 4px 0 8px; }
+.v32-tf {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left;
+    padding: 10px 12px; border-radius: 10px; cursor: pointer; min-width: 0;
+    background: rgba(255,255,255,0.025); border: 1px solid var(--border); color: var(--text);
+}
+.v32-tf.active { border-color: rgba(139, 92, 246, 0.5); background: rgba(139, 92, 246, 0.08); }
+.v32-tf-name { font-weight: 600; font-size: 0.8rem; }
+.v32-tf-kpi { font-size: 0.68rem; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.v32-profile {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px; border-radius: 10px; margin-bottom: 4px;
+    background: rgba(139, 92, 246, 0.07); border: 1px solid rgba(139, 92, 246, 0.25); font-size: 0.8rem;
+}
+.v32-profile small { color: var(--muted); }
+.v32-profile button { flex-shrink: 0; min-width: 96px; }
+.v32-profile button[disabled] { opacity: 0.6; cursor: default; }
+.v32-select { align-items: center; justify-content: space-between; cursor: default; }
+.v32-select select {
+    flex-shrink: 0; max-width: 46%; padding: 8px 10px; border-radius: 8px;
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong); color-scheme: dark;
+}
+@container (max-width: 380px) { .v32-tfs { grid-template-columns: 1fr; } .v32-select { flex-wrap: wrap; } .v32-select select { max-width: 100%; width: 100%; } }
+.v32-pills > .v32-pill { flex: 0 0 auto; }

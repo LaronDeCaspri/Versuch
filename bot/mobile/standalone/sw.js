@@ -1,4 +1,4 @@
-const CACHE = "trading-bot-standalone-v4";
+const CACHE = "trading-bot-standalone-v5";
 const ASSETS = ["./", "./app.css", "./app.js", "./lib.js", "./pro.js", "./pro-worker.js", "./jarvis.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -19,8 +19,16 @@ self.addEventListener("fetch", (e) => {
     if (url.pathname.includes("/api/")) return;
     // Never cache API calls (Binance, F&G, etc.)
     if (/binance\.com|alternative\.me|tradingview\.com|yahoo\.com|stooq\.com|allorigins\.win|frankfurter\.app|exchangerate\.host|open\.er-api\.com|financialmodelingprep\.com/.test(url.hostname)) return;
+    if (e.request.method !== "GET" || url.origin !== self.location.origin) return;
+    // Network first: every app update arrives immediately; the cache is only the offline fallback.
     e.respondWith(
-        caches.match(e.request).then((r) => r || fetch(e.request).catch(() => caches.match("./")))
+        fetch(e.request).then((res) => {
+            if (res && res.ok) {
+                const copy = res.clone();
+                caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+            }
+            return res;
+        }).catch(() => caches.match(e.request).then((r) => r || caches.match("./")))
     );
 });
 

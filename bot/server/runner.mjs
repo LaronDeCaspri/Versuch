@@ -13,9 +13,11 @@ const STATE_DIR = path.resolve(env.TB_STATE_DIR || path.join(here, "state"));
 const PORT = Number(env.PORT || 8787);
 const HOST = env.TB_HOST || "127.0.0.1";
 const SYMBOLS = (env.TB_SYMBOLS || "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,ADA/USDT,AVAX/USDT,LINK/USDT").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
-const INTERVAL = "15m";
+const TIMEFRAMES = ["15m", "1h"];
+const TF_MODE = TIMEFRAMES.includes(env.TB_TIMEFRAME) ? env.TB_TIMEFRAME : "auto";   // Profi: auto
+let INTERVAL = TF_MODE === "auto" ? "1h" : TF_MODE;
 const MOCK = env.TB_MOCK === "1";
-const STRICT = env.TB_STRICT === "1";
+const STRICT = env.TB_STRICT !== "0";   // Profi: only validated edge unless explicitly disabled
 const RESEARCH_DAYS = Number(env.TB_RESEARCH_DAYS || 180);
 const SCAN_MS = 30e3;
 const MAX_POSITIONS = 6;
@@ -47,15 +49,21 @@ const broker = new TB.PaperBroker(10000);
 const prices = {};
 const deriv = {};
 const rejects = [];
-let research = null;
-try { research = JSON.parse(localStorage.getItem("tb_pro_research_v1") || "null"); } catch (e) { research = null; }
+let researchAll = null;
+try { researchAll = JSON.parse(localStorage.getItem("tb_pro_research_v2") || "null"); } catch (e) { researchAll = null; }
+if (TF_MODE === "auto" && researchAll && TIMEFRAMES.includes(researchAll.chosen)) INTERVAL = researchAll.chosen;
+const currentResearch = () => (researchAll && researchAll.byTf ? researchAll.byTf[INTERVAL] || null : null);
 let researchRunning = false, researchProgress = null;
 const startedAt = Date.now();
 let lastScanAt = null, scans = 0;
 
-const resultFor = (s) => research && Array.isArray(research.results) ? research.results.find((r) => r.symbol === s && !r.error) || null : null;
+const resultFor = (s) => { const r = currentResearch(); return r && Array.isArray(r.results) ? r.results.find((x) => x.symbol === s && !x.error) || null : null; };
 const validated = (s) => { const r = resultFor(s); return !!(r && r.live && r.live.params && (r.verdict.code === "EDGE" || r.verdict.code === "PROMISING")); };
-const paramsFor = (s) => { const r = resultFor(s); if (r && r.live && r.live.params) return r.live.params; return STRICT ? null : { ...P.DEFAULT_PARAMS }; };
+const paramsFor = (s) => {
+    const r = resultFor(s);
+    if (STRICT) return validated(s) ? r.live.params : null;
+    return r && r.live && r.live.params ? r.live.params : { ...P.DEFAULT_PARAMS };
+};
 let engine = new P.LiveEngine({ interval: INTERVAL, paramsFor });
 
 const onTick = (symbol, price) => {
@@ -123,9 +131,10 @@ async function refreshDerivs() {
 }
 
 function researchStale() {
-    if (!research || !research.computedAt) return true;
-    if (Date.now() - research.computedAt > 24 * 3600e3) return true;
-    return (research.results || []).map((r) => r.symbol).join(",") !== SYMBOLS.join(",");
+    if (!researchAll || !researchAll.computedAt || !researchAll.byTf) return true;
+    if (Date.now() - researchAll.computedAt > 24 * 3600e3) return true;
+    if (TIMEFRAMES.some((tf) => !researchAll.byTf[tf])) return true;
+    return (researchAll.symbols || []).join(",") !== SYMBOLS.join(",");
 }
 
 async function runResearch() {
@@ -133,15 +142,22 @@ async function runResearch() {
     researchRunning = true;
     log("research", `Walk-Forward startet (${RESEARCH_DAYS} Tage, ${SYMBOLS.length} Symbole)`);
     try {
-        const res = await P.runResearch(SYMBOLS, {
-            days: RESEARCH_DAYS, interval: INTERVAL,
+        const res = await P.runResearchMulti(SYMBOLS, {
+            days: RESEARCH_DAYS, intervals: TIMEFRAMES,
             sim: { riskPct: BASE_RISK_PCT, maxNotionalPct: MAX_NOTIONAL_PCT },
         }, (p) => { researchProgress = p; });
-        research = res;
-        localStorage.setItem("tb_pro_research_v1", JSON.stringify(res));
+        researchAll = res;
+        localStorage.setItem("tb_pro_research_v2", JSON.stringify(res));
+        if (TF_MODE === "auto" && res.chosen && res.chosen !== INTERVAL) {
+            log("timeframe", `Zeitrahmen ${INTERVAL} → ${res.chosen} (Walk-Forward-Vergleich)`);
+            INTERVAL = res.chosen;
+        }
         engine = new P.LiveEngine({ interval: INTERVAL, paramsFor });
-        const p = res.portfolio;
-        log("research", p ? `Walk-Forward fertig: ${p.verdict.label}, Sharpe ${p.stats.sharpe.toFixed(2)}, ${p.stats.trades} Trades` : "Walk-Forward fertig: keine auswertbaren Symbole");
+        const summary = TIMEFRAMES.map((tf) => {
+            const p = res.byTf[tf] && res.byTf[tf].portfolio;
+            return p ? `${tf}: ${p.verdict.label}, Sharpe ${p.stats.sharpe.toFixed(2)}, ${p.stats.trades} Trades` : `${tf}: keine Daten`;
+        }).join(" | ");
+        log("research", `Walk-Forward fertig · ${summary} · live: ${INTERVAL}`);
     } catch (e) {
         log("error", `Walk-Forward: ${e.message}`);
     } finally {
@@ -176,7 +192,9 @@ function status() {
             return { symbol: s, regime: st && st.lastPre ? st.lastPre.regime : null, watch: st ? st.watch : null, validated: validated(s) };
         }),
         market: SYMBOLS.map((s) => ({ symbol: s, price: prices[s] || null, micro: micro.metrics(s), deriv: deriv[s] || null })),
-        research: research ? { computedAt: research.computedAt, days: research.days, portfolio: research.portfolio, results: (research.results || []).map(slim) } : null,
+        timeframe: { live: INTERVAL, mode: TF_MODE, chosen: researchAll ? researchAll.chosen : null }, strict: STRICT,
+        research: currentResearch() ? { computedAt: currentResearch().computedAt, days: currentResearch().days, portfolio: currentResearch().portfolio, results: (currentResearch().results || []).map(slim) } : null,
+        researchByTf: researchAll && researchAll.byTf ? Object.fromEntries(TIMEFRAMES.map((tf) => [tf, researchAll.byTf[tf] && researchAll.byTf[tf].portfolio ? { verdict: researchAll.byTf[tf].portfolio.verdict, sharpe: researchAll.byTf[tf].portfolio.stats.sharpe, dsr: researchAll.byTf[tf].portfolio.stats.dsr, trades: researchAll.byTf[tf].portfolio.stats.trades } : null])) : null,
         researchRunning, researchProgress,
         rejects: rejects.slice(0, 10),
     };
@@ -207,7 +225,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-    log("start", `Paper-Trading-Server läuft auf http://${HOST}:${PORT} · ${SYMBOLS.join(", ")} · Daten: ${MOCK ? "synthetisch" : "Binance live"} · Zustand: ${STATE_DIR}`);
+    log("start", `Paper-Trading-Server läuft auf http://${HOST}:${PORT} · ${SYMBOLS.join(", ")} · Zeitrahmen: ${TF_MODE === "auto" ? `automatisch (aktuell ${INTERVAL})` : INTERVAL} · ${STRICT ? "nur validierte Edge" : "alle Symbole"} · Daten: ${MOCK ? "synthetisch" : "Binance live"} · Zustand: ${STATE_DIR}`);
 });
 
 let scanning = false;
@@ -239,21 +257,35 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 // ---- synthetic exchange for offline runs and CI --------------------------------
 function installMockExchange() {
     const TF = 900e3;
-    const days = Math.max(RESEARCH_DAYS, 30) + 10;
+    const days = Math.max(RESEARCH_DAYS, 30) + 30;   // 1h needs ~21 days of warm-up bars
     const n = days * 96 + 600;
     const endTs = Date.now() + 2 * 86400e3;
     const series = {};
     SYMBOLS.forEach((s, i) => {
         series[s.replace("/", "")] = syntheticCandles(n, { seed: 101 + i, start: [68000, 3400, 165, 580][i] || 100, vol: 0.0035, endTs });
     });
-    const visible = (sym) => (series[sym] || []).filter((c) => c.ts <= Date.now());
+    // 1h bars aggregated from the same 15m path, so both timeframes see one market
+    const toHourly = (bars) => {
+        const out = [];
+        for (const b of bars) {
+            const ts = Math.floor(b.ts / 3600e3) * 3600e3;
+            const h = out[out.length - 1];
+            if (h && h.ts === ts) { h.high = Math.max(h.high, b.high); h.low = Math.min(h.low, b.low); h.close = b.close; h.volume += b.volume; }
+            else out.push({ ts, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume });
+        }
+        return out;
+    };
+    const visible = (sym, interval = "15m") => {
+        const bars = (series[sym] || []).filter((c) => c.ts <= Date.now());
+        return interval === "1h" ? toHourly(bars) : bars;
+    };
     const asKline = (c) => [c.ts, String(c.open), String(c.high), String(c.low), String(c.close), String(c.volume), c.ts + TF - 1, "0", 1, "0", "0", "0"];
     const ok = (body) => ({ ok: true, status: 200, json: async () => body });
     globalThis.fetch = async (input) => {
         const u = new URL(String(input));
         const sym = u.searchParams.get("symbol") || "";
         if (u.pathname.endsWith("/klines")) {
-            const all = visible(sym);
+            const all = visible(sym, u.searchParams.get("interval") || "15m");
             const limit = Math.min(1000, Number(u.searchParams.get("limit") || 500));
             const st = u.searchParams.get("startTime");
             if (st) { const i = all.findIndex((c) => c.ts >= Number(st)); return ok(i < 0 ? [] : all.slice(i, i + limit).map(asKline)); }

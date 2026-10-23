@@ -648,7 +648,9 @@ function portfolioSummary(results) {
 // ---------------------------------------------------------------------
 class LiveEngine {
     constructor(opts = {}) {
-        this.opts = { ...DEFAULT_SIM, interval: "15m", maxDelayMs: 120e3, ...opts };
+        const tf = TF_MS[opts.interval || "15m"] || 900e3;
+        // late-detection tolerance grows with the bar: 2 min on 15m, ~5 min on 1h
+        this.opts = { ...DEFAULT_SIM, interval: "15m", maxDelayMs: Math.max(120e3, tf * 0.08), ...opts };
         this.state = {};
     }
     _params(symbol) {
@@ -888,7 +890,7 @@ async function runResearch(symbols, o = {}, onProgress = () => {}) {
         const base = s / symbols.length, span = 1 / symbols.length;
         try {
             onProgress({ symbol, phase: "Lade Historie", pct: base });
-            const candles = o.candlesFor ? await o.candlesFor(symbol) : await fetchKlinesRange(symbol, o.interval || "15m", o.days || 90,
+            const candles = o.candlesFor ? await o.candlesFor(symbol, o.interval || "15m") : await fetchKlinesRange(symbol, o.interval || "15m", o.days || 90,
                 (p) => onProgress({ symbol, phase: "Lade Historie", pct: base + span * 0.15 * p }));
             const prepared = await precompute(candles, (p) => onProgress({ symbol, phase: "Berechne Signale", pct: base + span * (0.15 + 0.8 * p) }));
             onProgress({ symbol, phase: "Walk-Forward", pct: base + span * 0.97 });
@@ -902,12 +904,46 @@ async function runResearch(symbols, o = {}, onProgress = () => {}) {
     return { results, portfolio: portfolioSummary(results), computedAt: Date.now(), days: o.days || 90, interval: o.interval || "15m" };
 }
 
+// Runs the full research for several timeframes and picks one with a fixed,
+// documented rule: verdict first, then Deflated Sharpe, then net Sharpe. With no
+// evidence on either, the longer timeframe wins (fewer trades, lower cost drag).
+const VERDICT_RANK = { EDGE: 3, PROMISING: 2, NONE: 0, DATA: 0 };
+function chooseTimeframe(byTf) {
+    const tfs = Object.keys(byTf).filter((tf) => byTf[tf] && byTf[tf].portfolio);
+    if (!tfs.length) return null;
+    const longest = tfs.slice().sort((a, b) => (TF_MS[b] || 0) - (TF_MS[a] || 0))[0];
+    const score = (tf) => {
+        const p = byTf[tf].portfolio;
+        return [VERDICT_RANK[p.verdict.code] || 0, p.stats.dsr || 0, p.stats.sharpe || 0];
+    };
+    const ranked = tfs.slice().sort((a, b) => {
+        const A = score(a), B = score(b);
+        for (let i = 0; i < A.length; i++) if (A[i] !== B[i]) return B[i] - A[i];
+        return (TF_MS[b] || 0) - (TF_MS[a] || 0);
+    });
+    return score(ranked[0])[0] === 0 ? longest : ranked[0];
+}
+
+async function runResearchMulti(symbols, o = {}, onProgress = () => {}) {
+    const intervals = o.intervals && o.intervals.length ? o.intervals : [o.interval || "15m"];
+    const byTf = {};
+    for (let k = 0; k < intervals.length; k++) {
+        const interval = intervals[k];
+        byTf[interval] = await runResearch(symbols, { ...o, interval }, (p) => onProgress({
+            ...p, interval, pct: (k + (p.pct || 0)) / intervals.length,
+            phase: `${interval === "1h" ? "1 Std" : interval === "15m" ? "15 Min" : interval} · ${p.phase || ""}`,
+        }));
+    }
+    onProgress({ phase: "Fertig", pct: 1 });
+    return { byTf, chosen: chooseTimeframe(byTf), computedAt: Date.now(), days: o.days || 90, symbols };
+}
+
 TB.pro = {
     version: "32.0",
     installDemoGuard, isBlockedRequest,
     FAMILIES, FAMILY_LABELS, REGIME_LABELS, REGIME_WEIGHTS, PARAM_GRID, DEFAULT_PARAMS, DEFAULT_SIM, WINDOW, TF_MS,
     regimeOf, evaluateBar, signalFrom, SignalMachine,
-    fetchKlinesRange, precompute, simulate, walkForward, portfolioSummary, runResearch,
+    fetchKlinesRange, precompute, simulate, walkForward, portfolioSummary, runResearch, runResearchMulti, chooseTimeframe,
     dailyReturns, tearSheet, probabilisticSharpe, expectedMaxSharpe, expectedMaxSharpeFromVar, bootstrapSharpeCI,
     normCdf, normInv, mean, std,
     LiveEngine, MicroStream, slippageBps, fetchDerivatives, liveControls,

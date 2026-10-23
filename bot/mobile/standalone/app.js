@@ -56,9 +56,31 @@ function loadSymbols() {
     return stored && Array.isArray(stored) && stored.length ? stored : TRADER_CONSENSUS.symbols.slice();
 }
 
+// Profi-Profil (v36): einmalig für alle bestehenden Installationen setzen.
+// Zeitrahmen per Walk-Forward-Vergleich, gehandelt wird nur nachgewiesene Edge.
+const PRO_PROFILE_ID = "pro-v36";
+function applyProProfile() {
+    try {
+        localStorage.setItem("tb_timeframe", "auto");
+        localStorage.setItem("tb_pro_strict", "1");
+        localStorage.setItem("tb_pro_mode", "1");
+        localStorage.setItem("tb_profile", PRO_PROFILE_ID);
+    } catch (e) { /* storage unavailable */ }
+}
+try { if (localStorage.getItem("tb_profile") !== PRO_PROFILE_ID) applyProProfile(); } catch (e) { /* storage unavailable */ }
+
+const TIMEFRAMES = ["15m", "1h"];
+function loadTimeframe() {
+    let mode = "auto", auto = null;
+    try { mode = localStorage.getItem("tb_timeframe") || "auto"; auto = localStorage.getItem("tb_tf_auto"); } catch (e) { /* defaults */ }
+    if (TIMEFRAMES.includes(mode)) return mode;
+    return TIMEFRAMES.includes(auto) ? auto : "1h";   // without test results the longer, cheaper timeframe
+}
+
 const CFG = {
     ...TRADER_CONSENSUS,
     symbols: loadSymbols(),
+    primaryTf: loadTimeframe(),
 };
 
 const state = {
@@ -9805,7 +9827,16 @@ const PE = window.TB.pro;
 const PRO = (window.PRO = window.PRO || {});
 PRO.enabled = localStorage.getItem("tb_pro_mode") !== "0";
 PRO.strict = localStorage.getItem("tb_pro_strict") === "1";
-PRO.research = (() => { try { return JSON.parse(localStorage.getItem("tb_pro_research_v1") || "null"); } catch (e) { return null; } })();
+// Walk-Forward-Ergebnisse je Zeitrahmen: { byTf: { "15m": …, "1h": … }, chosen, computedAt, symbols }
+PRO.researchAll = (() => { try { return JSON.parse(localStorage.getItem("tb_pro_research_v2") || "null"); } catch (e) { return null; } })();
+try { localStorage.removeItem("tb_pro_research_v1"); } catch (e) { /* noop */ }
+Object.defineProperty(PRO, "research", {
+    configurable: true,
+    get() { return PRO.researchAll && PRO.researchAll.byTf ? PRO.researchAll.byTf[CFG.primaryTf] || null : null; },
+});
+PRO.timeframeMode = (() => { try { return localStorage.getItem("tb_timeframe") || "auto"; } catch (e) { return "auto"; } })();
+PRO.viewTf = null;
+const _TF_LABEL = { "15m": "15 Min", "1h": "1 Std" };
 PRO.running = false;
 PRO.progress = null;
 PRO.micro = null;
@@ -9829,10 +9860,14 @@ function _proValidated(symbol) {
 }
 PRO.paramsFor = function(symbol) {
     const r = _proResult(symbol);
+    if (PRO.strict) return _proValidated(symbol) ? r.live.params : null;
     if (r && r.live && r.live.params) return r.live.params;
-    return PRO.strict ? null : { ...PE.DEFAULT_PARAMS };
+    return { ...PE.DEFAULT_PARAMS };
 };
-PRO.engine = new PE.LiveEngine({ interval: CFG.primaryTf, paramsFor: (s) => PRO.paramsFor(s) });
+function _proNewEngine() {
+    return new PE.LiveEngine({ interval: CFG.primaryTf, paramsFor: (s) => PRO.paramsFor(s) });
+}
+PRO.engine = _proNewEngine();
 
 // Fills priced off the live order book when the stream is up
 broker.slipModel = (sym, side, notional, isExit) => PE.slippageBps(PRO.micro, sym, side, notional, isExit);
@@ -9973,13 +10008,14 @@ function _proNextCloseMs() {
 function _proExpectedPerDay() {
     const syms = _proSymbols();
     const R = PRO.research;
+    const base = CFG.primaryTf === "1h" ? 0.32 : 1.2;   // measured backtest rates of the default thresholds
     let sum = 0;
     for (const s of syms) {
         const r = _proResult(s);
         if (r && r.stats && r.stats.days > 0 && r.live && r.live.params) sum += r.stats.trades / r.stats.days;
-        else if (!PRO.strict) sum += 1.2;   // measured backtest rate of the default thresholds
+        else if (!PRO.strict) sum += base;
     }
-    return R ? sum : (PRO.strict ? 0 : syms.length * 1.2);
+    return R ? sum : (PRO.strict ? 0 : syms.length * base);
 }
 setInterval(() => {
     const el = document.getElementById("v32-countdown");
@@ -10010,24 +10046,40 @@ setInterval(() => { _proRefreshDerivs().catch(() => {}); }, 5 * 60e3);
 
 // ---- research: walk-forward in a Web Worker --------------------------------
 function _proResearchStale() {
-    const r = PRO.research;
-    if (!r || !r.computedAt) return true;
+    const r = PRO.researchAll;
+    if (!r || !r.computedAt || !r.byTf) return true;
     if (Date.now() - r.computedAt > 24 * 3600e3) return true;
-    const have = (r.results || []).map((x) => x.symbol).join(",");
-    return have !== _proSymbols().join(",");
+    if (TIMEFRAMES.some((tf) => !r.byTf[tf])) return true;
+    return (r.symbols || []).join(",") !== _proSymbols().join(",");
+}
+
+// Switch the live timeframe: new engine, kline stream on the new interval, fresh scan.
+function _proSwitchTf(tf, reason) {
+    if (!TIMEFRAMES.includes(tf) || tf === CFG.primaryTf) return;
+    CFG.primaryTf = tf;
+    PRO.engine = _proNewEngine();
+    for (const sym of Object.keys(state.candles)) delete state.candles[sym];
+    try { if (typeof startBinanceStream === "function" && _binanceStream) startBinanceStream(); } catch (e) { /* stream restarts on next symbol change */ }
+    if (typeof feedEvent === "function") feedEvent("info", `Zeitrahmen jetzt ${_TF_LABEL[tf]}${reason ? ` — ${reason}` : ""}`);
+    if (typeof scanAll === "function") setTimeout(() => scanAll().catch(() => {}), 500);
+    _proRenderAll();
 }
 
 function _proResearchDone(res) {
     PRO.running = false;
     PRO.progress = null;
-    PRO.research = res;
-    try { localStorage.setItem("tb_pro_research_v1", JSON.stringify(res)); } catch (e) { /* storage full: keep in memory */ }
-    const p = res.portfolio;
+    PRO.researchAll = res;
+    try { localStorage.setItem("tb_pro_research_v2", JSON.stringify(res)); } catch (e) { /* storage full: keep in memory */ }
+    if (res.chosen) { try { localStorage.setItem("tb_tf_auto", res.chosen); } catch (e) { /* noop */ } }
     if (typeof feedEvent === "function") {
-        feedEvent("info", p
-            ? `Walk-Forward fertig: ${p.verdict.label} · OOS-Sharpe ${_fmtNum(p.stats.sharpe)} netto · ${p.stats.trades} Trades · Buy&Hold ${_fmtNum(p.bench.sharpe)}`
-            : "Walk-Forward fertig: keine auswertbaren Symbole");
+        const parts = TIMEFRAMES.map((tf) => {
+            const p = res.byTf[tf] && res.byTf[tf].portfolio;
+            return p ? `${_TF_LABEL[tf]}: ${p.verdict.label}, Sharpe ${_fmtNum(p.stats.sharpe)}, ${p.stats.trades} Trades` : `${_TF_LABEL[tf]}: keine Daten`;
+        });
+        feedEvent("info", `Walk-Forward fertig · ${parts.join(" · ")}${res.chosen ? ` · besser: ${_TF_LABEL[res.chosen]}` : ""}`);
     }
+    if (PRO.timeframeMode === "auto" && res.chosen) _proSwitchTf(res.chosen, "vom Walk-Forward-Vergleich gewählt");
+    PRO.engine = _proNewEngine();
     _proRenderAll();
 }
 
@@ -10035,14 +10087,14 @@ PRO.runResearch = function() {
     if (PRO.running) return;
     const symbols = _proSymbols();
     const opts = {
-        days: PRO.RESEARCH_DAYS, interval: CFG.primaryTf,
+        days: PRO.RESEARCH_DAYS, intervals: TIMEFRAMES.slice(),
         sim: { riskPct: CFG.baseRiskPct, maxNotionalPct: CFG.maxNotionalPctPerPosition },
     };
     PRO.running = true;
     PRO.progress = { phase: "Start", pct: 0 };
     _proRenderAll();
     const inline = () => {
-        PE.runResearch(symbols, opts, (p) => { PRO.progress = p; _proRenderProgress(); })
+        PE.runResearchMulti(symbols, opts, (p) => { PRO.progress = p; _proRenderProgress(); })
             .then(_proResearchDone)
             .catch((e) => { PRO.running = false; PRO.progress = null; if (typeof feedEvent === "function") feedEvent("info", `Walk-Forward fehlgeschlagen: ${e.message}`); _proRenderAll(); });
     };
@@ -10103,6 +10155,13 @@ function _proEnsureCards() {
                 PRO.enabled = e.target.checked;
                 localStorage.setItem("tb_pro_mode", PRO.enabled ? "1" : "0");
                 if (typeof feedEvent === "function") feedEvent("info", `Pro-Modus ${PRO.enabled ? "aktiviert — Entscheidungen nur noch aus der getesteten Engine" : "deaktiviert — klassische Signal-Kette"}`);
+            } else if (e.target.id === "v32-tf-select") {
+                PRO.timeframeMode = e.target.value;
+                localStorage.setItem("tb_timeframe", PRO.timeframeMode);
+                const target = PRO.timeframeMode === "auto"
+                    ? ((PRO.researchAll && PRO.researchAll.chosen) || localStorage.getItem("tb_tf_auto") || "1h")
+                    : PRO.timeframeMode;
+                _proSwitchTf(target, PRO.timeframeMode === "auto" ? "automatisch nach Test" : "manuell gewählt");
             } else if (e.target.id === "v32-wakelock-toggle") {
                 PRO.wakeLockWanted = e.target.checked;
                 localStorage.setItem("tb_wakelock", PRO.wakeLockWanted ? "1" : "0");
@@ -10110,7 +10169,7 @@ function _proEnsureCards() {
             } else if (e.target.id === "v32-strict-toggle") {
                 PRO.strict = e.target.checked;
                 localStorage.setItem("tb_pro_strict", PRO.strict ? "1" : "0");
-                PRO.engine = new PE.LiveEngine({ interval: CFG.primaryTf, paramsFor: (s) => PRO.paramsFor(s) });
+                PRO.engine = _proNewEngine();
             }
             _proRenderAll();
         });
@@ -10119,6 +10178,10 @@ function _proEnsureCards() {
 document.addEventListener("click", (e) => {
     const run = e.target.closest && e.target.closest("[data-v32-run]");
     if (run) { PRO.runResearch(); return; }
+    const tfBtn = e.target.closest && e.target.closest("[data-v32-tf]");
+    if (tfBtn) { PRO.viewTf = tfBtn.dataset.v32Tf; PRO.selected = null; _proRenderTearSheet(); return; }
+    const prof = e.target.closest && e.target.closest("[data-v32-profile]");
+    if (prof) { _proApplyProfileNow(); return; }
     const pill = e.target.closest && e.target.closest("[data-v32-sym]");
     if (pill) { PRO.selected = pill.dataset.v32Sym; _proRenderTearSheet(); }
 });
@@ -10152,6 +10215,7 @@ function _proRenderStatus() {
             ? `<span class="${posPct >= 0 ? "v32-pos" : "v32-neg"}">${pos.side === "long" ? "LONG" : "SHORT"} offen ${posPct != null ? _signPct(posPct, 2) : ""}</span>`
             : st && st.watch
             ? `wartet auf ${st.watch.side === "long" ? "Schluss ≥" : "Schluss ≤"} ${_fmtNum(st.watch.trigger, st.watch.trigger < 10 ? 4 : 2)}`
+            : PRO.strict && !_proValidated(s) ? "nicht gehandelt — keine nachgewiesene Edge"
             : pre ? `kein Signal · L ${_fmtNum(pre.long.score, 1)} / S ${_fmtNum(pre.short.score, 1)}` : "wartet auf ersten Kerzenschluss";
         return `<div class="v32-row"><span class="v32-sym">${s.replace("/USDT", "")}</span><span class="v32-muted">${regime}</span><span class="v32-muted v32-grow">${watch}</span>${verdict}</div>`;
     }).join("");
@@ -10164,6 +10228,12 @@ function _proRenderStatus() {
     const p0 = PRO.paramsFor(_proSymbols()[0]);
     const need = p0 ? `Score ≥ ${p0.minScore} aus ≥ ${p0.agreement} Familie${p0.agreement > 1 ? "n" : ""}, danach Schlusskurs über/unter der Bestätigungsmarke` : "nur validierte Edge (strenger Modus)";
     const ms = _proNextCloseMs();
+    const validatedCount = _proSymbols().filter(_proValidated).length;
+    const strictNote = !PRO.strict ? ""
+        : PRO.running && !PRO.research ? `<div class="v32-reject">Profi-Einstellung „nur validierte Edge": Der Bot wartet auf das Ergebnis des Walk-Forward-Tests und handelt erst danach.</div>`
+        : !PRO.research ? `<div class="v32-reject">Noch kein Testergebnis — der Bot handelt erst, wenn der Walk-Forward eine Edge zeigt.</div>`
+        : validatedCount === 0 ? `<div class="v32-reject">Kein Symbol hat im Test eine Edge gezeigt. Der Bot handelt deshalb bewusst nicht — genau das würde ein Profi tun. Neuer Test alle 24 h.</div>`
+        : `<div class="v32-note">${validatedCount} von ${_proSymbols().length} Symbolen mit nachgewiesener Edge werden gehandelt.</div>`;
     const pausedNote = PRO.lastPauseMs > 60e3
         ? `<div class="v32-reject">Die App war zuletzt ${Math.round(PRO.lastPauseMs / 60000)} Min im Hintergrund. In dieser Zeit pausiert der Browser den Bot${missed ? ` — ${missed} Signal${missed > 1 ? "e" : ""} verpasst` : ""}. Für durchgehenden Betrieb: „Bildschirm wach halten" in den Einstellungen oder den 24/7-Server.</div>`
         : missed ? `<div class="v32-reject">${missed} Signal${missed > 1 ? "e" : ""} verpasst, weil die App im Hintergrund war.</div>` : "";
@@ -10174,7 +10244,8 @@ function _proRenderStatus() {
             <div><span class="v32-muted">Zuletzt geprüft</span><strong class="num">${lastEval ? `${Math.max(0, Math.round((Date.now() - lastEval) / 60000))} Min` : "–"}</strong></div>
             <div><span class="v32-muted">Erwartet laut Test</span><strong class="num">${every ? `≈ 1 Trade / ${every < 1 ? Math.round(every * 60) + " Min" : every.toFixed(1).replace(".", ",") + " h"}` : "–"}</strong></div>
         </div>
-        <div class="perf-hint">Der Bot entscheidet nur bei Kerzenschluss (alle 15 Min). Einstieg erst bei ${need}. Ruhige Phasen ohne Trade sind normal.</div>
+        <div class="perf-hint">Der Bot entscheidet nur bei Kerzenschluss (alle ${_TF_LABEL[CFG.primaryTf] || CFG.primaryTf}${PRO.timeframeMode === "auto" ? ", automatisch gewählt" : ""}). Einstieg erst bei ${need}. Ruhige Phasen ohne Trade sind normal.</div>
+        ${strictNote}
         <div class="v32-rows">${rows}</div>
         ${pausedNote}
         ${last ? `<div class="v32-reject">Zuletzt verworfen: <strong>${last.symbol}</strong> — ${last.why}</div>` : ""}
@@ -10208,10 +10279,30 @@ function _proLiveIncubation() {
     return { n: closes.length, pnl, fees, slip, gross, winRate: wins / closes.length };
 }
 
+function _proTfCompare(viewTf) {
+    const A = PRO.researchAll;
+    if (!A || !A.byTf) return "";
+    const rows = TIMEFRAMES.map((tf) => {
+        const p = A.byTf[tf] && A.byTf[tf].portfolio;
+        const live = tf === CFG.primaryTf;
+        return `<button class="v32-tf ${tf === viewTf ? "active" : ""}" data-v32-tf="${tf}">
+            <span class="v32-tf-name">${_TF_LABEL[tf]}${live ? " · live" : ""}</span>
+            ${p ? _proChip(_PRO_SHORT[p.verdict.code] || p.verdict.label, p.verdict.tone) : _proChip("–", "neutral")}
+            <span class="v32-tf-kpi num">Sharpe ${p ? _fmtNum(p.stats.sharpe) : "–"} · DSR ${p ? _fmtPct(p.stats.dsr, 0) : "–"} · ${p ? p.stats.trades : 0} Trades</span>
+        </button>`;
+    }).join("");
+    const why = A.chosen
+        ? `${PRO.timeframeMode === "auto" ? "Automatisch gewählt" : "Testsieger"}: ${_TF_LABEL[A.chosen]} (Regel: Urteil, dann Deflated Sharpe, dann Sharpe; ohne Edge gewinnt der längere Zeitrahmen wegen geringerer Kosten).${PRO.timeframeMode !== "auto" ? ` Live fest auf ${_TF_LABEL[CFG.primaryTf]} eingestellt.` : ""}`
+        : "";
+    return `<div class="v32-tfs">${rows}</div>${why ? `<div class="v32-note">${why}</div>` : ""}`;
+}
+
 function _proRenderTearSheet() {
     const el = document.getElementById("v32-tearsheet");
     if (!el) return;
-    const R = PRO.research;
+    const viewTf = PRO.viewTf && TIMEFRAMES.includes(PRO.viewTf) ? PRO.viewTf : CFG.primaryTf;
+    const R = PRO.researchAll && PRO.researchAll.byTf ? PRO.researchAll.byTf[viewTf] || null : null;
+    const tfCompare = _proTfCompare(viewTf);
     const progress = PRO.running ? `
         <div id="v32-progress" class="v32-progress"><div class="v32-progress-fill" style="width:${Math.round((PRO.progress?.pct || 0) * 100)}%"></div><span class="v32-progress-label">${PRO.progress?.phase || "Start"}</span></div>` : "";
     if (!R || !R.portfolio) {
@@ -10233,7 +10324,8 @@ function _proRenderTearSheet() {
     const thin = P.verdict.code === "DATA";
     el.innerHTML = `
         <h2>Pro Tear Sheet ${_proChip(P.verdict.label, P.verdict.tone)}</h2>
-        <div class="perf-hint">Portfolio aus ${P.symbols.length} Symbolen · ${s.days} Tage out-of-sample · Stand ${new Date(R.computedAt).toLocaleString("de-DE")}</div>
+        ${tfCompare}
+        <div class="perf-hint">${_TF_LABEL[viewTf]}-Kerzen · Portfolio aus ${P.symbols.length} Symbolen · ${s.days} Tage out-of-sample · Stand ${new Date(R.computedAt).toLocaleString("de-DE")}</div>
         ${thin ? `<div class="v32-reject">Stichprobe zu klein (${s.trades} Trades, ${s.days} Tage) — die Kennzahlen unten sind nicht belastbar und dienen nur zur Orientierung.</div>` : ""}
         <div class="v32-kpis ${thin ? "v32-dim" : ""}">
             ${kpi("Sharpe netto", _fmtNum(s.sharpe), `95%-KI ${ci}`, s.sharpe > 0 ? "v32-pos" : "v32-neg")}
@@ -10311,11 +10403,36 @@ function _proRenderMicro() {
         </div>`;
 }
 
+function _proIsProfile() {
+    return PRO.enabled && PRO.strict && PRO.timeframeMode === "auto";
+}
+function _proApplyProfileNow() {
+    applyProProfile();
+    PRO.enabled = true;
+    PRO.strict = true;
+    PRO.timeframeMode = "auto";
+    const target = (PRO.researchAll && PRO.researchAll.chosen) || "1h";
+    if (target !== CFG.primaryTf) _proSwitchTf(target, "Profi-Profil");
+    PRO.engine = _proNewEngine();
+    if (typeof feedEvent === "function") feedEvent("info", "Profi-Profil aktiv: Zeitrahmen nach Test, nur validierte Edge, reguläre Positionsgröße");
+    _proRenderAll();
+}
+
 function _proRenderSettings() {
     const el = document.getElementById("v32-settings-card");
     if (!el) return;
     el.innerHTML = `
         <h2>Pro-Modus ${_proChip(PRO.enabled ? "AN" : "AUS", PRO.enabled ? "green" : "neutral")}</h2>
+        <div class="v32-profile">
+            <div><strong>Profi-Profil</strong><br><small>Zeitrahmen automatisch nach Test · nur validierte Edge · reguläre Positionsgröße · Engine an</small></div>
+            <button class="primary" data-v32-profile ${_proIsProfile() ? "disabled" : ""}>${_proIsProfile() ? "Aktiv" : "Anwenden"}</button>
+        </div>
+        <label class="v32-toggle v32-select"><span><strong>Zeitrahmen</strong><br><small>Auf welchen Kerzen der Bot entscheidet. „Automatisch" nimmt den Sieger des Walk-Forward-Vergleichs.</small></span>
+            <select id="v32-tf-select">
+                <option value="auto" ${PRO.timeframeMode === "auto" ? "selected" : ""}>Automatisch (${_TF_LABEL[CFG.primaryTf]})</option>
+                <option value="15m" ${PRO.timeframeMode === "15m" ? "selected" : ""}>15 Minuten</option>
+                <option value="1h" ${PRO.timeframeMode === "1h" ? "selected" : ""}>1 Stunde</option>
+            </select></label>
         <label class="v32-toggle"><input type="checkbox" id="v32-pro-toggle" ${PRO.enabled ? "checked" : ""}>
             <span><strong>Getestete Engine handelt</strong><br><small>Entscheidungen nur aus der Walk-Forward-geprüften Logik.</small></span></label>
         <label class="v32-toggle"><input type="checkbox" id="v32-strict-toggle" ${PRO.strict ? "checked" : ""}>

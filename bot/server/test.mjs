@@ -136,3 +136,24 @@ test("pause in the background: missed entries are counted, entries before the pa
     assert.ok(inGap > 0, "gap must contain at least one backtest entry");
     assert.ok((live.status("SYN/USDT").missed || 0) >= inGap, `missed ${live.status("SYN/USDT").missed} >= ${inGap}`);
 });
+
+test("timeframe choice follows the documented rule", () => {
+    const pf = (code, dsr, sharpe) => ({ portfolio: { verdict: { code }, stats: { dsr, sharpe } } });
+    assert.equal(P.chooseTimeframe({ "15m": pf("NONE", 0.2, 1.5), "1h": pf("NONE", 0.1, 0.4) }), "1h", "no edge anywhere → longer, cheaper timeframe");
+    assert.equal(P.chooseTimeframe({ "15m": pf("PROMISING", 0.85, 1.2), "1h": pf("NONE", 0.3, 2.0) }), "15m", "verdict beats raw Sharpe");
+    assert.equal(P.chooseTimeframe({ "15m": pf("PROMISING", 0.81, 2.5), "1h": pf("PROMISING", 0.9, 1.1) }), "1h", "same verdict → higher Deflated Sharpe");
+    assert.equal(P.chooseTimeframe({ "15m": pf("EDGE", 0.96, 1.0), "1h": pf("PROMISING", 0.94, 3.0) }), "15m");
+    assert.equal(P.chooseTimeframe({ "15m": { portfolio: null } }), null);
+    assert.equal(new P.LiveEngine({ interval: "1h" }).opts.maxDelayMs, 288000, "late tolerance scales with the bar");
+    assert.equal(new P.LiveEngine({ interval: "15m" }).opts.maxDelayMs, 120000);
+});
+
+test("multi-timeframe research runs both timeframes and picks one", async () => {
+    const r = await P.runResearchMulti(["RND/USDT"], {
+        days: 45, intervals: ["15m", "1h"],
+        candlesFor: async (s, interval) => syntheticCandles(interval === "1h" ? 45 * 24 + 499 : 45 * 96 + 499, { seed: 5, vol: interval === "1h" ? 0.007 : 0.0035, tfMs: interval === "1h" ? 3600e3 : 900e3 }),
+    });
+    assert.ok(r.byTf["15m"] && r.byTf["1h"], "both timeframes present");
+    assert.ok(["15m", "1h"].includes(r.chosen));
+    assert.equal(r.byTf["1h"].interval, "1h");
+});
