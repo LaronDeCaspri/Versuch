@@ -287,7 +287,8 @@
         </div>
         <div class="jv2-ai-setup" id="jv2-ai-setup" hidden>
             <div class="jv2-ai-setup-head"><strong>Normal mit Jarvis reden</strong><span class="jv2-pill on">kostenlos</span></div>
-            <p>Jarvis bekommt ein eigenes KI-Gehirn (Qwen 3.5), das komplett auf deinem Gerät läuft — kein Konto, kein Schlüssel, keine Kosten, nach dem Laden auch offline. Am schnellsten mit Grafikbeschleunigung (WebGPU) in Chrome oder Edge — ohne läuft es im CPU-Modus.</p>
+            <p>Jarvis redet sofort — ohne Download über eine kostenlose Cloud-KI (ideal fürs Handy) oder über Chromes eingebaute KI. Optional bekommt er ein eigenes KI-Gehirn (Qwen 3.5), das komplett auf deinem Gerät läuft: kein Konto, kein Schlüssel, keine Kosten, danach auch offline. Es nutzt die Grafikkarte (auch ohne shader-f16) — ohne WebGPU läuft es im CPU-Modus.</p>
+            <label class="jv2-cloud-row"><input type="checkbox" id="jv2-cloud" checked><span><b>Cloud-KI ohne Download erlauben</b><small>kostenlos, ohne Schlüssel — deine Fragen und der Demo-Status gehen dafür an einen freien KI-Dienst <em id="jv2-cloud-state"></em></small></span></label>
             <div class="jv2-brain" id="jv2-brain" data-state="idle">
                 <div class="jv2-ai-setup-row"><select id="jv2-brain-size" aria-label="Größe des KI-Gehirns"></select><button class="primary" id="jv2-brain-load">Kostenlos laden</button></div>
                 <div class="jv2-brain-diag" id="jv2-brain-diag" hidden></div>
@@ -295,6 +296,11 @@
                 <small id="jv2-brain-txt" aria-live="polite"></small>
                 <small class="jv2-brain-hint">Beim Laden fragt der Browser nach einem Speicherort — wähle oder erstelle z. B. <b>D:\Downloads\Jarvis</b>. Dort liegt dann eine Kopie, aus der Jarvis auch ohne Internet neu laden kann.</small>
             </div>
+            <details class="jv2-claude">
+                <summary>Optional: zuverlässigere Cloud-KI mit kostenlosem Groq-Schlüssel</summary>
+                <small>Die schlüsselfreien Dienste sind manchmal überlastet. Ein Groq-Schlüssel ist kostenlos (ohne Kreditkarte, console.groq.com/keys) und wird nur auf diesem Gerät gespeichert.</small>
+                <div class="jv2-ai-setup-row"><input type="password" id="jv2-groq-key" placeholder="gsk_…" autocomplete="off" spellcheck="false"></div>
+            </details>
             <details class="jv2-claude">
                 <summary>Optional: noch klüger mit eigenem Claude-Schlüssel (kostenpflichtig)</summary>
                 <div class="jv2-ai-setup-row"><input type="password" id="jv2-ai-setup-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><button class="ghost" data-jv="ai-connect">Verbinden</button></div>

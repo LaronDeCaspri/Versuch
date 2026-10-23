@@ -547,7 +547,7 @@
             let hits = [];
             try { hits = L ? await L.webSearch(act.search) : []; } catch (e) { hits = []; }
             if (!hits.length) { say(`Zu „${act.search}“ habe ich gerade nichts gefunden.`); return; }
-            if (!(L && (L.ready() || L.loading()))) { say(hits[0].replace(/^Wikipedia „[^“]*“: /, "").split(/(?<=[.!?])\s/).slice(0, 2).join(" ")); return; }
+            if (!(L && L.canTalk())) { say(hits[0].replace(/^Wikipedia „[^“]*“: /, "").split(/(?<=[.!?])\s/).slice(0, 2).join(" ")); return; }
             extra = `Websuche nach „${act.search}“:\n${hits.join("\n")}\nBeantworte die Frage anhand dieser Ergebnisse und nenne kurz die Quelle.`;
         }
         // News questions: the bot's analysis goes along, and the best idea waits for a "yes".
@@ -562,19 +562,24 @@
             if (h.ready) extra = `BTC-Gedächtnis (komplette Historie seit ${h.since}): ${h.summary}\nDetails: ${JSON.stringify({ zyklus: h.cycle, einbrueche: h.biggest_drawdowns, analogien: h.analogs, tageszeit: h.intraday })}\nBeantworte die Frage damit in zwei bis drei gesprochenen Sätzen und sag, dass Geschichte keine Garantie ist.`;
         }
         // 2) Free on-device AI: real conversation, no key, no costs.
-        if (L && (L.ready() || L.loading())) {
+        let cloudDown = false;
+        if (L && L.canTalk()) {
             let spoke = false;
             try {
-                if (!L.ready()) { setSub("KI-Gehirn startet …"); await L.load(onBrainProgress); }
+                if (!L.ready() && !L.instant()) setSub("KI-Gehirn startet …");
                 await L.ask(text, { extra, onSentence: (x) => { spoke = true; say(x); } });
                 if (!spoke) say("Dazu fällt mir gerade nichts ein.");
                 return;
-            } catch (e) { writeLog(`KI-Gehirn: ${(e && e.message) || e}`, "warn"); }
+            } catch (e) {
+                cloudDown = !L.ready() && !!L.state.cloudError;
+                writeLog(cloudDown ? "Cloud-KI gerade nicht erreichbar — alle freien Dienste überlastet. Jarvis antwortet mit den eingebauten Antworten." : `KI-Gehirn: ${(e && e.message) || e}`, "warn");
+            }
         }
         // 3) Built-in answers.
         let reply = null;
         try { reply = B ? await B.answer(text) : null; } catch (e) { reply = null; }
-        if (reply) { say(reply); return; }
+        if (reply) { say(cloudDown ? `Die freie Cloud-KI ist gerade überlastet, deshalb kurz aus meinen eigenen Daten: ${reply}` : reply); return; }
+        if (L && L.canTalk() && L.state.cloudError && !L.ready()) { say("Die kostenlose Cloud-KI ist gerade überlastet. Versuch es gleich noch mal — Befehle wie Lagebericht, News vorlesen, Einstiege suchen oder Bot pausieren gehen trotzdem."); return; }
         showAiSetup(true);
         say("Für ein freies Gespräch brauche ich mein KI-Gehirn. Tipp in der Jarvis-Karte einmal auf „Kostenlos laden“ — es läuft danach komplett auf deinem Gerät, ohne Kosten. Befehle wie Lagebericht, News vorlesen, Einstiege suchen oder Bot pausieren gehen schon jetzt.");
     }
@@ -627,15 +632,17 @@
         if (!L || !el) return;
         const sel = $("jv2-brain-size");
         const cpu = L.state.gpu === false;
-        if (sel && sel.dataset.mode !== (cpu ? "cpu" : "gpu")) {
-            sel.dataset.mode = cpu ? "cpu" : "gpu";
-            sel.innerHTML = Object.entries(cpu ? L.CPU_MODELS : L.MODELS).map(([k, m]) => `<option value="${k}">${esc(m.label)} · ${cpu ? "Download" : "Speicher"} ${esc(m.mem)}</option>`).join("");
+        const mode = cpu ? "cpu" : L.state.f16 === false ? "gpu32" : "gpu";
+        if (sel && sel.dataset.mode !== mode) {
+            sel.dataset.mode = mode;
+            sel.innerHTML = Object.entries(cpu ? L.CPU_MODELS : L.MODELS).map(([k, m]) => `<option value="${k}">${esc(m.label)} · ${cpu ? "Download" : "Speicher"} ${esc(cpu ? m.mem : L.modelMem(k))}</option>`).join("");
         }
         if (sel) sel.value = cpu ? L.cpuSize() : L.size();
         const dg = $("jv2-brain-diag");
         if (dg) {
             const d = L.state.diag;
-            dg.hidden = !(cpu && d);
+            // While Jarvis already talks (cloud / Chrome AI), the GPU hints are noise — show them only when asked.
+            dg.hidden = !(cpu && d) || (L.instant() && !L.loading() && !L.state.error);
             if (cpu && d && dg.dataset.reason !== d.reason) {
                 dg.dataset.reason = d.reason;
                 dg.innerHTML = `<strong>Kein WebGPU: ${esc(d.reason)}</strong><span>Jarvis nutzt deshalb den <b>CPU-Modus</b> — funktioniert überall, antwortet aber langsamer. Für die schnelle Variante:</span><ol>${(d.steps || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ol><button class="ghost" data-jv="gpu-recheck">Erneut prüfen</button>`;
@@ -645,8 +652,19 @@
         el.dataset.state = L.ready() ? "ready" : L.loading() ? "loading" : st.error ? "error" : "idle";
         const bar = $("jv2-brain-bar"); if (bar) bar.style.width = `${Math.round((st.progress || 0) * 100)}%`;
         const txt = $("jv2-brain-txt");
-        if (txt) txt.textContent = L.ready() ? "KI-Gehirn bereit — sprich einfach los." : L.loading() ? (st.text || "lädt …").slice(0, 120) : st.error ? st.error : (L.config.downloaded ? "Bereits auf dem Gerät — startet beim Aktivieren automatisch." : "Einmaliger Download, danach offline. Im WLAN empfohlen.");
-        const btn = $("jv2-brain-load"); if (btn) { btn.disabled = L.loading() || L.ready(); btn.textContent = L.ready() ? "Bereit" : L.loading() ? "Lädt …" : "Kostenlos laden"; }
+        const now = L.instant() ? `Jarvis redet schon jetzt — über die ${L.activeLabel()}, ohne Download. ` : "";
+        const gpu32 = L.state.f16 === false && !cpu ? "Deine Grafikkarte kann kein shader-f16 — Jarvis nimmt die 32-Bit-Version, die trotzdem auf der Grafikkarte läuft. " : "";
+        if (txt) txt.textContent = L.ready() ? `${L.activeLabel()} bereit — sprich einfach los.` : L.loading() ? `${now}${(st.text || "lädt …").slice(0, 120)}` : st.error ? `${now}${st.error}` : `${now}${gpu32}${L.config.downloaded ? "Lokales Gehirn ist auf dem Gerät — startet beim Aktivieren automatisch." : `Optional: lokales Gehirn laden — einmaliger Download, danach offline und privat.${now ? "" : " Im WLAN empfohlen."}`}`;
+        const cl = $("jv2-cloud"); if (cl && cl.checked !== L.cloudAllowed()) cl.checked = L.config.cloud !== false;
+        const cs = $("jv2-cloud-state"); if (cs) cs.textContent = L.state.cloudOk ? `aktiv über ${L.state.cloudOk}` : L.state.cloudError ? `gerade nicht erreichbar (${L.state.cloudError.slice(0, 60)})` : "";
+        const btn = $("jv2-brain-load");
+        if (btn) {
+            btn.disabled = L.loading() || L.ready();
+            btn.textContent = L.ready() ? "Bereit" : L.loading() ? "Lädt …" : L.instant() ? "Offline-Gehirn laden" : "Kostenlos laden";
+            btn.classList.toggle("primary", !L.instant()); btn.classList.toggle("ghost", L.instant());
+        }
+        // The folder hint only makes sense where a folder can be picked (desktop Chrome/Edge).
+        const hint = el.querySelector(".jv2-brain-hint"); if (hint) hint.hidden = !L.fsSupported();
     }
     function onBrainProgress() { renderBrain(); }
     // The folder dialog must open straight from the tap; then the download starts.
@@ -692,7 +710,7 @@
     function setSub(t) { const el = $("jv2-sub"); if (el) el.textContent = t; }
     function engineLabel() {
         if (!S.enabled) return "Aktivieren, damit Jarvis spricht und zuhört.";
-        const ai = window.JarvisAI && window.JarvisAI.available() ? " · KI-Gespräch (Claude)" : window.JarvisLocal && window.JarvisLocal.ready() ? " · KI-Gehirn lokal" : "";
+        const ai = window.JarvisAI && window.JarvisAI.available() ? " · KI-Gespräch (Claude)" : window.JarvisLocal && window.JarvisLocal.activeLabel() ? ` · ${window.JarvisLocal.activeLabel()}` : "";
         if (S.engine === "premium" && S.premiumKey) return `Stimme: Premium (ElevenLabs)${ai}`;
         if (S.engine === "neural" && S.neuralReady) return `Stimme: ${VOICES[S.neuralVoice].label}${S.fx ? " · Jarvis-Klang" : ""}${ai}`;
         if (S.engine === "neural" && R.pending.has("init")) return "Jarvis-Stimme wird geladen — bis dahin Systemstimme.";
@@ -933,6 +951,8 @@
                 if (L.state.gpu === false) L.config.cpuSize = el.value; else L.config.size = el.value;
                 L.save(); renderBrain();
             }
+            else if (el.id === "jv2-cloud" && window.JarvisLocal) { window.JarvisLocal.config.cloud = el.checked; window.JarvisLocal.save(); renderBrain(); syncSettings(); }
+            else if (el.id === "jv2-groq-key" && window.JarvisLocal) { const L = window.JarvisLocal; L.config.groqKey = el.value.trim(); L.save(); L.state.cloudOk = null; el.value = ""; el.placeholder = L.config.groqKey ? "gespeichert ✓" : "gsk_…"; renderBrain(); }
             else if (el.id === "jv2-el-key") { S.premiumKey = el.value.trim(); if (S.premiumKey) S.engine = "premium"; save(); syncSettings(); }
             else if (el.id === "jv2-el-voice") { S.premiumVoice = el.value.trim() || DEFAULTS.premiumVoice; save(); }
             else if (el.id && el.id.startsWith("jv2-ai-") && window.JarvisAI) {
@@ -959,7 +979,7 @@
         const prompt = `Neue Krypto-Meldungen:\n${d.items.slice(0, 5).map((n) => `- [${n.sentiment}] ${n.source}${n.coins.length ? ` (${n.coins.join(", ")})` : ""}: ${n.title}`).join("\n")}\nFasse auf Deutsch in ein bis zwei Sätzen zusammen, worum es geht und was das für die betroffenen Coins bedeutet. Beginne mit „Neue Meldung“ bzw. „Neue Meldungen“.`;
         try {
             if (window.JarvisAI && window.JarvisAI.available()) text = await window.JarvisAI.summarize(prompt);
-            else if (window.JarvisLocal && window.JarvisLocal.ready()) text = await window.JarvisLocal.summarize(prompt);
+            else if (window.JarvisLocal && window.JarvisLocal.canTalk()) text = await window.JarvisLocal.summarize(prompt);
         } catch (e) { text = ""; }
         speak(text || d.digest, "news", { kind: "news" });
     });
@@ -970,7 +990,11 @@
 
     function boot() {
         bind();
-        if (window.JarvisLocal) window.JarvisLocal.supported().then(() => renderBrain()).catch(() => {});
+        if (window.JarvisLocal) {
+            window.JarvisLocal.supported().then(() => renderBrain()).catch(() => {});
+            window.JarvisLocal.builtinStatus().then(() => { renderBrain(); syncSettings(); }).catch(() => {});
+            const gk = $("jv2-groq-key"); if (gk && window.JarvisLocal.config.groqKey) gk.placeholder = "gespeichert ✓";
+        }
         setVoiceStatus(S.neuralReady ? "ready" : "none");
         syncSettings();
         setPhase("idle");

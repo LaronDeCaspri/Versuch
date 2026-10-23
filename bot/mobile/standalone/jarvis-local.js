@@ -16,13 +16,15 @@
         better: { url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf", label: "CPU besser — Qwen 2.5 1,5B (langsamer)", mem: "ca. 1,1 GB" },
     };
     const MODELS = {
-        small: { id: "Qwen3.5-0.8B-q4f16_1-MLC", label: "Klein — fürs Handy", mem: "ca. 1,6 GB" },
-        medium: { id: "Qwen3.5-2B-q4f16_1-MLC", label: "Mittel — empfohlen", mem: "ca. 2,2 GB" },
-        large: { id: "Qwen3.5-4B-q4f16_1-MLC", label: "Groß — klügste, starker PC", mem: "ca. 3,9 GB" },
+        small: { id: "Qwen3.5-0.8B-q4f16_1-MLC", label: "Klein — fürs Handy", mem: "ca. 1,6 GB", mem32: "ca. 1,9 GB" },
+        medium: { id: "Qwen3.5-2B-q4f16_1-MLC", label: "Mittel — empfohlen", mem: "ca. 2,2 GB", mem32: "ca. 2,6 GB" },
+        large: { id: "Qwen3.5-4B-q4f16_1-MLC", label: "Groß — klügste, starker PC", mem: "ca. 3,9 GB", mem32: "ca. 4,7 GB" },
     };
     const KEY = "tb_jarvis_local";
     const C = (() => { try { return { size: "", downloaded: false, ...(JSON.parse(localStorage.getItem(KEY) || "{}")) }; } catch (e) { return { size: "", downloaded: false }; } })();
     function save() { try { localStorage.setItem(KEY, JSON.stringify(C)); } catch (e) { /* storage full */ } }
+    // The GPU failures recorded by v50 were mostly missing shader-f16 — solved by the 32-bit models.
+    if (C.gpuFailed && !C.gpuFailedV) { C.gpuFailed = 0; C.gpuFailedV = 51; save(); }
 
     const S = { engine: null, loading: null, progress: 0, text: "", error: null, history: [], lastTurn: 0, gpu: null };
 
@@ -38,6 +40,7 @@
         S.diag = await diagnose();
         if (S.diag.webgpu) { C.gpuFailed = 0; save(); }
         S.gpu = S.diag.webgpu;
+        S.f16 = S.diag.f16 !== false;
         return S.gpu;
     }
     // Why there is no WebGPU, and what the user can do about it (Chrome/Edge).
@@ -48,17 +51,14 @@
             let ad = null;
             try { ad = await navigator.gpu.requestAdapter(opt); } catch (e) { /* try the next option */ }
             if (!ad) continue;
-            // The models are stored as 16-bit floats; without shader-f16 WebLLM refuses the GPU.
-            if (/f16/.test(MODELS[size()].id) && ad.features && !ad.features.has("shader-f16")) {
-                return { webgpu: false, reason: "Die Grafikkarte unterstützt kein 16-Bit-Rechnen (shader-f16), das die KI-Modelle brauchen.",
-                    steps: ["Grafiktreiber aktualisieren und Chrome neu starten.", "Ohne shader-f16 nutzt Jarvis automatisch den CPU-Modus."] };
-            }
+            // Without shader-f16 the GPU still works — with the 32-bit build of the same model (q4f32_1).
+            const f16 = !!(ad.features && ad.features.has("shader-f16"));
             // WebLLM asks for a device of its own; if Chrome refuses here, it would refuse there too.
             try {
-                const dev = await ad.requestDevice(ad.features && ad.features.has("shader-f16") ? { requiredFeatures: ["shader-f16"] } : {});
+                const dev = await ad.requestDevice(f16 ? { requiredFeatures: ["shader-f16"] } : {});
                 if (dev && dev.destroy) dev.destroy();
             } catch (e) { continue; }
-            return { webgpu: true };
+            return { webgpu: true, f16 };
         }
         return { webgpu: false, reason: "Chrome hat WebGPU, bekommt aber keinen Zugriff auf die Grafikkarte.",
             steps: ["chrome://settings/system öffnen → „Grafikbeschleunigung verwenden, wenn verfügbar“ einschalten → Chrome neu starten.",
@@ -73,6 +73,9 @@
         return mobile || mem <= 4 ? "small" : "medium";
     }
     function size() { return MODELS[C.size] ? C.size : autoSize(); }
+    // The model build that fits this graphics card: 16-bit if it has shader-f16, otherwise 32-bit.
+    function modelId(k = size()) { return S.f16 === false ? MODELS[k].id.replace("q4f16_1", "q4f32_1") : MODELS[k].id; }
+    function modelMem(k = size()) { return S.f16 === false ? MODELS[k].mem32 : MODELS[k].mem; }
 
     // ---- robust download -------------------------------------------------------------------
     // WebLLM downloads with Cache.add(), which fails the whole load on a single dropped connection
@@ -140,7 +143,7 @@
     }
     async function downloadModel(onProgress, { askFolder = false } = {}) {
         const mod = await import(WEBLLM);
-        const id = MODELS[size()].id;
+        const id = modelId();
         const rec = mod.prebuiltAppConfig.model_list.find((r) => r.model_id === id);
         if (!rec) throw new Error(`Modell ${id} unbekannt`);
         const base = `${rec.model.replace(/\/$/, "")}/resolve/main/`;
@@ -301,13 +304,143 @@
         const { CreateWebWorkerMLCEngine } = await import(WEBLLM);
         const worker = new Worker("jarvis-llm-worker.js", { type: "module" });
         try {
-            const engine = await CreateWebWorkerMLCEngine(worker, MODELS[size()].id, {
+            const engine = await CreateWebWorkerMLCEngine(worker, modelId(), {
                 initProgressCallback: (r) => { S.progress = 0.9 + 0.1 * (r.progress || 0); S.text = /Fetching|Loading model from cache/i.test(r.text || "") ? "Starte KI-Gehirn …" : (r.text || ""); onProgress && onProgress(S.progress, S.text); },
             });
             S.engine = engine;
             C.downloaded = true; C.loadedSize = size(); save();
             return engine;
         } catch (e) { worker.terminate(); throw e; }
+    }
+
+    // ---- Chrome's built-in AI (Gemini Nano, Prompt API, Chrome 148+ on desktop) -------------------
+    // Free and local; Chrome keeps the model itself, so the user downloads nothing.
+    const LM_OPTS = { expectedInputs: [{ type: "text", languages: ["de"] }], expectedOutputs: [{ type: "text", languages: ["de"] }] };
+    async function builtinStatus() {
+        if (S.builtin) return S.builtin;
+        let a = "unavailable";
+        try { if (self.LanguageModel && C.builtin !== false) a = await self.LanguageModel.availability(LM_OPTS); } catch (e) { a = "unavailable"; }
+        // Only use it when Chrome already has the model — a fresh multi-GB download is not "instant".
+        S.builtin = a;
+        return a;
+    }
+    function builtinEngine() {
+        return { kind: "builtin", label: "Chrome-KI (Gemini Nano, lokal)", chat: { completions: { create: async (req) => {
+            const msgs = req.messages, last = msgs[msgs.length - 1];
+            const session = await self.LanguageModel.create({ ...LM_OPTS, initialPrompts: msgs.slice(0, -1).map((m) => ({ role: m.role, content: m.content })) });
+            if (!req.stream) { try { return { choices: [{ message: { content: await session.prompt(last.content) } }] }; } finally { session.destroy(); } }
+            const rs = session.promptStreaming(last.content);
+            return (async function* () {
+                let acc = "";
+                try {
+                    for await (const chunk of rs) {
+                        // Current Chrome streams deltas; early builds sent the whole text so far.
+                        const d = acc && chunk.startsWith(acc) ? chunk.slice(acc.length) : chunk;
+                        acc += d;
+                        if (d) yield { choices: [{ delta: { content: d } }] };
+                    }
+                } finally { session.destroy(); }
+            })();
+        } } } };
+    }
+
+    // ---- free cloud AI without download or key (phones) ---------------------------------------------
+    // OpenAI-compatible services with an anonymous free tier. Which one answers from this browser is
+    // found out at runtime; the first that works is kept. An optional free Groq key comes first.
+    const CLOUD = [
+        { name: "Groq", url: "https://api.groq.com/openai/v1/chat/completions", model: "openai/gpt-oss-20b", needsKey: true, extra: { reasoning_effort: "low" } },
+        { name: "Pollinations", url: "https://text.pollinations.ai/openai", models: "https://text.pollinations.ai/models",
+          pick: (l) => { const m = (Array.isArray(l) ? l : []).find((x) => x && x.tier === "anonymous" && !(x.output_modalities && !x.output_modalities.includes("text"))); return m ? m.name : "openai"; } },
+        { name: "Kilo", url: "https://api.kilo.ai/api/gateway/chat/completions", models: "https://api.kilo.ai/api/gateway/models",
+          pick: (j) => { const m = ((j && j.data) || []).find((x) => /:free$/.test(x.id) && !/vision|omni|image|audio|coder/i.test(x.id)); return m && m.id; } },
+        { name: "OVHcloud", url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", models: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models",
+          pick: (j) => { const m = ((j && j.data) || []).find((x) => /qwen|llama|mistral|gpt-oss/i.test(x.id) && !/coder|vl|vision|embed/i.test(x.id)); return m && m.id; } },
+    ];
+    const cloudAllowed = () => C.cloud !== false && navigator.onLine !== false;
+    async function cloudModel(p) {
+        if (p.model && !p.models) return p.model;
+        if (S.cloudModels && S.cloudModels[p.name]) return S.cloudModels[p.name];
+        let id = null;
+        try { id = p.pick(await getJson(p.models, 6000)); } catch (e) { id = p.name === "Pollinations" ? "openai" : null; }
+        if (!id) throw new Error(`${p.name}: kein freies Modell`);
+        (S.cloudModels = S.cloudModels || {})[p.name] = id;
+        return id;
+    }
+    // Server-sent events or plain JSON → the same delta chunks WebLLM produces.
+    async function* cloudChunks(res) {
+        const type = res.headers.get("Content-Type") || "";
+        if (!/event-stream/.test(type) || !res.body) {
+            const raw = await res.text();
+            let t = raw;
+            try { const j = JSON.parse(raw); t = (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || ""; } catch (e) { /* plain text answer */ }
+            if (t) yield { choices: [{ delta: { content: t } }] };
+            return;
+        }
+        const rd = res.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buf = "";
+        for (;;) {
+            const { done, value } = await rd.read();
+            if (done) break;
+            buf += value;
+            let i;
+            while ((i = buf.indexOf("\n")) >= 0) {
+                const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+                if (!line.startsWith("data:")) continue;
+                const data = line.slice(5).trim();
+                if (data === "[DONE]") return;
+                try { const j = JSON.parse(data); const d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content; if (d) yield { choices: [{ delta: { content: d } }] }; } catch (e) { /* keep-alive */ }
+            }
+        }
+    }
+    async function cloudCreate(req) {
+        const list = CLOUD.filter((p) => !p.needsKey || C.groqKey);
+        const order = S.cloudOk ? [list.find((p) => p.name === S.cloudOk), ...list.filter((p) => p.name !== S.cloudOk)].filter(Boolean) : list;
+        let last = null;
+        for (const p of order) {
+            const ctl = new AbortController();
+            const timer = setTimeout(() => ctl.abort(), 20000);
+            try {
+                const body = { model: await cloudModel(p), messages: req.messages, stream: !!req.stream, temperature: req.temperature, max_tokens: req.max_tokens, ...(p.extra || {}) };
+                const res = await fetch(p.url, { method: "POST", signal: ctl.signal, credentials: "omit",
+                    headers: { "Content-Type": "application/json", ...(p.needsKey ? { Authorization: `Bearer ${C.groqKey}` } : {}) }, body: JSON.stringify(body) });
+                if (!res.ok) throw new Error(`${p.name}: HTTP ${res.status}`);
+                // A provider only counts as working once the first words arrived.
+                const it = cloudChunks(res);
+                const first = await it.next();
+                clearTimeout(timer);
+                if (first.done) throw new Error(`${p.name}: leere Antwort`);
+                S.cloudOk = p.name; S.cloudError = null;
+                if (!req.stream) {
+                    let t = first.value.choices[0].delta.content;
+                    for await (const c of it) t += c.choices[0].delta.content;
+                    return { choices: [{ message: { content: t } }] };
+                }
+                return (async function* () { yield first.value; yield* it; })();
+            } catch (e) {
+                clearTimeout(timer);
+                last = e;
+                if (S.cloudOk === p.name) S.cloudOk = null;
+            }
+        }
+        S.cloudError = String((last && last.message) || last || "keine Verbindung");
+        throw new Error(`Cloud-KI nicht erreichbar (${S.cloudError})`);
+    }
+    const cloudEngine = { kind: "cloud", get label() { return `Cloud-KI (kostenlos${S.cloudOk ? `, ${S.cloudOk}` : ""})`; }, chat: { completions: { create: cloudCreate } } };
+
+    // Which brain answers right now: the loaded local model, else Chrome's built-in AI, else the
+    // free cloud (no download — the phone path), else the local model is loaded.
+    async function talkEngine() {
+        if (S.engine) return S.engine;
+        if ((await builtinStatus()) === "available") return (S.builtinEngine = S.builtinEngine || builtinEngine());
+        if (cloudAllowed()) return cloudEngine;
+        return load();
+    }
+    function canTalk() { return !!S.engine || !!S.loading || S.builtin === "available" || cloudAllowed(); }
+    function activeLabel() {
+        if (S.engine) return S.engineKind === "cpu" ? "KI-Gehirn lokal (CPU)" : `KI-Gehirn lokal (Grafikkarte${S.f16 === false ? ", 32-Bit" : ""})`;
+        if (S.builtin === "available") return "Chrome-KI (Gemini Nano, lokal)";
+        if (cloudAllowed()) return cloudEngine.label;
+        return "";
     }
 
     function systemPrompt(ctx) {
@@ -320,12 +453,12 @@ AKTUELLE DATEN (${new Date().toLocaleString("de-DE")}):
 ${ctx}`;
     }
 
-    function context(extra) {
+    function context(extra, kind = S.engineKind) {
         const A = window.TBJarvisActions;
         if (!A) return extra || "";
         const st = A.status();
         // CPU mode: compact context, every prompt token costs time without a graphics card.
-        if (S.engineKind === "cpu") {
+        if (kind === "cpu" || kind === "builtin") {
             const L = window.TBNewsAI && window.TBNewsAI.last;
             const nw = L && L.count ? `News: Stimmung ${L.label}; ${L.top.slice(0, 3).map((n) => `${n.trusted || n.source}: ${n.title}`).join(" | ")}` : "Keine News.";
             const bb = A.btcContextLine ? A.btcContextLine() : "";
@@ -338,11 +471,11 @@ ${ctx}`;
     }
 
     async function ask(text, { onSentence, extra } = {}) {
-        const engine = await load();
+        const engine = await talkEngine();
         if (Date.now() - S.lastTurn > 15 * 60e3) S.history = [];
         S.lastTurn = Date.now();
         // Small context window: keep the last few exchanges only (this model has no thinking blocks).
-        const messages = [{ role: "system", content: systemPrompt(context(extra)) }, ...S.history.slice(-6), { role: "user", content: text }];
+        const messages = [{ role: "system", content: systemPrompt(context(extra, engine.kind)) }, ...S.history.slice(-6), { role: "user", content: text }];
         const stream = await engine.chat.completions.create({
             messages, stream: true, temperature: 0.6, top_p: 0.9, max_tokens: 320,
             extra_body: { enable_thinking: false },
@@ -399,7 +532,7 @@ ${ctx}`;
 
     // One-off text job (e.g. summarising fresh headlines) — does not touch the conversation.
     async function summarize(prompt) {
-        const engine = await load();
+        const engine = await talkEngine();
         const r = await engine.chat.completions.create({
             messages: [{ role: "system", content: "Du bist J.A.R.V.I.S. Antworte auf Deutsch in ein bis zwei kurzen, gesprochenen Sätzen, ohne Listen, Markdown oder Links." }, { role: "user", content: prompt }],
             stream: false, temperature: 0.4, max_tokens: 160, extra_body: { enable_thinking: false },
@@ -410,13 +543,14 @@ ${ctx}`;
     async function remove() {
         try {
             const mod = await import(WEBLLM);
-            for (const m of Object.values(MODELS)) { try { await mod.deleteModelAllInfoInCache(m.id); } catch (e) { /* not cached */ } }
+            for (const m of Object.values(MODELS)) for (const id of [m.id, m.id.replace("q4f16_1", "q4f32_1")]) { try { await mod.deleteModelAllInfoInCache(id); } catch (e) { /* not cached */ } }
         } catch (e) { /* offline */ }
         S.engine = null; S.loading = null; C.downloaded = false; save();
     }
 
     window.JarvisLocal = {
         MODELS, CPU_MODELS, cpuSize, diagnose, config: C, save, state: S, supported, load, ask, summarize, reset, remove, webSearch, size,
+        modelId, modelMem, canTalk, activeLabel, builtinStatus, cloudAllowed, instant: () => !S.engine && (S.builtin === "available" || cloudAllowed()),
         fsSupported, pickDir, savedDir,
         ready: () => !!S.engine, loading: () => !!S.loading && !S.engine,
     };

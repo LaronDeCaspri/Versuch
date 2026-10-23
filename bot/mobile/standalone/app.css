@@ -3060,3 +3060,9 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 .v50-hours i { flex: 1; background: var(--accent-2); opacity: 0.75; border-radius: 2px 2px 0 0; min-height: 2px; }
 .v50-note { font-size: 0.7rem; color: var(--muted); margin: 4px 0 0; line-height: 1.4; }
 @media (max-width: 420px) { .v50-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .v50-seas { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.jv2-cloud-row { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0 10px; font-size: 0.8rem; cursor: pointer; }
+.jv2-cloud-row input { margin-top: 3px; flex: none; }
+.jv2-cloud-row span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.jv2-cloud-row small { color: var(--text-2); line-height: 1.35; }
+.jv2-cloud-row em { font-style: normal; color: var(--accent-2); }
+.jv2-brain-hint[hidden] { display: none; }
