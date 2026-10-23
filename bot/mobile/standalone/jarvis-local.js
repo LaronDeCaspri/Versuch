@@ -102,11 +102,11 @@
         const rec = mod.prebuiltAppConfig.model_list.find((r) => r.model_id === id);
         if (!rec) throw new Error(`Modell ${id} unbekannt`);
         const base = `${rec.model.replace(/\/$/, "")}/resolve/main/`;
-        let dir = null;
+        let dir = null, root = null;
         if (fsSupported()) {
             dir = await ensureDirPermission(S.dir || await savedDir());
             if (!dir && askFolder) dir = await pickDir();
-            if (dir) { S.dirName = dir.name; try { dir = await dir.getDirectoryHandle(id, { create: true }); } catch (e) { dir = null; } }
+            if (dir) { S.dirName = dir.name; root = dir; try { dir = await dir.getDirectoryHandle(id, { create: true }); } catch (e) { dir = null; } }
         }
         let done = 0, total = 0;
         const report = (text) => onProgress && onProgress(total ? Math.min(0.99, done / total) : 0, text);
@@ -114,7 +114,8 @@
             const cache = await caches.open(scope);
             const hit = await cache.match(url);
             if (hit) { const b = await hit.arrayBuffer(); if (dir && !(await readFromDir(dir, fileName))) await writeToDir(dir, fileName, b); return b; }
-            let buf = dir ? await readFromDir(dir, fileName) : null;
+            // Manually downloaded files may sit in the model subfolder or directly in the picked folder.
+            let buf = dir ? (await readFromDir(dir, fileName)) || (root ? await readFromDir(root, fileName) : null) : null;
             if (buf) report(`Aus Ordner geladen: ${fileName}`);
             else {
                 buf = await fetchRetry(url, (n) => { done += n; report(`Lade ${fileName} … ${(done / 1e6).toFixed(0)} von ${(total / 1e6).toFixed(0)} MB`); });
