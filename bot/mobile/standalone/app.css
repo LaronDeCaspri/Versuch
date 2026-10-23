@@ -2948,3 +2948,14 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 .jv2-brain select { min-height: 42px; width: 100%; min-width: 0; }
 .jv2-claude { margin-top: 12px; font-size: 0.78rem; color: var(--muted); }
 .jv2-claude summary { cursor: pointer; padding: 4px 0 8px; }
+/* v46: three listening modes */
+.jv2-listen { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; padding: 4px; border-radius: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); }
+.jv2-listen label { position: relative; cursor: pointer; }
+.jv2-listen input { position: absolute; opacity: 0; pointer-events: none; }
+.jv2-listen span { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; border-radius: 9px; text-align: center; transition: background 0.2s, box-shadow 0.2s; }
+.jv2-listen b { font-size: 0.82rem; color: var(--text-2); font-weight: 600; white-space: nowrap; }
+.jv2-listen small { font-size: 0.66rem; color: var(--muted); line-height: 1.2; }
+.jv2-listen input:checked + span { background: rgba(139, 92, 246, 0.16); box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.55); }
+.jv2-listen input:checked + span b { color: #e9d5ff; }
+.jv2-listen input:focus-visible + span { outline: 2px solid #8b5cf6; outline-offset: 1px; }
+.jv2-card[data-phase="standby"] .jv2-title { color: #c4b5fd; }

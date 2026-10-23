@@ -43,6 +43,11 @@
         catch (e) { return { ...DEFAULTS }; }
     })();
     function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* storage full */ } }
+    // Three ways to get Jarvis listening: "button" (tap), "wake" ("Jarvis, …" in one sentence),
+    // "okjarvis" (hotword opens a conversation that ends on silence).
+    if (!["button", "wake", "okjarvis"].includes(S.listen)) S.listen = S.wake ? "wake" : "button";
+    const wakeOn = () => S.listen === "wake" || S.listen === "okjarvis";
+    const HOT = /\b(?:o\.?\s?k\.?|okay|okey|hey)\s*[,.!]?\s*(?:jarvis|jervis|javis|jarwis|dschawis|tschawis|charvis)\b/i;
 
     const R = {
         queue: [], busy: false, phase: "idle",          // idle | loading | speaking | listening | thinking
@@ -155,7 +160,7 @@
         const ctx = audio();
         if (!ctx) return Promise.resolve();
         const now = ctx.currentTime;
-        const notes = kind === "alert" ? [880, 660] : [660, 990];
+        const notes = kind === "alert" ? [880, 660] : kind === "listen" ? [587, 880] : kind === "end" ? [740, 494] : [660, 990];
         notes.forEach((f, i) => {
             const o = ctx.createOscillator(), g = ctx.createGain();
             o.type = "sine"; o.frequency.value = f;
@@ -409,6 +414,7 @@
                 const r = e.results[i];
                 if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript;
             }
+            if (R.wakeMode && S.listen === "okjarvis") { onHotword(rec, final || interim, !!final); return; }
             showTranscript(final || interim, !final);
             if (R.consumed) return;
             clearTimeout(R.endT);
@@ -425,15 +431,18 @@
         };
         rec.onerror = (e) => {
             if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-                S.wake = false; save(); syncSettings();
+                S.listen = "button"; save(); syncSettings();
                 setSub("Mikrofon blockiert — bitte im Browser erlauben.");
             }
         };
         rec.onend = () => {
             R.recActive = false;
+            // Hotword heard with nothing after it: open the conversation now that the mic is free.
+            if (R.pendingFollow) { R.pendingFollow = false; startListening(false, true); return; }
+            if (R.suppressRestart) { R.suppressRestart = false; return; }
             // Follow-up listening that heard nothing ends the conversation quietly.
-            if (R.followUp && !R.heard) R.convoOn = false;
-            if (S.enabled && S.wake && R.wakeArmed && !R.busy) setTimeout(() => startListening(true), 400);
+            if (R.followUp && !R.heard) { R.convoOn = false; if (S.listen === "okjarvis" && S.enabled) chime("end"); }
+            if (S.enabled && wakeOn() && R.wakeArmed && !R.busy) setTimeout(() => { if (!R.recActive && !R.busy) startListening(true); }, 400);
             else if (!R.busy) setPhase("idle");
         };
         R.rec = rec;
@@ -447,11 +456,38 @@
         R.wakeMode = wakeMode;
         R.heard = false; R.consumed = false; R.followUp = followUp; clearTimeout(R.endT);
         rec.continuous = wakeMode;
-        try { rec.start(); R.recActive = true; setPhase("listening"); } catch (e) { /* already running */ }
+        R.hotAt = 0; clearTimeout(R.hotT);
+        try { rec.start(); R.recActive = true; setPhase(wakeMode ? "standby" : "listening"); } catch (e) { /* already running */ }
+    }
+    // "OK Jarvis": tone + listening state the moment the hotword appears (interim results are
+    // enough). Words right after it are the first question; otherwise a fresh listening turn opens.
+    function onHotword(rec, text, isFinal) {
+        if (R.consumed) return;
+        const m = HOT.exec(text || "");
+        if (!m) return;
+        const rest = text.slice(m.index + m[0].length).replace(/^[\s,.!?]+/, "").trim();
+        if (!R.hotAt) { R.hotAt = Date.now(); stopSpeaking(); chime("listen"); setPhase("listening"); }
+        showTranscript(rest || "…", !isFinal);
+        clearTimeout(R.hotT);
+        const fire = () => {
+            if (R.consumed) return;
+            R.consumed = true; R.hotAt = 0; R.heard = true;
+            if (rest) { R.suppressRestart = true; R.convoOn = true; try { rec.abort(); } catch (e) { /* ignore */ } showTranscript(rest, false); handleCommand(rest); }
+            else { R.convoOn = true; R.pendingFollow = true; try { rec.abort(); } catch (e) { R.pendingFollow = false; startListening(false, true); } }
+        };
+        if (isFinal) fire(); else R.hotT = setTimeout(fire, rest ? 800 : 1200);
+    }
+    // Tap to talk — also while the background hotword listener holds the microphone.
+    function listenNow() {
+        if (R.recActive && !R.wakeMode) { R.suppressRestart = !wakeOn(); try { R.rec.stop(); } catch (e) { /* ignore */ } return; }
+        stopSpeaking();
+        R.convoOn = S.convo;
+        if (R.recActive && R.wakeMode) { R.pendingFollow = true; try { R.rec.abort(); } catch (e) { R.pendingFollow = false; } return; }
+        startListening(false);
     }
     function stopListening() { R.wakeArmed = false; try { R.rec && R.rec.stop(); } catch (e) { /* ignore */ } }
-    function pauseWake() { if (R.recActive) { try { R.rec.abort(); } catch (e) { /* ignore */ } R.recActive = false; } }
-    function resumeWake() { if (S.enabled && S.wake && R.wakeArmed && !R.recActive) setTimeout(() => startListening(true), 500); }
+    function pauseWake() { if (R.recActive) { R.suppressRestart = true; try { R.rec.abort(); } catch (e) { R.suppressRestart = false; } R.recActive = false; } }
+    function resumeWake() { if (S.enabled && wakeOn() && R.wakeArmed && !R.recActive) setTimeout(() => { if (!R.recActive && !R.busy) startListening(true); }, 500); }
 
     function onHeard(text) {
         let cmd = text;
@@ -459,7 +495,7 @@
             const m = /\b(jarvis|jervis|dschawis|tschawis|javis)\b[,.!]?\s*(.*)$/i.exec(text);
             if (!m) return;                          // ignore everything without the wake word
             cmd = m[2].trim();
-            if (!cmd) { speak("Ja?", "info", { force: true, chime: false }); return; }
+            if (!cmd) { R.convoOn = true; R.pendingFollow = true; chime("listen"); try { R.rec.abort(); } catch (e) { R.pendingFollow = false; startListening(false, true); } return; }
         }
         handleCommand(cmd);
     }
@@ -535,11 +571,12 @@
     // ------------------------------------------------------------------ UI
     function setPhase(p, text) {
         R.phase = p;
-        const titles = { idle: S.enabled ? "Bereit" : "Ausgeschaltet", speaking: "Spricht …", listening: "Hört zu …", thinking: "Denkt nach …", loading: "Lädt Stimme …" };
+        const titles = { idle: S.enabled ? "Bereit" : "Ausgeschaltet", standby: "Bereit", speaking: "Spricht …", listening: "Hört zu …", thinking: "Denkt nach …", loading: "Lädt Stimme …" };
         const el = $("jv2-title"); if (el) el.textContent = titles[p] || "Bereit";
         const card = $("jarvis-card"); if (card) card.dataset.phase = p;
         syncFab();
         if (p === "speaking" && text) setSub(text);
+        else if (p === "standby") setSub(S.listen === "okjarvis" ? "Sag „OK Jarvis“ — dann höre ich zu, bis du nichts mehr sagst." : "Sag „Jarvis“ und gleich deine Frage, z. B. „Jarvis, Lagebericht“.");
         else if (p === "idle") setSub(engineLabel());
     }
     function fab() {
@@ -551,7 +588,7 @@
             b.addEventListener("click", () => {
                 if (!S.enabled) { const c = $("jarvis-card"); if (c) c.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
                 if (R.phase === "speaking") { stopSpeaking(); return; }
-                if (R.recActive && !R.wakeMode) stopListening(); else startListening(false);
+                listenNow();
             });
             document.body.appendChild(b);
         }
@@ -677,7 +714,8 @@
     function syncSettings() {
         const set = (id, v) => { const el = $(id); if (el) { if (el.type === "checkbox") el.checked = !!v; else el.value = v; } };
         set("jv2-rate", S.rate); set("jv2-vol", S.volume);
-        set("jv2-wake", S.wake); set("jv2-brief-auto", S.briefing); set("jv2-fx", S.fx); set("jv2-convo", S.convo);
+        document.querySelectorAll('input[name="jv2-listen"]').forEach((r) => { r.checked = r.value === S.listen; });
+        set("jv2-brief-auto", S.briefing); set("jv2-fx", S.fx); set("jv2-convo", S.convo);
         set("jv2-el-key", S.premiumKey); set("jv2-el-voice", S.premiumVoice);
         const AI = window.JarvisAI;
         if (AI) {
@@ -707,6 +745,13 @@
         showAiSetup(false);
         syncFab();
     }
+    function setListen(mode) {
+        if (!["button", "wake", "okjarvis"].includes(mode)) return;
+        S.listen = mode; save();
+        if (wakeOn() && S.enabled) { R.wakeArmed = true; pauseWake(); setTimeout(() => startListening(true), 300); }
+        else { stopListening(); setPhase("idle"); }
+        syncSettings();
+    }
     function setVolume(v) { S.volume = Math.max(0.1, Math.min(1, v)); if (R.gain) R.gain.gain.value = S.volume; save(); syncSettings(); }
     function setRate(v) { S.rate = Math.max(0.7, Math.min(1.4, Math.round(v * 100) / 100)); save(); syncSettings(); }
 
@@ -731,6 +776,7 @@
                 target = Math.min(1, Math.sqrt(sum / data.length) * 4.5);
             } else if (R.phase === "speaking") target = R.level;
             else if (R.phase === "listening") target = 0.25 + 0.15 * Math.sin(t * 4);
+            else if (R.phase === "standby") target = 0.08 + 0.06 * Math.sin(t * 1.6);
             else if (R.phase === "thinking" || R.phase === "loading") target = 0.2;
             lvl += (target - lvl) * 0.25;
             const c = size / 2, base = size * 0.2;
@@ -785,7 +831,7 @@
         if (S.engine === "neural") ensureNeural();
         if (window.JarvisAI && window.JarvisAI.available()) window.JarvisAI.warm();
         else if (window.JarvisLocal && window.JarvisLocal.config.downloaded) loadBrain(false);
-        if (S.wake) { R.wakeArmed = true; startListening(true); }
+        if (wakeOn()) { R.wakeArmed = true; startListening(true); }
         const brief = window.TBJarvisBrain && window.TBJarvisBrain.briefing();
         speak(brief ? `Jarvis online. ${brief}` : "Jarvis online. Ich melde mich bei Trades, Alarmen und wichtigen Nachrichten.", "info", { force: true });
     }
@@ -811,7 +857,7 @@
             const b = e.target.closest("button, [data-jv]");
             if (!b) return;
             if (b.id === "jarvis-toggle") { S.enabled ? disable() : enable(); }
-            else if (b.id === "jv2-mic") { if (R.recActive && !R.wakeMode) stopListening(); else { stopSpeaking(); startListening(false); } }
+            else if (b.id === "jv2-mic") listenNow();
             else if (b.id === "jv2-brief") { if (!S.enabled) enable(); else handleCommand("Lagebericht"); }
             else if (b.dataset.jv === "load") { audio(); S.engine = "neural"; save(); loadNeural().then(() => { syncSettings(); speak("Neurale Stimme bereit. So klinge ich ab jetzt.", "info", { force: true }); }).catch(() => {}); }
             else if (b.dataset.jv === "ai-connect") connectAi();
@@ -843,10 +889,7 @@
                 if (S.enabled) speak("Stimme geändert.", "info", { force: true });
             } else if (el.id === "jv2-rate") setRate(Number(el.value));
             else if (el.id === "jv2-vol") setVolume(Number(el.value));
-            else if (el.id === "jv2-wake") {
-                S.wake = el.checked; save();
-                if (S.wake && S.enabled) { R.wakeArmed = true; startListening(true); } else stopListening();
-            } else if (el.id === "jv2-brief-auto") { S.briefing = el.checked; save(); }
+            else if (el.name === "jv2-listen") setListen(el.value); else if (el.id === "jv2-brief-auto") { S.briefing = el.checked; save(); }
             else if (el.id === "jv2-fx") { S.fx = el.checked; save(); applyFx(); syncSettings(); if (S.enabled) speak(S.fx ? "Jarvis-Klang aktiv." : "Natürlicher Klang.", "info", { force: true }); }
             else if (el.id === "jv2-convo") { S.convo = el.checked; save(); }
             else if (el.id === "jv2-brain-size" && window.JarvisLocal) { window.JarvisLocal.config.size = el.value; window.JarvisLocal.save(); renderBrain(); }
@@ -887,7 +930,7 @@
                 document.removeEventListener("pointerdown", arm, true);
                 audio();
                 if (S.engine === "neural") ensureNeural();
-                if (S.wake) { R.wakeArmed = true; startListening(true); }
+                if (wakeOn()) { R.wakeArmed = true; startListening(true); }
                 if (window.JarvisLocal && window.JarvisLocal.config.downloaded && !(window.JarvisAI && window.JarvisAI.available())) loadBrain(false);
                 maybeBriefing();
             };

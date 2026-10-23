@@ -280,6 +280,11 @@
             <button id="jv2-mic" class="jv2-mic" disabled><span aria-hidden="true">●</span> Sprechen</button>
             <button id="jv2-brief">Lagebericht</button>
         </div>
+        <div class="jv2-listen" role="radiogroup" aria-label="Wie Jarvis zuhört">
+            <label><input type="radio" name="jv2-listen" value="button"><span><b>Knopf</b><small>tippen &amp; sprechen</small></span></label>
+            <label><input type="radio" name="jv2-listen" value="wake"><span><b>„Jarvis …“</b><small>Frage im selben Satz</small></span></label>
+            <label><input type="radio" name="jv2-listen" value="okjarvis"><span><b>„OK Jarvis“</b><small>Gespräch bis Stille</small></span></label>
+        </div>
         <div class="jv2-ai-setup" id="jv2-ai-setup" hidden>
             <div class="jv2-ai-setup-head"><strong>Normal mit Jarvis reden</strong><span class="jv2-pill on">kostenlos</span></div>
             <p>Jarvis bekommt ein eigenes KI-Gehirn (Qwen 3.5), das komplett auf deinem Gerät läuft — kein Konto, kein Schlüssel, keine Kosten, nach dem Laden auch offline. Braucht Chrome oder Edge mit Grafikbeschleunigung (WebGPU).</p>
@@ -307,7 +312,6 @@
             <div class="jv2-checks">
                 <label><input type="checkbox" id="jv2-fx"> Jarvis-Klang (tiefer, klarer, digitaler Raum)</label>
                 <label><input type="checkbox" id="jv2-convo"> Gesprächsmodus (hört nach jeder Antwort weiter zu)</label>
-                <label><input type="checkbox" id="jv2-wake"> Wake-Word „Jarvis“ (Mikrofon hört mit)</label>
                 <label><input type="checkbox" id="jv2-brief-auto"> Tages-Briefing beim ersten Öffnen</label>
                 <label><input type="checkbox" id="jv2-say-trades"> Trades ansagen</label>
                 <label><input type="checkbox" id="jv2-say-alerts"> Alarme ansagen</label>
