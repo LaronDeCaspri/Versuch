@@ -199,3 +199,54 @@ test("attention radar: mentions, scoring, levels and safe logos", () => {
     const hist = [{ t: now - 3600e3, scores: { SOL: 40 } }, { t: now - 600e3, scores: { SOL: 70 } }];
     assert.equal(R.trendFor(hist, "SOL", sol.score, now), sol.score - 40, "trend compares with ~1 h ago");
 });
+
+test("BTC memory: merge, drawdowns, cycle, analogs and a risk context that only ever reduces", () => {
+    const B = TB.btcBrain, DAY = 86400e3;
+    const now = Date.parse("2026-10-23T00:00:00Z");
+    // Steady uptrend with a little wave, plus one clean 60 % crash and full recovery.
+    const n = 5000, mid = 3000, t0 = Math.floor(now / DAY) * DAY - n * DAY, raw = [];
+    let lc = 0;
+    for (let i = 0; i < n; i++) {
+        let r = 0.002 + 0.01 * Math.sin(i / 9) * Math.sin(i / 31);
+        if (i > mid && i <= mid + 200) r = Math.log(0.4) / 200;
+        else if (i > mid + 200 && i <= mid + 400) r = Math.log(2.5 * 1.05) / 200;
+        lc += r;
+        const c = Math.exp(lc);
+        raw.push({ t: t0 + i * DAY, o: c, h: c * 1.01, l: c * 0.99, c, v: 1 });
+    }
+    const daily = B.mergeDaily(raw.slice(0, 10), raw, [{ t: raw[5].t + 3600e3, c: 999 }]);
+    assert.equal(daily.length, raw.length, "one row per UTC day");
+    assert.ok(daily.every((k, i) => !i || k.t > daily[i - 1].t), "sorted, no duplicates");
+    assert.notEqual(daily[5].c, 999, "earlier sources win for the same day");
+
+    const dds = B.drawdowns(daily, 30);
+    const crash = dds.slice().sort((x, y) => x.depth - y.depth)[0];
+    assert.ok(crash && crash.depth <= -58 && crash.depth >= -66, `the 60 % crash is found (${crash && crash.depth})`);
+    assert.ok(crash.recoveryDays > 150 && crash.recoveryDays < 260, "and its recovery");
+
+    const cyc = B.cycleInfo(daily, B.HALVINGS[3] + 100 * DAY);
+    assert.equal(cyc.halvingIndex, 4);
+    assert.equal(cyc.daysSince, 100);
+    assert.match(cyc.phase, /früh nach dem Halving/);
+
+    const a = B.analyze(daily, now);
+    assert.ok(a && a.days === daily.length && a.price === daily[daily.length - 1].c);
+    assert.ok(a.context.score >= -1 && a.context.score <= 1);
+    assert.ok(a.riskMult.long <= 1 && a.riskMult.short <= 1 && a.riskMult.long >= 0.5 && a.riskMult.short >= 0.5, "risk is never increased");
+    assert.ok(a.analogs.rows.length > 0);
+    const last = daily.length - 1;
+    for (const r of a.analogs.rows) {
+        const idx = daily.findIndex((k) => k.t === r.t);
+        assert.ok(idx + 90 < last - 60, "analogue outcomes come from the past, never overlap today's window");
+    }
+    assert.match(B.summary(a), /Ich kenne Bitcoin seit/);
+    assert.match(B.answer(a, "Wann war das letzte Halving?"), /Halving/);
+    assert.match(B.answer(a, "größter Crash"), /Einbrüche/);
+
+    const hourly = syntheticCandles(24 * 120, { seed: 3, start: 30000, vol: 0.004, tfMs: 3600e3, endTs: now })
+        .map((k) => ({ t: k.ts, o: k.open, h: k.high, l: k.low, c: k.close, v: k.volume }));
+    const I = B.intraday(hourly);
+    assert.equal(I.byHour.length, 24);
+    assert.equal(I.byWeekday.length, 7);
+    assert.equal(I.busiest.length, 3);
+});

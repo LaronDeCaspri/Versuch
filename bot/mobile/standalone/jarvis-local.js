@@ -26,9 +26,17 @@
 
     const S = { engine: null, loading: null, progress: 0, text: "", error: null, history: [], lastTurn: 0, gpu: null };
 
+    const GPU_FAILED = { webgpu: false, reason: "Chrome meldet zwar WebGPU, die KI findet aber keine passende Grafikkarte.",
+        steps: ["chrome://gpu öffnen: Bei „WebGPU“ sollte „Hardware accelerated“ stehen.", "Grafiktreiber aktualisieren, Chrome neu starten, dann „Erneut prüfen“."] };
     async function supported() {
         if (S.gpu !== null) return S.gpu;
+        if (C.gpuFailed && !S.recheck) {
+            S.diag = GPU_FAILED; S.gpu = false;
+            return false;
+        }
+        S.recheck = false;
         S.diag = await diagnose();
+        if (S.diag.webgpu) { C.gpuFailed = 0; save(); }
         S.gpu = S.diag.webgpu;
         return S.gpu;
     }
@@ -37,7 +45,20 @@
         if (!window.isSecureContext) return { webgpu: false, reason: "Die Seite läuft nicht über https.", steps: ["Die App über den https-Link öffnen, nicht als Datei."] };
         if (!navigator.gpu) return { webgpu: false, reason: "Dieser Browser stellt kein WebGPU bereit.", steps: ["Chrome bzw. Edge aktualisieren (Menü → Hilfe → Über Google Chrome).", "chrome://flags öffnen, nach „WebGPU“ suchen und „Unsafe WebGPU Support“ aktivieren, dann neu starten."] };
         for (const opt of [{ powerPreference: "high-performance" }, {}, { powerPreference: "low-power" }]) {
-            try { if (await navigator.gpu.requestAdapter(opt)) return { webgpu: true }; } catch (e) { /* try the next option */ }
+            let ad = null;
+            try { ad = await navigator.gpu.requestAdapter(opt); } catch (e) { /* try the next option */ }
+            if (!ad) continue;
+            // The models are stored as 16-bit floats; without shader-f16 WebLLM refuses the GPU.
+            if (/f16/.test(MODELS[size()].id) && ad.features && !ad.features.has("shader-f16")) {
+                return { webgpu: false, reason: "Die Grafikkarte unterstützt kein 16-Bit-Rechnen (shader-f16), das die KI-Modelle brauchen.",
+                    steps: ["Grafiktreiber aktualisieren und Chrome neu starten.", "Ohne shader-f16 nutzt Jarvis automatisch den CPU-Modus."] };
+            }
+            // WebLLM asks for a device of its own; if Chrome refuses here, it would refuse there too.
+            try {
+                const dev = await ad.requestDevice(ad.features && ad.features.has("shader-f16") ? { requiredFeatures: ["shader-f16"] } : {});
+                if (dev && dev.destroy) dev.destroy();
+            } catch (e) { continue; }
+            return { webgpu: true };
         }
         return { webgpu: false, reason: "Chrome hat WebGPU, bekommt aber keinen Zugriff auf die Grafikkarte.",
             steps: ["chrome://settings/system öffnen → „Grafikbeschleunigung verwenden, wenn verfügbar“ einschalten → Chrome neu starten.",
@@ -256,19 +277,37 @@
                 C.downloaded = true; C.loadedSize = "cpu:" + cpuSize(); save();
                 return S.engine;
             }
-            S.engineKind = "webgpu";
-            await downloadModel((p, t) => { S.progress = p * 0.9; S.text = t; onProgress && onProgress(S.progress, S.text); }, opts);
-            const { CreateWebWorkerMLCEngine } = await import(WEBLLM);
-            const worker = new Worker("jarvis-llm-worker.js", { type: "module" });
+            try {
+                return await loadGpu(onProgress, opts);
+            } catch (e) {
+                // Chrome offered an adapter but WebLLM cannot use it ("Unable to find a compatible GPU"):
+                // remember that and continue on the CPU instead of failing.
+                if (!/compatible GPU|WebGPU|adapter|shader-f16|GPUDevice|device lost/i.test(String((e && e.message) || e))) throw e;
+                S.gpu = false; S.diag = GPU_FAILED;
+                C.gpuFailed = Date.now(); save();
+                S.engine = await loadCpu(onProgress, opts);
+                S.engineKind = "cpu";
+                C.downloaded = true; C.loadedSize = "cpu:" + cpuSize(); save();
+                return S.engine;
+            }
+        })();
+        S.loading.catch((e) => { S.error = String((e && e.message) || e); S.loading = null; });
+        return S.loading;
+    }
+
+    async function loadGpu(onProgress, opts) {
+        S.engineKind = "webgpu";
+        await downloadModel((p, t) => { S.progress = p * 0.9; S.text = t; onProgress && onProgress(S.progress, S.text); }, opts);
+        const { CreateWebWorkerMLCEngine } = await import(WEBLLM);
+        const worker = new Worker("jarvis-llm-worker.js", { type: "module" });
+        try {
             const engine = await CreateWebWorkerMLCEngine(worker, MODELS[size()].id, {
                 initProgressCallback: (r) => { S.progress = 0.9 + 0.1 * (r.progress || 0); S.text = /Fetching|Loading model from cache/i.test(r.text || "") ? "Starte KI-Gehirn …" : (r.text || ""); onProgress && onProgress(S.progress, S.text); },
             });
             S.engine = engine;
             C.downloaded = true; C.loadedSize = size(); save();
             return engine;
-        })();
-        S.loading.catch((e) => { S.error = String((e && e.message) || e); S.loading = null; });
-        return S.loading;
+        } catch (e) { worker.terminate(); throw e; }
     }
 
     function systemPrompt(ctx) {
@@ -289,11 +328,13 @@ ${ctx}`;
         if (S.engineKind === "cpu") {
             const L = window.TBNewsAI && window.TBNewsAI.last;
             const nw = L && L.count ? `News: Stimmung ${L.label}; ${L.top.slice(0, 3).map((n) => `${n.trusted || n.source}: ${n.title}`).join(" | ")}` : "Keine News.";
-            return `Depot ${st.equity_usdt} USDT, heute ${st.today_usdt}, Positionen ${st.positions.length}, Automatik ${st.auto_mode ? "an" : "aus"}, BTC ${st.btc_usdt}.\n${nw}${extra ? `\n${extra}` : ""}`;
+            const bb = A.btcContextLine ? A.btcContextLine() : "";
+            return `Depot ${st.equity_usdt} USDT, heute ${st.today_usdt}, Positionen ${st.positions.length}, Automatik ${st.auto_mode ? "an" : "aus"}, BTC ${st.btc_usdt}.\n${nw}${bb ? `\n${bb}` : ""}${extra ? `\n${extra}` : ""}`;
         }
         const news = window.TBNewsAI && window.TBNewsAI.contextText ? window.TBNewsAI.contextText()
             : A.news(5, false).map((n, i) => `${i + 1}. ${n.source}, vor ${n.minutes_ago} Min.: ${n.title}`).join("\n");
-        return `Bot-Status: ${JSON.stringify(st)}\n${news || "Keine Meldungen."}${extra ? `\n\nZUSATZINFOS ZUR FRAGE:\n${extra}` : ""}`;
+        const bb = A.btcContextLine ? A.btcContextLine() : "";
+        return `Bot-Status: ${JSON.stringify(st)}\n${news || "Keine Meldungen."}${bb ? `\n${bb}` : ""}${extra ? `\n\nZUSATZINFOS ZUR FRAGE:\n${extra}` : ""}`;
     }
 
     async function ask(text, { onSentence, extra } = {}) {

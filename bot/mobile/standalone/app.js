@@ -8069,7 +8069,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "49.0";
+const APP_VERSION = "50.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -12102,6 +12102,247 @@ Object.assign(NEWSAI, {
             + `Ideen des Bots: ${(NEWSAI.ideaList || []).map((i) => i.text).join(" | ") || "keine"}`;
     },
 });
+
+// ============================================================================
+// v50 — BTC-Gedächtnis: die komplette Bitcoin-Historie seit 2010 (Tageskerzen) plus jede
+// Stunde seit 2017, dauerhaft im Browser (IndexedDB), laufend ergänzt und ausgewertet.
+// Das Ergebnis fließt als vorsichtiger Kontext in alle Trades (Risiko nur kleiner, nie größer)
+// und steht Jarvis für Fragen zur Geschichte zur Verfügung.
+// ============================================================================
+const BRAIN = (window.TBBtcBrain = window.TBBtcBrain || { daily: [], hourly: [], last: null, meta: {}, status: "lädt", busy: false, renderedKey: "" });
+const _bbDB = "tb_btc_brain";
+function _bbIdb(mode, fn) {
+    return new Promise((resolve, reject) => {
+        let req;
+        try { req = indexedDB.open(_bbDB, 1); } catch (e) { reject(e); return; }
+        req.onupgradeneeded = () => req.result.createObjectStore("kv");
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+            try {
+                const tx = req.result.transaction("kv", mode), st = tx.objectStore("kv");
+                const r = fn(st);
+                tx.oncomplete = () => { req.result.close(); resolve(r && "result" in r ? r.result : undefined); };
+                tx.onerror = () => { req.result.close(); reject(tx.error); };
+            } catch (e) { req.result.close(); reject(e); }
+        };
+    });
+}
+// Compact rows [t, o, h, l, c, v] keep ~80 000 hourly candles at a few MB.
+const _bbPack = (list) => list.map((k) => [k.t, k.o, k.h, k.l, k.c, k.v]);
+const _bbUnpack = (rows) => (rows || []).map((r) => ({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4], v: r[5] }));
+const _bbGet = (key) => _bbIdb("readonly", (st) => st.get(key)).catch(() => undefined);
+const _bbPut = (key, val) => _bbIdb("readwrite", (st) => st.put(val, key)).catch(() => undefined);
+
+async function _bbFetchHistory() {
+    const B = window.TB.btcBrain, src = [];
+    let cc = [], bs = [], bn = [];
+    try { cc = await B.fetchCryptoCompareDaily(); if (cc.length) src.push("CryptoCompare"); } catch (e) { /* next source */ }
+    if (!cc.length || cc[0].t > Date.parse("2012-01-01")) {
+        for (const p of [null, ...RSS_PROXIES.map((x) => x.wrap)]) {
+            try { bs = await B.fetchBitstampDaily(p); if (bs.length) { src.push(p ? "Bitstamp (Proxy)" : "Bitstamp"); break; } } catch (e) { /* next proxy */ }
+        }
+    }
+    try { bn = await B.fetchBinance("1d"); if (bn.length) src.push("Binance"); } catch (e) { /* older sources still count */ }
+    // Recent days: Binance (same market the bot trades); older history: CryptoCompare, then Bitstamp.
+    return { daily: B.mergeDaily(bn, cc, bs), sources: src };
+}
+
+function _bbAnalyze() {
+    const B = window.TB.btcBrain;
+    const a = B.analyze(BRAIN.daily, Date.now());
+    if (a) a.intraday = BRAIN.intraday || null;
+    BRAIN.last = a;
+    if (window.TB) window.TB.btcContext = a ? { score: a.context.score, label: a.context.label, riskMult: a.riskMult, regime: a.regime } : null;
+    _bbRender();
+}
+
+async function _bbUpdate() {
+    if (BRAIN.busy || !(window.TB && window.TB.btcBrain)) return;
+    BRAIN.busy = true;
+    const B = window.TB.btcBrain;
+    try {
+        if (!BRAIN.daily.length) {
+            const [d, h, m] = await Promise.all([_bbGet("daily"), _bbGet("hourly"), _bbGet("meta")]);
+            BRAIN.daily = _bbUnpack(d); BRAIN.hourly = _bbUnpack(h); BRAIN.meta = m || {};
+            if (BRAIN.hourly.length) BRAIN.intraday = B.intraday(BRAIN.hourly);
+            if (BRAIN.daily.length) _bbAnalyze();
+        }
+        // Complete history once (or again if it is shorter than it should be), afterwards only the new days.
+        if (BRAIN.daily.length < 2500 || BRAIN.daily[0].t > Date.parse("2013-01-01")) {
+            BRAIN.status = "lädt die komplette Historie …"; _bbRender();
+            const r = await _bbFetchHistory();
+            if (r.daily.length > BRAIN.daily.length) {
+                BRAIN.daily = B.mergeDaily(r.daily, BRAIN.daily);
+                BRAIN.meta.sources = r.sources;
+            }
+        } else {
+            const from = BRAIN.daily[BRAIN.daily.length - 1].t - 2 * 86400e3;
+            const fresh = await B.fetchBinance("1d", from);
+            if (fresh.length) BRAIN.daily = B.mergeDaily(fresh, BRAIN.daily);
+        }
+        if (BRAIN.daily.length) {
+            BRAIN.meta.lastUpdate = Date.now();
+            await _bbPut("daily", _bbPack(BRAIN.daily));
+            await _bbPut("meta", BRAIN.meta);
+            BRAIN.status = "aktuell";
+            _bbAnalyze();
+        } else BRAIN.status = "keine Datenquelle erreichbar — neuer Versuch bald";
+        _bbRender();
+        await _bbHourly();
+    } catch (e) {
+        BRAIN.status = BRAIN.daily.length ? "aktuell (letzte Aktualisierung fehlgeschlagen)" : "keine Datenquelle erreichbar — neuer Versuch bald";
+        _bbRender();
+    } finally { BRAIN.busy = false; }
+}
+
+// Every hour since August 2017 (~80 requests), saved page by page so an interruption loses nothing.
+async function _bbHourly() {
+    const B = window.TB.btcBrain;
+    let from = BRAIN.hourly.length ? BRAIN.hourly[BRAIN.hourly.length - 1].t + 3600e3 : Date.parse("2017-08-17T00:00:00Z");
+    if (from > Date.now() - 2 * 3600e3) return;
+    let pages = 0;
+    while (from < Date.now() - 2 * 3600e3) {
+        const batch = await B.fetchBinance("1h", from, null, 1);
+        if (!batch.length) break;
+        BRAIN.hourly = BRAIN.hourly.concat(batch.filter((k) => k.t >= from));
+        from = BRAIN.hourly[BRAIN.hourly.length - 1].t + 3600e3;
+        if (++pages % 10 === 0 || from >= Date.now() - 2 * 3600e3) {
+            await _bbPut("hourly", _bbPack(BRAIN.hourly));
+            BRAIN.status = from >= Date.now() - 2 * 3600e3 ? "aktuell" : `Stundenkerzen: ${Math.round(BRAIN.hourly.length / 1000)} Tsd. geladen …`;
+            _bbRender();
+        }
+        await new Promise((r) => setTimeout(r, 250));
+        if (batch.length < 1000) break;
+    }
+    await _bbPut("hourly", _bbPack(BRAIN.hourly));
+    BRAIN.intraday = B.intraday(BRAIN.hourly);
+    BRAIN.status = "aktuell";
+    _bbAnalyze();
+}
+
+// ---- card on the Analyse tab ---------------------------------------------------------------------
+function _bbChart(daily) {
+    const W = 640, H = 170, P = 4;
+    const step = Math.max(1, Math.floor(daily.length / 640));
+    const pts = daily.filter((_, i) => i % step === 0 || i === daily.length - 1);
+    const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+    const lo = Math.log10(Math.min(...pts.map((k) => k.c))), hi = Math.log10(Math.max(...pts.map((k) => k.c)));
+    const x = (t) => P + ((t - t0) / (t1 - t0 || 1)) * (W - 2 * P);
+    const y = (v) => H - P - ((Math.log10(v) - lo) / (hi - lo || 1)) * (H - 2 * P);
+    const line = pts.map((k, i) => `${i ? "L" : "M"}${x(k.t).toFixed(1)},${y(k.c).toFixed(1)}`).join("");
+    const halv = window.TB.btcBrain.HALVINGS.filter((h) => h > t0 && h < t1)
+        .map((h, i) => `<line x1="${x(h).toFixed(1)}" x2="${x(h).toFixed(1)}" y1="${P}" y2="${H - P}" class="v50-halv"/><text x="${(x(h) + 3).toFixed(1)}" y="12" class="v50-halv-t">H${i + 1 + window.TB.btcBrain.HALVINGS.filter((z) => z <= t0).length}</text>`).join("");
+    const grid = [];
+    for (let e = Math.ceil(lo); e <= Math.floor(hi); e++) if (y(10 ** e) > 18) grid.push(`<line x1="${P}" x2="${W - P}" y1="${y(10 ** e).toFixed(1)}" y2="${y(10 ** e).toFixed(1)}" class="v50-grid"/><text x="${W - P - 2}" y="${(y(10 ** e) - 3).toFixed(1)}" class="v50-grid-t">${10 ** e >= 1000 ? `${10 ** e / 1000}k` : 10 ** e} $</text>`);
+    const yrs = [];
+    for (let yr = new Date(t0).getUTCFullYear() + 1; yr <= new Date(t1).getUTCFullYear(); yr += 2) { const t = Date.UTC(yr, 0, 1); yrs.push(`<text x="${x(t).toFixed(1)}" y="${H - 6}" class="v50-yr">${yr}</text>`); }
+    return `<svg viewBox="0 0 ${W} ${H}" class="v50-chart" role="img" aria-label="Bitcoin-Kurs seit ${new Date(t0).getUTCFullYear()}, logarithmisch">${grid.join("")}${halv}${yrs.join("")}<path d="${line}" class="v50-line"/></svg>`;
+}
+const _bbPct = (x, d = 0) => (x == null || isNaN(x) ? "–" : `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(d)} %`);
+const _bbDate = (t, long) => new Date(t).toLocaleDateString("de-DE", long ? { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" } : { month: "short", year: "numeric", timeZone: "UTC" });
+function _bbRender() {
+    const pane = document.querySelector('[data-pane="analyse"]');
+    if (!pane) return;
+    let el = document.getElementById("v50-brain");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "v50-brain";
+        el.className = "card v31-card v50-brain";
+        el.innerHTML = `<h2>BTC-Gedächtnis <span class="v50-status"></span></h2><div class="v50-body"></div>`;
+        const ts = document.getElementById("v32-tearsheet");
+        if (ts && ts.parentNode === pane) ts.after(el); else pane.insertBefore(el, pane.firstChild);
+    }
+    const st = el.querySelector(".v50-status");
+    if (st.textContent !== BRAIN.status) st.textContent = BRAIN.status;
+    const a = BRAIN.last;
+    // Re-render the body only when the data changed — no flicker during background updates.
+    const key = a ? `${a.to}|${a.days}|${a.price}|${BRAIN.intraday ? BRAIN.intraday.candles : 0}` : `none|${BRAIN.status}`;
+    if (key === BRAIN.renderedKey) return;
+    BRAIN.renderedKey = key;
+    const body = el.querySelector(".v50-body");
+    if (!a) { body.innerHTML = `<p class="v50-note">Die komplette Bitcoin-Historie seit 2010 wird einmalig geladen und dauerhaft im Browser gespeichert.</p>`; return; }
+    const c = a.cycle, an = a.analogs, I = BRAIN.intraday;
+    const MON = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+    const kpi = (k, v, cls = "") => `<div class="v50-kpi"><div class="k">${k}</div><div class="v num ${cls}">${v}</div></div>`;
+    const ctxCls = a.context.score >= 0.25 ? "pos" : a.context.score <= -0.25 ? "neg" : "";
+    body.innerHTML = `
+        <p class="v50-cover">${a.days.toLocaleString("de-DE")} Tage seit ${_bbDate(a.from, true)}${I ? ` · ${Math.round(I.candles / 1000).toLocaleString("de-DE")} Tsd. Stundenkerzen seit ${_bbDate(I.from)}` : ""}${BRAIN.meta.sources ? ` · Quellen: ${_escHtml(BRAIN.meta.sources.join(", "))}` : ""}</p>
+        ${_bbChart(BRAIN.daily)}
+        <div class="v50-ctx ${ctxCls}"><b>Historischer Kontext: ${_escHtml(a.context.label)}</b><span>${a.riskMult.long < 1 ? `Long-Risiko aller Trades × ${a.riskMult.long.toFixed(2)}` : a.riskMult.short < 1 ? `Short-Risiko aller Trades × ${a.riskMult.short.toFixed(2)}` : "keine Risiko-Anpassung"}</span></div>
+        <div class="v50-kpis">
+            ${kpi("Allzeithoch", `${fmt(a.ath, 0)} $`)}
+            ${kpi("Abstand ATH", _bbPct(a.ddFromAth, 1), a.ddFromAth < -20 ? "neg" : "")}
+            ${kpi("Trend", a.regime === "bull" ? "Aufwärts" : a.regime === "bear" ? "Abwärts" : "Seitwärts", a.regime === "bull" ? "pos" : a.regime === "bear" ? "neg" : "")}
+            ${kpi("Mayer-Multiple", a.mayer != null ? `${a.mayer.toFixed(2)} <small>(${Math.round(a.mayerPct * 100)}. Pz.)</small>` : "–")}
+            ${kpi("200-Wochen-Ø", a.sma200w ? `${fmt(a.sma200w, 0)} $` : "–")}
+            ${kpi("Volatilität 30T", a.volNow ? `${a.volNow.toFixed(0)} % <small>(${Math.round(a.volPct * 100)}. Pz.)</small>` : "–")}
+        </div>
+        ${c.daysSince != null ? `<div class="v50-cycle"><div class="v50-cycle-h"><span>Tag ${c.daysSince} nach dem ${c.halvingIndex}. Halving</span><span>nächstes ≈ ${_bbDate(c.nextHalvingEst)}</span></div><div class="v50-bar"><i style="width:${Math.round((c.progress || 0) * 100)}%"></i>${c.medianDaysToTop && c.cycleLen ? `<b style="left:${Math.min(100, Math.round((c.medianDaysToTop / c.cycleLen) * 100))}%" title="Früher Zyklus-Hoch im Median"></b>` : ""}</div><small>${_escHtml(c.phase)}${c.past.length ? ` · frühere Hochs nach ${c.past.map((p) => p.daysToTop).join(" / ")} Tagen` : ""}</small></div>` : ""}
+        ${an ? `<div class="v50-sec"><div class="v50-sec-h">Ähnlichste Situationen der Geschichte <small>(${an.window}-Tage-Muster)</small></div>
+            <div class="v50-an-stats">${[7, 30, 90].map((h) => `<div><span>${h} Tage danach</span><b class="${an.stats[h].median >= 0 ? "pos" : "neg"}">${_bbPct(an.stats[h].median, 1)}</b><small>${Math.round(an.stats[h].up * 100)} % im Plus</small></div>`).join("")}</div>
+            <div class="v50-an-list">${an.rows.slice(0, 5).map((r) => `<span>${_bbDate(r.t, true)} <b class="${r.fwd[30] >= 0 ? "pos" : "neg"}">${_bbPct(r.fwd[30])}</b></span>`).join("")}</div></div>` : ""}
+        <div class="v50-sec"><div class="v50-sec-h">Größte Einbrüche</div>
+            <div class="v50-dd">${a.drawdowns.slice().sort((x, y) => x.depth - y.depth).slice(0, 5).map((d) => `<div><span>${_bbDate(d.peakT)}</span><b class="neg">${_bbPct(d.depth)}</b><small>${d.ongoing ? "läuft noch" : `${d.recoveryDays} Tage bis Erholung`}</small></div>`).join("")}</div></div>
+        <div class="v50-sec"><div class="v50-sec-h">Monats-Saisonalität <small>(Median, Anteil positiver Jahre)</small></div>
+            <div class="v50-seas">${a.seasonality.map((m) => `<div class="${m.month === a.monthNow.month ? "now" : ""}"><span>${MON[m.month]}</span><b class="${(m.median || 0) >= 0 ? "pos" : "neg"}">${m.median == null ? "–" : _bbPct(m.median)}</b><small>${m.n ? `${Math.round(m.up * 100)} %` : ""}</small></div>`).join("")}</div></div>
+        ${I ? `<div class="v50-sec"><div class="v50-sec-h">Tageszeit <small>(UTC, Ø Bewegung pro Stunde)</small></div><div class="v50-hours">${I.byHour.map((h) => `<i title="${h.hour} Uhr UTC: Ø ${h.absMove.toFixed(2)} %" style="height:${Math.round(12 + 88 * ((h.absMove - Math.min(...I.byHour.map((z) => z.absMove))) / ((Math.max(...I.byHour.map((z) => z.absMove)) - Math.min(...I.byHour.map((z) => z.absMove))) || 1)))}%"></i>`).join("")}</div><small class="v50-note">Unruhigste Stunden: ${I.busiest.map((h) => `${h} Uhr`).join(", ")} · ruhigste: ${I.calmest.map((h) => `${h} Uhr`).join(", ")} (UTC)</small></div>` : ""}
+        <p class="v50-note">Geschichte ist Kontext, keine Garantie. Der Bot verkleinert damit nur das Risiko in historisch ungünstigen Phasen — er vergrößert es nie.</p>`;
+}
+
+// ---- risk context for every trade ------------------------------------------------------------------
+if (typeof makePending === "function" && !makePending._v50) {
+    const _v50Mkp = makePending;
+    makePending = function (symbol, sig, candles, price) {
+        const p = _v50Mkp(symbol, sig, candles, price);
+        const a = BRAIN.last;
+        if (!p || !a || Date.now() - a.at > 3 * 86400e3) return p;
+        const m = a.riskMult[p.side] ?? 1;
+        if (m < 1) {
+            p.size *= m;
+            if (p.riskAmount) p.riskAmount *= m;
+            p.btcContext = { mult: m, label: a.context.label };
+            if (Array.isArray(p.reasons)) p.reasons.push(`BTC-Gedächtnis: ${a.context.label} → Risiko × ${m.toFixed(2)}`);
+        }
+        return p;
+    };
+    makePending._v50 = true;
+}
+
+// ---- Jarvis -----------------------------------------------------------------------------------------
+const _BB_Q = /(geschichte|historisch|halving|zyklus|allzeithoch|\bath\b|rekordhoch|crash|absturz|einbr[uü]ch|ähnlich\w* situation|muster|analog|saison|uhrzeit|tageszeit|wochentag|seit (2010|beginn|start)|btc.gedächtnis|gedächtnis)/i;
+TBJarvisActions.btcHistory = () => {
+    const a = BRAIN.last;
+    if (!a) return { ready: false, status: BRAIN.status };
+    return {
+        ready: true, summary: window.TB.btcBrain.summary(a), since: new Date(a.from).toISOString().slice(0, 10), days: a.days,
+        price: a.price, ath: a.ath, ath_date: new Date(a.athT).toISOString().slice(0, 10), from_ath_pct: +a.ddFromAth.toFixed(1),
+        regime: a.regime, mayer_multiple: a.mayer && +a.mayer.toFixed(2), cycle: { halving: a.cycle.halvingIndex, day: a.cycle.daysSince, phase: a.cycle.phase, past_days_to_top: a.cycle.past.map((p) => p.daysToTop) },
+        analogs: a.analogs && { median_7d: a.analogs.stats[7].median, median_30d: a.analogs.stats[30].median, median_90d: a.analogs.stats[90].median, up_30d: a.analogs.stats[30].up, dates: a.analogs.rows.map((r) => new Date(r.t).toISOString().slice(0, 10)) },
+        biggest_drawdowns: a.drawdowns.slice().sort((x, y) => x.depth - y.depth).slice(0, 5).map((d) => ({ from: new Date(d.peakT).toISOString().slice(0, 10), depth_pct: Math.round(d.depth), recovery_days: d.recoveryDays })),
+        context: a.context.label, risk_multiplier: a.riskMult,
+        intraday: a.intraday && { busiest_utc_hours: a.intraday.busiest, calmest_utc_hours: a.intraday.calmest },
+    };
+};
+TBJarvisActions.btcContextLine = () => {
+    const a = BRAIN.last;
+    return a ? `BTC-Gedächtnis (${a.days} Tage seit ${new Date(a.from).getUTCFullYear()}): ${a.context.label}; Trend ${a.regime}; ${a.ddFromAth.toFixed(0)} % vom ATH; Tag ${a.cycle.daysSince} nach Halving ${a.cycle.halvingIndex}${a.analogs ? `; ähnliche Lagen 30 T später im Median ${a.analogs.stats[30].median.toFixed(0)} %` : ""}.` : "";
+};
+TBJarvisActions.isHistoryQuestion = (t) => _BB_Q.test(String(t || ""));
+{
+    const _bbStatus = TBJarvisActions.status;
+    TBJarvisActions.status = function () { const s = _bbStatus.apply(this, arguments); if (BRAIN.last) s.btc_history_context = BRAIN.last.context.label; return s; };
+    const _bbAnswer = window.TBJarvisBrain.answer;
+    window.TBJarvisBrain.answer = (raw) => {
+        if (_BB_Q.test(String(raw || ""))) return BRAIN.last ? window.TB.btcBrain.answer(BRAIN.last, raw) : `Mein BTC-Gedächtnis lädt noch (${BRAIN.status}).`;
+        return _bbAnswer(raw);
+    };
+}
+
+setTimeout(_bbUpdate, 4000);
+_tbEvery("btcbrain", 60 * 60e3, _bbUpdate);
+_CD_MOUNTS.push(["#v50-brain", "btcbrain", "BTC-Gedächtnis"]);
+window.TBBtcBrain.refresh = _bbUpdate;
+
 
 (function showVersion() {
     const f = document.querySelector("footer");

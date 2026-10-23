@@ -30,7 +30,7 @@ Führe ein echtes Gespräch: geh auf das Gesagte ein, beziehe dich auf vorher Ge
 Jede Nachricht des Nutzers enthält einen aktuellen <bot_status>-Block mit Depot, Positionen, Modus, validierten Edges und Radar. Nutze ihn für Fragen zum Bot, ohne ihn vorzulesen.
 
 Bei Fragen zu News oder „was gibt es Neues“: nutze get_news_analysis, fasse die Lage in zwei bis drei Sätzen zusammen (Stimmung, Themen, betroffene Coins), schlage die beste Idee vor und frage, ob du sie im Demo-Konto umsetzen sollst. Erst nach einem klaren Ja rufst du execute_idea auf.
-Werkzeuge: Nutze get_news, um Meldungen vorzulesen — übersetze englische Schlagzeilen sinngemäß ins Deutsche und nenne die Quelle. Nutze scan_for_entries, wenn nach Einstiegen oder Gelegenheiten gefragt wird, und erkläre das Ergebnis knapp. Nutze set_auto_mode, wenn der Nutzer den Bot pausieren, stoppen oder starten will, und bestätige danach. Nutze get_price für Kurse. Nutze die Websuche nur, wenn die Frage aktuelle Informationen außerhalb des Bots braucht, und nenne die Quelle kurz.
+Werkzeuge: Nutze get_news, um Meldungen vorzulesen — übersetze englische Schlagzeilen sinngemäß ins Deutsche und nenne die Quelle. Nutze scan_for_entries, wenn nach Einstiegen oder Gelegenheiten gefragt wird, und erkläre das Ergebnis knapp. Nutze set_auto_mode, wenn der Nutzer den Bot pausieren, stoppen oder starten will, und bestätige danach. Nutze get_price für Kurse. Nutze get_btc_history bei Fragen zur Bitcoin-Geschichte, zu Halvings, Zyklen, Crashs, Allzeithochs, ähnlichen Situationen von früher oder wenn du eine Einschätzung mit historischem Kontext gibst — sag dabei, dass Geschichte keine Garantie ist. Nutze die Websuche nur, wenn die Frage aktuelle Informationen außerhalb des Bots braucht, und nenne die Quelle kurz.
 
 Grenzen: Trades eröffnest du nur als Demo-Trade aus einer Bot-Idee über execute_idea und nur nach Zustimmung; sonst änderst du nichts außer der Automatik und bewegst nie echtes Geld. Gib keine Gewinnversprechen; bei Einschätzungen zu Kursen weise kurz auf die Unsicherheit hin. Wenn ein Werkzeug fehlschlägt, sag ehrlich, was du nicht weißt.`;
     }
@@ -46,6 +46,8 @@ Grenzen: Trades eröffnest du nur als Demo-Trade aus einer Bot-Idee über execut
           input_schema: { type: "object", properties: {}, required: [], additionalProperties: false } },
         { name: "execute_idea", description: "Setzt eine Idee aus get_news_analysis im DEMO-Konto um (Demo-Trade eröffnen oder Stop absichern). Nur aufrufen, nachdem der Nutzer ausdrücklich zugestimmt hat.", strict: true, eager_input_streaming: true,
           input_schema: { type: "object", properties: { idea_id: { type: "string" } }, required: ["idea_id"], additionalProperties: false } },
+        { name: "get_btc_history", description: "Das BTC-Gedächtnis: Auswertung der kompletten Bitcoin-Historie seit 2010 (Tageskerzen) und aller Stundenkerzen seit 2017 — Allzeithoch, Halving-Zyklus und frühere Zyklen, größte Einbrüche, historisch ähnlichste Situationen mit Kursverlauf danach, Saisonalität, Tageszeit, Gesamt-Kontext und Risiko-Faktor für Trades.", strict: true, eager_input_streaming: true,
+          input_schema: { type: "object", properties: {}, required: [], additionalProperties: false } },
         { name: "get_price", description: "Aktueller Kurs in USDT und 24-Stunden-Veränderung eines Coins, z. B. BTC, ETH, SOL.", strict: true, eager_input_streaming: true,
           input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false } },
     ];
@@ -60,6 +62,7 @@ Grenzen: Trades eröffnest du nur als Demo-Trade aus einer Bot-Idee über execut
             case "set_auto_mode": return typeof inp.enabled === "boolean" ? A.setAuto(inp.enabled) : { error: "enabled fehlt" };
             case "get_news_analysis": return A.newsAnalysis();
             case "execute_idea": return typeof inp.idea_id === "string" ? A.executeIdea(inp.idea_id) : { error: "idea_id fehlt" };
+            case "get_btc_history": return A.btcHistory ? A.btcHistory() : { error: "BTC-Gedächtnis nicht verfügbar" };
             case "get_price": return typeof inp.symbol === "string" ? A.price(inp.symbol) : { error: "symbol fehlt" };
             default: return { error: `unbekanntes Werkzeug ${name}` };
         }

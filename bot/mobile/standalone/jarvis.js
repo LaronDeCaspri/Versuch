@@ -555,6 +555,12 @@
             window.TBNewsAI.summary();
             extra = "Der Nutzer fragt nach den News. Fasse die News-Analyse oben in zwei bis drei gesprochenen Sätzen zusammen (Stimmung, Hauptthemen, welche Coins positiv oder negativ betroffen sind, wichtigste Meldung sinngemäß auf Deutsch). Nenne dann die beste Idee des Bots und frage, ob du sie im Demo-Konto umsetzen sollst.";
         }
+        // Questions about Bitcoin's past: the BTC memory (history since 2010) goes along.
+        const A = window.TBJarvisActions;
+        if (!extra && A && A.isHistoryQuestion && A.isHistoryQuestion(text)) {
+            const h = A.btcHistory();
+            if (h.ready) extra = `BTC-Gedächtnis (komplette Historie seit ${h.since}): ${h.summary}\nDetails: ${JSON.stringify({ zyklus: h.cycle, einbrueche: h.biggest_drawdowns, analogien: h.analogs, tageszeit: h.intraday })}\nBeantworte die Frage damit in zwei bis drei gesprochenen Sätzen und sag, dass Geschichte keine Garantie ist.`;
+        }
         // 2) Free on-device AI: real conversation, no key, no costs.
         if (L && (L.ready() || L.loading())) {
             let spoke = false;
@@ -890,7 +896,7 @@
             else if (b.id === "jv2-brief") { if (!S.enabled) enable(); else handleCommand("Lagebericht"); }
             else if (b.dataset.jv === "load") { audio(); S.engine = "neural"; save(); loadNeural().then(() => { syncSettings(); speak("Neurale Stimme bereit. So klinge ich ab jetzt.", "info", { force: true }); }).catch(() => {}); }
             else if (b.dataset.jv === "ai-connect") connectAi();
-            else if (b.dataset.jv === "gpu-recheck" && window.JarvisLocal) { const L = window.JarvisLocal; L.state.gpu = null; L.supported().then(() => { const dg = $("jv2-brain-diag"); if (dg) dg.dataset.reason = ""; renderBrain(); if (L.state.gpu) writeLog("WebGPU ist jetzt verfügbar — das schnelle KI-Gehirn kann geladen werden.", "info"); }); }
+            else if (b.dataset.jv === "gpu-recheck" && window.JarvisLocal) { const L = window.JarvisLocal; L.state.gpu = null; L.state.recheck = true; L.supported().then(() => { const dg = $("jv2-brain-diag"); if (dg) dg.dataset.reason = ""; renderBrain(); if (L.state.gpu) writeLog("WebGPU ist jetzt verfügbar — das schnelle KI-Gehirn kann geladen werden.", "info"); }); }
             else if (b.id === "jv2-brain-load") pickFolderThenLoad();
             else if (b.dataset.jv === "send") { const i = $("jv2-text"); const v = i && i.value.trim(); if (v) { i.value = ""; if (!S.enabled) enable(); stopSpeaking(); handleCommand(v); } }
             else if (b.dataset.jv === "test") { if (!S.enabled) enable(); else speak("Guten Tag. Bitcoin steht bei achtundsechzigtausend Dollar, plus eins Komma zwei Prozent. Alle Positionen sind abgesichert.", "info", { force: true }); }
