@@ -625,6 +625,17 @@
         const btn = $("jv2-brain-load"); if (btn) { btn.disabled = L.loading() || L.ready(); btn.textContent = L.ready() ? "Bereit" : L.loading() ? "Lädt …" : "Kostenlos laden"; }
     }
     function onBrainProgress() { renderBrain(); }
+    // The folder dialog must open straight from the tap; then the download starts.
+    async function pickFolderThenLoad() {
+        const L = window.JarvisLocal;
+        if (!L) return;
+        if (L.fsSupported()) {
+            try { await L.pickDir(); writeLog(`Speicherort für das KI-Gehirn: Ordner „${L.state.dirName}“`, "info"); }
+            catch (e) { if (e && e.name !== "AbortError") writeLog(`Ordner nicht verfügbar: ${e.message}`, "warn"); }
+        }
+        if (!S.enabled) enable();
+        loadBrain(true);
+    }
     function loadBrain(announceReady) {
         const L = window.JarvisLocal;
         if (!L || L.ready()) return;
@@ -861,7 +872,7 @@
             else if (b.id === "jv2-brief") { if (!S.enabled) enable(); else handleCommand("Lagebericht"); }
             else if (b.dataset.jv === "load") { audio(); S.engine = "neural"; save(); loadNeural().then(() => { syncSettings(); speak("Neurale Stimme bereit. So klinge ich ab jetzt.", "info", { force: true }); }).catch(() => {}); }
             else if (b.dataset.jv === "ai-connect") connectAi();
-            else if (b.id === "jv2-brain-load") { if (!S.enabled) enable(); loadBrain(true); }
+            else if (b.id === "jv2-brain-load") pickFolderThenLoad();
             else if (b.dataset.jv === "send") { const i = $("jv2-text"); const v = i && i.value.trim(); if (v) { i.value = ""; if (!S.enabled) enable(); stopSpeaking(); handleCommand(v); } }
             else if (b.dataset.jv === "test") { if (!S.enabled) enable(); else speak("Guten Tag. Bitcoin steht bei achtundsechzigtausend Dollar, plus eins Komma zwei Prozent. Alle Positionen sind abgesichert.", "info", { force: true }); }
             else if (b.dataset.jv === "purge") { if (R.worker) R.worker.postMessage({ type: "purge" }); else { try { caches.delete("jarvis-voice-v1"); } catch (err) { /* ignore */ } S.neuralReady = false; save(); setVoiceStatus("none"); } S.engine = "system"; save(); syncSettings(); }

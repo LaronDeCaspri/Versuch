@@ -32,16 +32,126 @@
     }
     function size() { return MODELS[C.size] ? C.size : autoSize(); }
 
-    function load(onProgress) {
+    // ---- robust download -------------------------------------------------------------------
+    // WebLLM downloads with Cache.add(), which fails the whole load on a single dropped connection
+    // ("Cache.add() encountered a network error"). We fetch every file ourselves with retries,
+    // optionally keep a copy in a folder the user picks (e.g. D:\Downloads\Jarvis), and put each
+    // file into exactly the cache slot WebLLM checks first — so WebLLM never downloads anything.
+    const IDB = "tb_jarvis_fs";
+    function idb(mode, fn) {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(IDB, 1);
+            req.onupgradeneeded = () => req.result.createObjectStore("kv");
+            req.onerror = () => reject(req.error);
+            req.onsuccess = () => {
+                try {
+                    const tx = req.result.transaction("kv", mode), st = tx.objectStore("kv");
+                    const r = fn(st);
+                    tx.oncomplete = () => resolve(r && r.result);
+                    tx.onerror = () => reject(tx.error);
+                    tx.onabort = () => reject(tx.error);
+                } catch (e) { reject(e); }
+            };
+        });
+    }
+    const fsSupported = () => typeof window.showDirectoryPicker === "function";
+    async function savedDir() { try { return await idb("readonly", (st) => st.get("dir")); } catch (e) { return null; } }
+    async function pickDir() {
+        const dir = await window.showDirectoryPicker({ id: "jarvis-model", mode: "readwrite", startIn: "downloads" });
+        try { await idb("readwrite", (st) => st.put(dir, "dir")); } catch (e) { /* remember only for this session */ }
+        S.dir = dir; S.dirName = dir.name;
+        return dir;
+    }
+    async function ensureDirPermission(dir) {
+        if (!dir) return null;
+        try {
+            if ((await dir.queryPermission({ mode: "readwrite" })) === "granted") return dir;
+            if ((await dir.requestPermission({ mode: "readwrite" })) === "granted") return dir;
+        } catch (e) { /* folder moved or deleted */ }
+        return null;
+    }
+    async function readFromDir(dir, name) {
+        try { const f = await (await dir.getFileHandle(name)).getFile(); return f.size > 0 ? await f.arrayBuffer() : null; } catch (e) { return null; }
+    }
+    async function writeToDir(dir, name, buf) {
+        try { const h = await dir.getFileHandle(name, { create: true }); const w = await h.createWritable(); await w.write(buf); await w.close(); } catch (e) { /* folder copy is optional */ }
+    }
+    async function fetchRetry(url, onBytes, tries = 5) {
+        let last = null;
+        for (let i = 0; i < tries; i++) {
+            try {
+                const res = await fetch(url, { cache: "no-store" });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (!res.body) return await res.arrayBuffer();
+                const reader = res.body.getReader(), chunks = [];
+                let n = 0;
+                for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); n += value.length; onBytes && onBytes(value.length); }
+                const out = new Uint8Array(n); let o = 0;
+                for (const c of chunks) { out.set(c, o); o += c.length; }
+                return out.buffer;
+            } catch (e) {
+                last = e;
+                await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
+            }
+        }
+        throw new Error(`Download fehlgeschlagen nach ${tries} Versuchen: ${url.split("/").pop()} (${(last && last.message) || last})`);
+    }
+    async function downloadModel(onProgress, { askFolder = false } = {}) {
+        const mod = await import(WEBLLM);
+        const id = MODELS[size()].id;
+        const rec = mod.prebuiltAppConfig.model_list.find((r) => r.model_id === id);
+        if (!rec) throw new Error(`Modell ${id} unbekannt`);
+        const base = `${rec.model.replace(/\/$/, "")}/resolve/main/`;
+        let dir = null;
+        if (fsSupported()) {
+            dir = await ensureDirPermission(S.dir || await savedDir());
+            if (!dir && askFolder) dir = await pickDir();
+            if (dir) { S.dirName = dir.name; try { dir = await dir.getDirectoryHandle(id, { create: true }); } catch (e) { dir = null; } }
+        }
+        let done = 0, total = 0;
+        const report = (text) => onProgress && onProgress(total ? Math.min(0.99, done / total) : 0, text);
+        const get = async (url, scope, fileName) => {
+            const cache = await caches.open(scope);
+            const hit = await cache.match(url);
+            if (hit) { const b = await hit.arrayBuffer(); if (dir && !(await readFromDir(dir, fileName))) await writeToDir(dir, fileName, b); return b; }
+            let buf = dir ? await readFromDir(dir, fileName) : null;
+            if (buf) report(`Aus Ordner geladen: ${fileName}`);
+            else {
+                buf = await fetchRetry(url, (n) => { done += n; report(`Lade ${fileName} … ${(done / 1e6).toFixed(0)} von ${(total / 1e6).toFixed(0)} MB`); });
+                if (dir) await writeToDir(dir, fileName, buf);
+            }
+            await cache.put(url, new Response(buf));
+            return buf;
+        };
+        const td = new TextDecoder();
+        const cfg = JSON.parse(td.decode(await get(new URL("mlc-chat-config.json", base).href, "webllm/config", "mlc-chat-config.json")));
+        const tc = JSON.parse(td.decode(await get(new URL("tensor-cache.json", base).href, "webllm/model", "tensor-cache.json")));
+        const shards = [...new Map((tc.records || []).map((r) => [r.dataPath, r.nbytes || 0])).entries()];
+        total = shards.reduce((a, [, n]) => a + n, 0) + 30e6;
+        const tok = (cfg.tokenizer_files || []).includes("tokenizer.json") ? "tokenizer.json" : "tokenizer.model";
+        await get(new URL(tok, base).href, "webllm/model", tok);
+        await get(rec.model_lib, "webllm/wasm", rec.model_lib.split("/").pop());
+        // Three shards at a time: fast, but gentle enough not to trip rate limits.
+        let i = 0;
+        const workers = Array.from({ length: 3 }, async () => {
+            while (i < shards.length) { const [path] = shards[i++]; await get(new URL(path, base).href, "webllm/model", path); }
+        });
+        await Promise.all(workers);
+        report(dir ? `Fertig — Kopie in Ordner „${S.dirName}/${id}“` : "Download fertig");
+        return { dir: !!dir };
+    }
+
+    function load(onProgress, opts = {}) {
         if (S.engine) return Promise.resolve(S.engine);
         if (S.loading) return S.loading;
         S.error = null;
         S.loading = (async () => {
             if (!(await supported())) throw new Error("Dieser Browser hat kein WebGPU — bitte Chrome oder Edge nutzen.");
+            await downloadModel((p, t) => { S.progress = p * 0.9; S.text = t; onProgress && onProgress(S.progress, S.text); }, opts);
             const { CreateWebWorkerMLCEngine } = await import(WEBLLM);
             const worker = new Worker("jarvis-llm-worker.js", { type: "module" });
             const engine = await CreateWebWorkerMLCEngine(worker, MODELS[size()].id, {
-                initProgressCallback: (r) => { S.progress = r.progress || 0; S.text = r.text || ""; onProgress && onProgress(S.progress, S.text); },
+                initProgressCallback: (r) => { S.progress = 0.9 + 0.1 * (r.progress || 0); S.text = /Fetching|Loading model from cache/i.test(r.text || "") ? "Starte KI-Gehirn …" : (r.text || ""); onProgress && onProgress(S.progress, S.text); },
             });
             S.engine = engine;
             C.downloaded = true; C.loadedSize = size(); save();
@@ -140,6 +250,7 @@ ${ctx}`;
 
     window.JarvisLocal = {
         MODELS, config: C, save, state: S, supported, load, ask, reset, remove, webSearch, size,
+        fsSupported, pickDir, savedDir,
         ready: () => !!S.engine, loading: () => !!S.loading && !S.engine,
     };
 })();

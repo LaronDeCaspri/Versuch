@@ -8062,7 +8062,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "46.0";
+const APP_VERSION = "47.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -11573,7 +11573,7 @@ function _sbStep(text, kind = "info") {
     const inc = SB.active;
     if (!inc) return;
     inc.steps.push({ at: Date.now(), text, kind });
-    _sbSave(); _sbRender();
+    _sbSave(); _sbRender(); _sbPopup();
 }
 
 // Negative breaks only (unusually good performance is not a problem), and only on equity
@@ -11662,6 +11662,7 @@ async function _sbWait(cond, timeoutMs, everyMs = 2000) {
 
 async function _sbStart(d, prevAuto) {
     SB.active = { id: Date.now(), startedAt: Date.now(), drop: d.drop, prevAuto: prevAuto ?? !!state.autoMode, phase: "paused", steps: [], findings: [], actions: [] };
+    SB.popupOpen = true;
     _sbStep(`Strukturbruch erkannt: Equity ${(d.drop * 100).toFixed(2)} % im Überwachungsfenster, statistisch außerhalb des bisherigen Musters.`, "alert");
     if (state.autoMode) $("#mode-toggle").click();
     _sbStep("Vollautomatik pausiert. Offene Positionen behalten ihre Stops.");
@@ -11704,11 +11705,13 @@ function _sbFinish(ok, validated = []) {
     const inc = SB.active;
     if (!inc) return;
     inc.phase = "done"; inc.endedAt = Date.now(); inc.ok = ok;
-    if (inc.prevAuto && !state.autoMode) $("#mode-toggle").click();
-    _sbStep(inc.prevAuto ? "Vollautomatik wieder aktiv — mit reduziertem Risiko in der Probephase." : "Automatik war vorher aus und bleibt aus.", "ok");
-    SB.incidents.push(inc); SB.active = null; SB.lastCheck = _sbDetect(); _sbSave(); _sbRender();
+    // After the fix the bot always returns to full automation (paper trading, reduced risk).
+    if (!state.autoMode) $("#mode-toggle").click();
+    _sbStep(ok ? "Behoben — Vollautomatik wieder aktiv, mit reduziertem Risiko in der Probephase." : "Selbstheilung unvollständig — Vollautomatik trotzdem wieder aktiv, mit stark reduziertem Risiko.", "ok");
+    if (!ok) { SB.riskMult = Math.min(SB.riskMult || 1, 0.5); SB.probationUntil = Math.max(SB.probationUntil || 0, Date.now() + 24 * 3600e3); }
+    SB.incidents.push(inc); SB.active = null; SB.lastCheck = _sbDetect(); _sbSave(); _sbRender(); _sbPopup();
     const q = Object.keys(SB.quarantine).filter((s) => SB.quarantine[s] > Date.now()).map((s) => _jvName(s.replace("/USDT", "")));
-    announce(`Selbstheilung abgeschlossen. ${inc.findings.length ? `Ursache: ${inc.findings[0].text}.` : ""} ${q.length ? `${q.join(" und ")} vorerst gesperrt. ` : ""}Risiko für 24 Stunden reduziert${inc.prevAuto ? ", Bot läuft wieder" : ""}.`, "success");
+    announce(`Strukturbruch behoben. ${inc.findings.length ? `Ursache: ${inc.findings[0].text}.` : ""} ${q.length ? `${q.join(" und ")} vorerst gesperrt. ` : ""}Risiko für 24 Stunden reduziert, die Vollautomatik läuft wieder.`, "success");
 }
 
 // Hooks: quarantined markets get no new entries; probation scales risk down.
@@ -11746,6 +11749,40 @@ setTimeout(() => {
         _sbStart({ drop: prev.drop || 0 }, prev.prevAuto).catch(() => {});
     }
 }, 15000);
+
+// Popup: appears on detection, follows the repair live, stays until closed with ✕.
+function _sbPopup() {
+    let el = document.getElementById("v44-pop");
+    const inc = SB.active || SB.incidents[SB.incidents.length - 1];
+    if (!SB.popupOpen || !inc) { if (el) el.remove(); return; }
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "v44-pop";
+        el.setAttribute("role", "alertdialog");
+        el.setAttribute("aria-label", "Strukturbruch");
+        document.body.appendChild(el);
+        el.addEventListener("click", (e) => {
+            if (e.target.closest("[data-sb-close]")) { SB.popupOpen = false; _sbPopup(); }
+            else if (e.target.closest("[data-sb-show]")) { SB.popupOpen = false; _sbPopup(); const c = document.getElementById("v44-heal-card"); if (c) { document.querySelector('[data-tab="dashboard"]').click(); setTimeout(() => c.scrollIntoView({ behavior: "smooth", block: "center" }), 80); } }
+        });
+    }
+    const live = !!SB.active;
+    const phaseIdx = { paused: 0, diagnose: 1, fix: 2, done: 3 }[live ? SB.active.phase : "done"];
+    const phases = ["Pausiert", "Diagnose", "Behebung", "Automatik an"].map((t, i) => `<div class="v44-ph ${!live || i < phaseIdx ? "done" : i === phaseIdx ? "now" : ""}"><i></i><span>${t}</span></div>`).join("");
+    const finds = (inc.findings || []).slice(0, 3).map((f) => `<li>${_escHtml(f.text)}</li>`).join("");
+    const last = inc.steps[inc.steps.length - 1];
+    el.className = live ? "live" : inc.ok === false ? "warn" : "ok";
+    el.innerHTML = `
+        <div class="v44-pop-head">
+            <span class="v44-pop-icon" aria-hidden="true">${live ? "⚠" : "✓"}</span>
+            <div class="v44-pop-title"><strong>${live ? "Strukturbruch erkannt" : "Strukturbruch behoben"}</strong><small>${new Date(inc.startedAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} · Equity ${((inc.drop || 0) * 100).toFixed(2)} %</small></div>
+            <button class="v44-pop-x" data-sb-close aria-label="Schließen" title="Schließen">✕</button>
+        </div>
+        <div class="v44-phases ${live ? "live" : ""}">${phases}</div>
+        ${finds ? `<div class="v44-pop-sec">Ursache</div><ul class="v44-pop-finds">${finds}</ul>` : ""}
+        ${last ? `<div class="v44-pop-last">${_escHtml(last.text)}</div>` : ""}
+        <button class="ghost v44-pop-more" data-sb-show>Protokoll anzeigen</button>`;
+}
 
 function _sbRender() {
     const home = document.querySelector('[data-pane="dashboard"]');
@@ -11794,7 +11831,8 @@ if (typeof INFO_DB === "object") {
                <ol><li><strong>Pausieren:</strong> Vollautomatik aus, offene Positionen behalten ihre Stops.</li>
                <li><strong>Diagnose:</strong> Welche Märkte und Strategien verlieren? Volatilitätsschock oder Wechsel der Marktphase? Ist der Walk-Forward-Test veraltet, weicht live vom Test ab? Sind die Daten frisch, gibt es News?</li>
                <li><strong>Behebung:</strong> Verlustbringer 24 h sperren, Risiko senken (Probephase), Walk-Forward mit neuesten Daten neu rechnen, Wächter neu kalibrieren.</li>
-               <li><strong>Fortsetzen:</strong> Automatik wieder an (falls sie vorher an war) — gehandelt wird nur, wo der neue Test eine Edge bestätigt.</li></ol>
+               <li><strong>Fortsetzen:</strong> Die Vollautomatik geht danach immer wieder an — in der Probephase mit reduziertem Risiko. Gehandelt wird nur, wo der neue Test eine Edge bestätigt.</li></ol>
+               <p>Der Bruch erscheint sofort als Popup, das den Fortschritt live zeigt; schließen mit ✕.</p>
                <p>Die Maßnahmen machen den Bot nur vorsichtiger, nie riskanter. Ein Strukturbruch kann auch Pech sein — eine Garantie, dass die Ursache „behoben“ ist, gibt es im Trading nicht. Alles im Demo-Konto.</p>`,
     };
 }
