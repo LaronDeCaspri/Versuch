@@ -7975,7 +7975,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "38.0";
+const APP_VERSION = "39.0";
 const APP_BUILD = "2026-09-25";
 
 // ---- 1. First-launch splash screen ----
@@ -10313,7 +10313,9 @@ function _proRenderStatus() {
             ? `wartet auf ${st.watch.side === "long" ? "Schluss ≥" : "Schluss ≤"} ${_fmtNum(st.watch.trigger, st.watch.trigger < 10 ? 4 : 2)}`
             : PRO.strict && !_proValidated(s) ? "nicht gehandelt — keine nachgewiesene Edge"
             : pre ? `kein Signal · L ${_fmtNum(pre.long.score, 1)} / S ${_fmtNum(pre.short.score, 1)}` : "wartet auf ersten Kerzenschluss";
-        return `<div class="v32-row"><span class="v32-sym">${s.replace("/USDT", "")}</span><span class="v32-muted">${regime}</span><span class="v32-muted v32-grow">${watch}</span>${verdict}</div>`;
+        const hot = window.RADAR && window.RADAR.bySymbol && window.RADAR.bySymbol[s.replace("/USDT", "")];
+        const hotChip = hot && hot.level === "HYPE" ? `<span class="v39-hot" title="Aufmerksamkeits-Radar: ${_escHtml(hot.advice)}">HYPE</span>` : "";
+        return `<div class="v32-row"><span class="v32-sym">${s.replace("/USDT", "")}</span>${hotChip}<span class="v32-muted">${regime}</span><span class="v32-muted v32-grow">${watch}</span>${verdict}</div>`;
     }).join("");
     const last = PRO.rejects[0];
     const sts = _proSymbols().map((s) => PRO.engine.status(s)).filter(Boolean);
@@ -10636,6 +10638,309 @@ if (typeof INFO_DB === "object") {
         title: "Pro-Engine",
         body: `<p>Eine einzige Signal-Pipeline für Backtest und Live. Korrelierte Indikatoren sind in Familien gebündelt (Trend, Breakout, Momentum, Mean-Reversion, Makro) und jede Familie zählt nur einmal. Das Regime (ADX) schaltet Trendfolger in Seitwärtsphasen ab und Mean-Reversion in Trends.</p>
                <p>Jede Nacht prüft ein Walk-Forward-Test, ob das System auf jedem Symbol out-of-sample nach Kosten Geld verdient hätte. Nur dann gilt die Edge als validiert.</p>`,
+    };
+}
+
+
+// ============================================================================
+// v39 — Aufmerksamkeits-Radar: worauf der Markt gerade schaut
+// Nur Information: beeinflusst keine Handelsentscheidung (nicht backtestbar).
+// ============================================================================
+const RD = window.TB.radar;
+const RADAR = (window.RADAR = window.RADAR || {});
+RADAR.coins = [];
+RADAR.bySymbol = {};
+RADAR.selected = null;
+RADAR.updatedAt = null;
+RADAR.loading = false;
+RADAR.sources = {};
+RADAR.history = (() => { try { return JSON.parse(localStorage.getItem("tb_radar_hist") || "[]"); } catch (e) { return []; } })();
+
+function _rdHue(sym) { let h = 0; for (const ch of String(sym)) h = (h * 31 + ch.charCodeAt(0)) % 360; return h; }
+function _rdLogo(c, size) {
+    const hue = _rdHue(c.symbol);
+    const initials = _escHtml(String(c.symbol).slice(0, 4));
+    const img = c.image ? `<img class="v39-img" src="${_escHtml(c.image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="${size}" height="${size}">` : "";
+    return `<span class="v39-logo" style="--s:${size}px; --h:${hue};"><span class="v39-initials">${initials}</span>${img}</span>`;
+}
+document.addEventListener("error", (e) => {
+    const t = e.target;
+    if (t && t.classList && t.classList.contains("v39-img")) t.remove();
+}, true);
+document.addEventListener("load", (e) => {
+    const t = e.target;
+    if (t && t.classList && t.classList.contains("v39-img")) t.classList.add("ok");
+}, true);
+
+function _rdFmtPrice(p) {
+    if (!Number.isFinite(p)) return "–";
+    const d = p >= 1000 ? 0 : p >= 1 ? 2 : p >= 0.01 ? 4 : 8;
+    return "$" + p.toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function _rdLevelChip(level) {
+    const tone = level === "HYPE" ? "red" : level === "ERHÖHT" ? "amber" : "neutral";
+    return _proChip(level, tone);
+}
+
+async function _rdRefresh() {
+    if (RADAR.loading) return;
+    RADAR.loading = true;
+    const sources = {};
+    const symbols = _proSymbols();
+    const tracked = symbols.map((s) => ({ symbol: s.replace("/USDT", "") }));
+    let trending = [], markets = [], vols = {};
+    try { trending = await RD.fetchTrending(); sources.trends = trending.length > 0; } catch (e) { sources.trends = false; }
+    try {
+        const ids = [...tracked.map((t) => RD.GECKO_IDS[t.symbol]), ...trending.map((t) => t.id)];
+        markets = await RD.fetchMarkets(ids);
+        sources.markets = markets.length > 0;
+    } catch (e) { sources.markets = false; }
+    try { vols = await RD.fetchVolumeRatios(symbols); sources.volume = Object.values(vols).some((v) => Number.isFinite(v.volRatio)); } catch (e) { sources.volume = false; }
+    for (const t of tracked) {
+        const v = vols[`${t.symbol}/USDT`] || {};
+        const d = PRO.deriv[`${t.symbol}/USDT`];
+        Object.assign(t, { volRatio: v.volRatio, change24h: v.change24h, price: v.price, fundingZ: d ? d.fundingZ : undefined, oiChange1h: d ? d.oiChange1h : undefined });
+    }
+    sources.news = (state.news || []).length > 0;
+    const now = Date.now();
+    RADAR.coins = RD.computeAttention({ tracked, trending, markets, news: state.news || [] }, now);
+    RADAR.bySymbol = Object.fromEntries(RADAR.coins.map((c) => [c.symbol, c]));
+    for (const c of RADAR.coins) c.trend = RD.trendFor(RADAR.history, c.symbol, c.score, now);
+    const last = RADAR.history[RADAR.history.length - 1];
+    if (!last || now - last.t >= 5 * 60e3) {
+        RADAR.history.push({ t: now, scores: Object.fromEntries(RADAR.coins.map((c) => [c.symbol, c.score])) });
+        RADAR.history = RADAR.history.filter((h) => now - h.t < 48 * 3600e3);
+        try { localStorage.setItem("tb_radar_hist", JSON.stringify(RADAR.history)); } catch (e) { /* storage full */ }
+    }
+    if (!RADAR.selected || !RADAR.bySymbol[RADAR.selected]) RADAR.selected = RADAR.coins[0] ? RADAR.coins[0].symbol : null;
+    const newHype = RADAR.coins.filter((c) => c.level === "HYPE" && c.tracked && !(RADAR._lastHype || []).includes(c.symbol));
+    if (newHype.length && typeof feedEvent === "function") feedEvent("info", `Aufmerksamkeits-Radar: HYPE bei ${newHype.map((c) => c.symbol).join(", ")} — ${newHype[0].advice}`);
+    RADAR._lastHype = RADAR.coins.filter((c) => c.level === "HYPE").map((c) => c.symbol);
+    RADAR.sources = sources;
+    RADAR.updatedAt = now;
+    RADAR.loading = false;
+    _rdRender();
+}
+setTimeout(() => { _rdRefresh().catch(() => { RADAR.loading = false; }); }, 8000);
+setInterval(() => { _rdRefresh().catch(() => { RADAR.loading = false; }); }, 5 * 60e3);
+
+function _rdSparkSvg(prices) {
+    if (!Array.isArray(prices) || prices.length < 2) return `<div class="v39-spark-empty">kein Verlauf</div>`;
+    const step = Math.max(1, Math.floor(prices.length / 120));
+    const pts = prices.filter((_, i) => i % step === 0);
+    const lo = Math.min(...pts), hi = Math.max(...pts), span = hi - lo || 1;
+    const up = pts[pts.length - 1] >= pts[0];
+    const xy = pts.map((p, i) => `${(i / (pts.length - 1) * 200).toFixed(1)},${(56 - (p - lo) / span * 50).toFixed(1)}`);
+    const id = `g${Math.random().toString(36).slice(2, 8)}`;
+    return `<svg class="v39-spark ${up ? "up" : "down"}" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true">
+        <defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.35"/><stop offset="100%" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>
+        <polygon points="0,60 ${xy.join(" ")} 200,60" fill="url(#${id})"/>
+        <polyline points="${xy.join(" ")}" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+}
+
+function _rdGauge(score, level) {
+    const r = 26, c = 2 * Math.PI * r;
+    return `<svg class="v39-gauge lvl-${level === "HYPE" ? "hype" : level === "ERHÖHT" ? "warm" : "calm"}" viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="32" cy="32" r="${r}" class="v39-gauge-track"/>
+        <circle cx="32" cy="32" r="${r}" class="v39-gauge-fill" stroke-dasharray="${(c * score / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 32 32)"/>
+        <text x="32" y="36" text-anchor="middle">${score}</text>
+    </svg>`;
+}
+
+function _rdRawText(k, c) {
+    const r = c.raw;
+    if (k === "search") return r.search ? `Platz ${r.search} der CoinGecko-Suchtrends` : "nicht in den Suchtrends";
+    if (k === "news") return `${r.news} Schlagzeile${r.news === 1 ? "" : "n"} in 24 h`;
+    if (k === "volume") return Number.isFinite(r.volume) ? `${r.volume.toFixed(1).replace(".", ",")}× Volumen ggü. 30-Tage-Median` : "keine Volumendaten";
+    if (k === "move") return Number.isFinite(r.move) ? `${r.move >= 0 ? "+" : ""}${r.move.toFixed(1).replace(".", ",")} % in 24 h` : "keine Kursdaten";
+    if (k === "crowd") {
+        if (!r.crowd) return "keine Derivate-Daten";
+        const z = Number.isFinite(r.crowd.fundingZ) ? `Funding z ${r.crowd.fundingZ.toFixed(1)}` : "";
+        const oi = Number.isFinite(r.crowd.oiChange1h) ? `OI ${r.crowd.oiChange1h >= 0 ? "+" : ""}${(r.crowd.oiChange1h * 100).toFixed(1)} % (1 h)` : "";
+        return [z, oi].filter(Boolean).join(" · ") || "keine Derivate-Daten";
+    }
+    return "";
+}
+
+function _rdDetail(c) {
+    if (!c) return `<div class="v39-detail-empty">Tippe auf einen Coin im Radar.</div>`;
+    const chg = Number.isFinite(c.change24h) ? `<span class="${c.change24h >= 0 ? "v32-pos" : "v32-neg"}">${c.change24h >= 0 ? "+" : ""}${c.change24h.toFixed(2).replace(".", ",")} %</span>` : "–";
+    const trend = Number.isFinite(c.trend) && c.trend !== 0 ? `<span class="v39-trend ${c.trend > 0 ? "up" : "down"}">${c.trend > 0 ? "▲" : "▼"} ${Math.abs(c.trend)} seit 1 h</span>` : "";
+    const bars = Object.keys(RD.WEIGHTS).map((k) => {
+        const has = k in c.components;
+        const v = has ? c.components[k] : 0;
+        return `<div class="v39-bar ${has ? "" : "na"}">
+            <span class="v39-bar-label">${RD.COMPONENT_LABELS[k]}</span>
+            <span class="v39-bar-track"><span class="v39-bar-fill" style="width:${Math.round(v * 100)}%"></span></span>
+            <span class="v39-bar-raw">${_escHtml(_rdRawText(k, c))}</span>
+        </div>`;
+    }).join("");
+    return `
+        <div class="v39-detail-head">
+            ${_rdLogo(c, 52)}
+            <div class="v39-detail-title">
+                <div class="v39-name">${_escHtml(c.name)} <span class="v39-sym">${_escHtml(c.symbol)}</span></div>
+                <div class="v39-sub num">${_rdFmtPrice(c.price)} · ${chg} 24 h${c.mcRank ? ` · Rang #${c.mcRank}` : ""}</div>
+            </div>
+            ${_rdLevelChip(c.level)}
+        </div>
+        <div class="v39-detail-mid">
+            <div class="v39-gauge-wrap">${_rdGauge(c.score, c.level)}<span>Aufmerksamkeit</span>${trend}</div>
+            <div class="v39-spark-wrap">${_rdSparkSvg(c.sparkline)}<span>7 Tage</span></div>
+        </div>
+        <div class="v39-bars">${bars}</div>
+        <div class="v39-advice lvl-${c.level === "HYPE" ? "hype" : c.level === "ERHÖHT" ? "warm" : "calm"}">${_escHtml(c.advice)}</div>
+        <div class="v39-note">${c.tracked ? "Vom Bot beobachtetes Symbol. Das Radar ist ein Hinweis und ändert keine Handelsentscheidung." : "Wird vom Bot nicht gehandelt — reiner Markt-Hinweis."}</div>`;
+}
+
+// Radius carries the meaning (closer = more attention); only the angle is free.
+// Each coin is placed in score order at the free angle on its ring nearest to its
+// base angle, avoiding other coins and the zone labels (boxes in real pixels).
+const _RD_ZONE_R = { hype: (0.14 + 0.30 * 0.76) * 50, warm: (0.14 + 0.55 * 0.76) * 50 };
+function _rdLayout(coins, widthPx) {
+    const W = Math.max(220, widthPx || 400);
+    const small = W < 360;
+    const bw = ((small ? 44 : 50) / W) * 100, bh = ((small ? 54 : 62) / W) * 100;
+    const labels = [
+        { x: 50, y: 50 - _RD_ZONE_R.hype + 2.4, w: 12, h: 5 },
+        { x: 50, y: 50 - _RD_ZONE_R.warm + 2.4, w: 16, h: 5 },
+        { x: 50, y: 3.6, w: 13, h: 5 },
+    ];
+    const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w / 2, b.x + b.w / 2) - Math.max(a.x - a.w / 2, b.x - b.w / 2)) *
+                              Math.max(0, Math.min(a.y + a.h / 2, b.y + b.h / 2) - Math.max(a.y - a.h / 2, b.y - b.h / 2));
+    const placed = [];
+    const out = [];
+    coins.forEach((c, i) => {
+        const r = (0.14 + (1 - c.score / 100) * 0.76) * 50;
+        const base = -90 + 40 + i * 137.508;
+        let best = null;
+        for (let k = 0; k < 72; k++) {
+            const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 5;
+            const ang = (base + off) * Math.PI / 180;
+            const box = { x: 50 + Math.cos(ang) * r, y: 50 + Math.sin(ang) * r, w: bw, h: bh };
+            let cost = 0;
+            for (const p of placed) cost += overlap(box, p) * 3;
+            for (const l of labels) cost += overlap(box, l);
+            const edge = Math.hypot(box.x - 50, box.y - 50) + bw * 0.45 - 50;
+            if (edge > 0) cost += edge * 2;
+            if (!best || cost < best.cost - 1e-9) best = { box, cost };
+            if (cost === 0) break;
+        }
+        placed.push(best.box);
+        out.push({ x: best.box.x, y: best.box.y });
+    });
+    return out;
+}
+
+function _rdRender() {
+    const markt = document.querySelector('[data-pane="markt"]');
+    if (!markt) return;
+    let el = document.getElementById("v39-radar-card");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "v39-radar-card";
+        el.className = "card v31-card v39-radar-card";
+        markt.insertBefore(el, markt.firstChild);
+    }
+    const coins = RADAR.coins;
+    const shown = coins.slice(0, 14);
+    const hype = coins.filter((c) => c.level === "HYPE").length;
+    const scopeEl = el.querySelector(".v39-scope");
+    const scopeW = scopeEl && scopeEl.clientWidth ? scopeEl.clientWidth : Math.min(440, Math.max(0, el.clientWidth - 40));
+    const pos = _rdLayout(shown, scopeW);
+    RADAR._lastW = scopeW;
+    const intro = shown.length && !RADAR._introDone;
+    if (intro) RADAR._introDone = true;
+    const blips = shown.map((c, i) => {
+        const { x, y } = pos[i];
+        const lvl = c.level === "HYPE" ? "hype" : c.level === "ERHÖHT" ? "warm" : "calm";
+        return `<button class="v39-blip lvl-${lvl} ${c.tracked ? "tracked" : ""} ${c.symbol === RADAR.selected ? "selected" : ""}" style="left:${x.toFixed(2)}%; top:${y.toFixed(2)}%; --d:${(i * 0.37 % 2).toFixed(2)}s" data-v39-coin="${_escHtml(c.symbol)}" aria-label="${_escHtml(c.name)}, Aufmerksamkeit ${c.score} von 100, ${c.level}">
+            <span class="v39-ring"></span>${_rdLogo(c, 34)}<span class="v39-tag">${_escHtml(c.symbol)}</span>
+        </button>`;
+    }).join("");
+    const list = coins.slice(0, 8).map((c) => `
+        <button class="v39-row ${c.symbol === RADAR.selected ? "selected" : ""}" data-v39-coin="${_escHtml(c.symbol)}">
+            ${_rdLogo(c, 28)}
+            <span class="v39-row-name"><strong>${_escHtml(c.symbol)}</strong><small>${_escHtml(c.name)}${c.tracked ? " · Bot" : ""}</small></span>
+            <span class="v39-row-score"><span class="v39-row-track"><span class="v39-row-fill lvl-${c.level === "HYPE" ? "hype" : c.level === "ERHÖHT" ? "warm" : "calm"}" style="width:${c.score}%"></span></span><span class="num">${c.score}</span></span>
+            <span class="v39-row-chg num ${Number.isFinite(c.change24h) ? (c.change24h >= 0 ? "v32-pos" : "v32-neg") : ""}">${Number.isFinite(c.change24h) ? `${c.change24h >= 0 ? "+" : ""}${c.change24h.toFixed(1)}%` : "–"}</span>
+        </button>`).join("");
+    const src = RADAR.sources;
+    const srcTxt = [["trends", "Suchtrends"], ["markets", "Kurse & Logos"], ["volume", "Volumen"], ["news", "News"]]
+        .map(([k, l]) => `<span class="${src[k] ? "ok" : "off"}">${src[k] ? "●" : "○"} ${l}</span>`).join("");
+    el.innerHTML = `
+        <h2>Aufmerksamkeits-Radar ${hype ? _proChip(`${hype} HYPE`, "red") : _proChip(RADAR.updatedAt ? "RUHIG" : "LÄDT", "neutral")} <span class="info" data-info="radar">ⓘ</span></h2>
+        <div class="perf-hint">Worauf der Markt gerade schaut: Suchtrends, News-Erwähnungen, ungewöhnliches Volumen und Positionierung. Je näher an der Mitte, desto mehr Aufmerksamkeit. Nur ein Hinweis, keine Handelsentscheidung.</div>
+        <div class="v39-layout">
+            <div class="v39-scope-wrap">
+                <div class="v39-scope ${intro ? "v39-intro" : ""}" role="group" aria-label="Radar der Coins nach Aufmerksamkeit">
+                    <svg class="v39-grid" viewBox="0 0 100 100" aria-hidden="true">
+                        <circle cx="50" cy="50" r="49.5" class="v39-zone-calm"/>
+                        <circle cx="50" cy="50" r="${(0.14 + 0.55 * 0.76) * 50}" class="v39-zone-warm"/>
+                        <circle cx="50" cy="50" r="${(0.14 + 0.30 * 0.76) * 50}" class="v39-zone-hype"/>
+                        <circle cx="50" cy="50" r="12" class="v39-ring-line"/><circle cx="50" cy="50" r="24.5" class="v39-ring-line"/><circle cx="50" cy="50" r="37" class="v39-ring-line"/>
+                        <line x1="50" y1="1" x2="50" y2="99" class="v39-axis"/><line x1="1" y1="50" x2="99" y2="50" class="v39-axis"/>
+                        <text x="50" y="${50 - (0.14 + 0.30 * 0.76) * 50 + 3.6}" class="v39-zone-label hype">HYPE</text>
+                        <text x="50" y="${50 - (0.14 + 0.55 * 0.76) * 50 + 3.6}" class="v39-zone-label warm">ERHÖHT</text>
+                        <text x="50" y="4.6" class="v39-zone-label">RUHIG</text>
+                    </svg>
+                    <div class="v39-sweep" aria-hidden="true"></div>
+                    <div class="v39-core" aria-hidden="true"></div>
+                    ${shown.length ? blips : `<div class="v39-empty">${RADAR.loading || !RADAR.updatedAt ? "Radar wird geladen …" : "Keine Daten erreichbar"}</div>`}
+                </div>
+                <div class="v39-legend"><span><i class="lg tracked"></i>vom Bot beobachtet</span><span><i class="lg trend"></i>nur im Trend</span></div>
+            </div>
+            <div class="v39-detail">${_rdDetail(RADAR.bySymbol[RADAR.selected])}</div>
+        </div>
+        ${coins.length ? `<div class="v39-list">${list}</div>` : ""}
+        <div class="v39-foot"><span class="v39-src">${srcTxt}</span><span>${RADAR.updatedAt ? `Stand ${new Date(RADAR.updatedAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : ""}</span><button class="ghost v39-refresh" data-v39-refresh ${RADAR.loading ? "disabled" : ""}>↻ Aktualisieren</button></div>`;
+}
+
+// Selecting a coin swaps only the detail panel and the highlight — no rebuild.
+function _rdSelect(sym) {
+    RADAR.selected = sym;
+    const el = document.getElementById("v39-radar-card");
+    if (!el) return;
+    el.querySelectorAll("[data-v39-coin]").forEach((n) => n.classList.toggle("selected", n.dataset.v39Coin === sym));
+    const d = el.querySelector(".v39-detail");
+    if (d) d.innerHTML = _rdDetail(RADAR.bySymbol[sym]);
+}
+// Re-position existing blips when the available width changes (rotation, resize, tab switch).
+function _rdRelayout() {
+    const el = document.getElementById("v39-radar-card");
+    const scopeEl = el && el.querySelector(".v39-scope");
+    if (!scopeEl || !scopeEl.clientWidth || scopeEl.clientWidth === RADAR._lastW) return;
+    RADAR._lastW = scopeEl.clientWidth;
+    const shown = RADAR.coins.slice(0, 14);
+    const pos = _rdLayout(shown, scopeEl.clientWidth);
+    shown.forEach((c, i) => {
+        const b = scopeEl.querySelector(`.v39-blip[data-v39-coin="${CSS.escape(c.symbol)}"]`);
+        if (b) { b.style.left = `${pos[i].x.toFixed(2)}%`; b.style.top = `${pos[i].y.toFixed(2)}%`; }
+    });
+}
+document.addEventListener("click", (e) => {
+    const coin = e.target.closest && e.target.closest("[data-v39-coin]");
+    if (coin) { _rdSelect(coin.dataset.v39Coin); return; }
+    const ref = e.target.closest && e.target.closest("[data-v39-refresh]");
+    if (ref) _rdRefresh().catch(() => { RADAR.loading = false; });
+});
+setTimeout(_rdRender, 1200);
+let _rdResizeT = null;
+window.addEventListener("resize", () => { clearTimeout(_rdResizeT); _rdResizeT = setTimeout(_rdRelayout, 200); });
+document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-tab="markt"]')) setTimeout(_rdRelayout, 60); });
+
+if (typeof INFO_DB === "object") {
+    INFO_DB["radar"] = {
+        title: "Aufmerksamkeits-Radar",
+        body: `<p>Zeigt, auf welche Coins der Markt gerade ungewöhnlich stark achtet. Je näher ein Coin an der Mitte steht, desto höher sein Aufmerksamkeits-Wert (0–100).</p>
+               <ul><li><strong>Suchtrend</strong> (30 %): Platz in den CoinGecko-Suchtrends</li>
+               <li><strong>News</strong> (20 %): Schlagzeilen der letzten 24 h</li>
+               <li><strong>Volumen</strong> (25 %): 24-h-Volumen ggü. dem 30-Tage-Median bei Binance</li>
+               <li><strong>Kursbewegung</strong> (15 %): Veränderung in 24 h</li>
+               <li><strong>Positionierung</strong> (10 %): Funding und Open Interest der Perps</li></ul>
+               <p>Fehlt eine Quelle, wird der Wert aus den übrigen gebildet. Ab 70 gilt „HYPE", ab 45 „ERHÖHT".</p>
+               <p>Wichtig: Das Radar ist ein Hinweis. Es verändert keine Entscheidung des Bots, weil es für Suchtrends keine Historie gibt, mit der man es ehrlich testen könnte. Hype ist oft das Gegenteil einer guten Einstiegsgelegenheit.</p>`,
     };
 }
 

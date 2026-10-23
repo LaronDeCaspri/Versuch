@@ -39,7 +39,7 @@ export function loadEngine({ storageFile = null } = {}) {
             removeItem: (k) => { delete mem[k]; },
         };
     }
-    for (const f of ["lib.js", "pro.js"]) {
+    for (const f of ["lib.js", "pro.js", "radar.js"]) {
         vm.runInThisContext(fs.readFileSync(path.join(APP_DIR, f), "utf8"), { filename: f });
     }
     return globalThis.TB;

@@ -157,3 +157,41 @@ test("multi-timeframe research runs both timeframes and picks one", async () => 
     assert.ok(["15m", "1h"].includes(r.chosen));
     assert.equal(r.byTf["1h"].interval, "1h");
 });
+
+test("attention radar: mentions, scoring, levels and safe logos", () => {
+    const R = TB.radar;
+    const now = Date.UTC(2026, 9, 23, 12);
+    const news = [
+        { title: "Bitcoin ETF inflows hit record", ts: now - 3600e3 },
+        { title: "$SOL rallies as Solana DEX volume jumps", ts: now - 2 * 3600e3 },
+        { title: "Ethena launches new product", ts: now - 3600e3 },
+        { title: "Old Bitcoin story", ts: now - 3 * 86400e3 },
+    ];
+    assert.equal(R.countMentions(news, "BTC", "Bitcoin", now - 86400e3), 1, "only fresh headlines count");
+    assert.equal(R.countMentions(news, "SOL", "Solana", now - 86400e3), 1);
+    assert.equal(R.countMentions(news, "ETH", "Ethereum", now - 86400e3), 0, "ETH must not match Ethena");
+
+    const out = R.computeAttention({
+        tracked: [
+            { symbol: "BTC", volRatio: 1.0, change24h: 0.4, fundingZ: 0.2, oiChange1h: 0.01 },
+            { symbol: "SOL", volRatio: 3.2, change24h: 14, fundingZ: 2.8, oiChange1h: 0.09 },
+        ],
+        trending: [
+            { id: "solana", symbol: "SOL", name: "Solana", image: "https://coin-images.coingecko.com/coins/images/4128/large/solana.png" },
+            { id: "pepe", symbol: "PEPE", name: "Pepe", image: "javascript:alert(1)", change24h: 22 },
+        ],
+        markets: [], news,
+    }, now);
+    const sol = out.find((c) => c.symbol === "SOL"), btc = out.find((c) => c.symbol === "BTC"), pepe = out.find((c) => c.symbol === "PEPE");
+    assert.equal(out[0].symbol, "SOL", "hottest coin ranks first");
+    assert.equal(sol.level, "HYPE");
+    assert.match(sol.advice, /Rückschlag/);
+    assert.equal(btc.level, "RUHIG");
+    assert.ok(btc.tracked && !pepe.tracked);
+    assert.equal(pepe.image, null, "only https CoinGecko images are allowed");
+    assert.ok(sol.image.startsWith("https://coin-images.coingecko.com/"));
+    assert.ok(pepe.score > 0 && pepe.score <= 100, "missing components are re-weighted, not zeroed");
+
+    const hist = [{ t: now - 3600e3, scores: { SOL: 40 } }, { t: now - 600e3, scores: { SOL: 70 } }];
+    assert.equal(R.trendFor(hist, "SOL", sol.score, now), sol.score - 40, "trend compares with ~1 h ago");
+});
