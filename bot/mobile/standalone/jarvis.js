@@ -550,6 +550,11 @@
             if (!(L && (L.ready() || L.loading()))) { say(hits[0].replace(/^Wikipedia „[^“]*“: /, "").split(/(?<=[.!?])\s/).slice(0, 2).join(" ")); return; }
             extra = `Websuche nach „${act.search}“:\n${hits.join("\n")}\nBeantworte die Frage anhand dieser Ergebnisse und nenne kurz die Quelle.`;
         }
+        // News questions: the bot's analysis goes along, and the best idea waits for a "yes".
+        if (!extra && /(news|nachricht|meldung|schlagzeile|neuigkeit|was gibt.s neues|was gibt es neues|was ist (los|passiert))/i.test(text) && window.TBNewsAI) {
+            window.TBNewsAI.summary();
+            extra = "Der Nutzer fragt nach den News. Fasse die News-Analyse oben in zwei bis drei gesprochenen Sätzen zusammen (Stimmung, Hauptthemen, welche Coins positiv oder negativ betroffen sind, wichtigste Meldung sinngemäß auf Deutsch). Nenne dann die beste Idee des Bots und frage, ob du sie im Demo-Konto umsetzen sollst.";
+        }
         // 2) Free on-device AI: real conversation, no key, no costs.
         if (L && (L.ready() || L.loading())) {
             let spoke = false;
@@ -922,6 +927,18 @@
         speak, enable, disable, stop: stopSpeaking, listen: () => startListening(false), command: handleCommand, sayable, settings: S,
         status: () => ({ phase: R.phase, busy: R.busy, queue: R.queue.length, neural: R.workerReady, engine: S.engine, lastSynth: R.lastSynth || null, played: R.played || 0 }),
     };
+    // Fresh headlines: Jarvis reads them and gives a short summary (AI-phrased when available).
+    window.addEventListener("jarvis-news", async (ev) => {
+        const d = ev.detail || {};
+        if (!S.enabled || S.speak.news === false || !d.items || !d.items.length) return;
+        let text = "";
+        const prompt = `Neue Krypto-Meldungen:\n${d.items.slice(0, 5).map((n) => `- [${n.sentiment}] ${n.source}${n.coins.length ? ` (${n.coins.join(", ")})` : ""}: ${n.title}`).join("\n")}\nFasse auf Deutsch in ein bis zwei Sätzen zusammen, worum es geht und was das für die betroffenen Coins bedeutet. Beginne mit „Neue Meldung“ bzw. „Neue Meldungen“.`;
+        try {
+            if (window.JarvisAI && window.JarvisAI.available()) text = await window.JarvisAI.summarize(prompt);
+            else if (window.JarvisLocal && window.JarvisLocal.ready()) text = await window.JarvisLocal.summarize(prompt);
+        } catch (e) { text = ""; }
+        speak(text || d.digest, "news", { kind: "news" });
+    });
     window.addEventListener("jarvis", (ev) => {
         const d = ev.detail || {};
         speak(d.text || "", d.level || "info", { kind: d.kind });

@@ -1986,11 +1986,18 @@ async function boot() {
     if ("serviceWorker" in navigator) {
         // After an update the new worker takes over; reload once so the new code actually runs.
         const hadController = !!navigator.serviceWorker.controller;
-        navigator.serviceWorker.addEventListener("controllerchange", () => {
-            if (!hadController) return;
-            try { if (sessionStorage.getItem("tb_sw_reloaded")) return; sessionStorage.setItem("tb_sw_reloaded", "1"); } catch (e) { /* storage unavailable */ }
+        // A new version never reloads in front of the user: it is applied only while the app is in
+        // the background, and never during the KI download or while Jarvis is speaking.
+        let updatePending = false;
+        const applyUpdateQuietly = () => {
+            if (!updatePending || document.visibilityState !== "hidden") return;
+            if (window.JarvisLocal && window.JarvisLocal.loading()) return;
+            if (window.jarvis && window.jarvis.status && window.jarvis.status().busy) return;
+            try { if (sessionStorage.getItem("tb_sw_reloaded")) return; sessionStorage.setItem("tb_sw_reloaded", "1"); } catch (e) { return; }
             location.reload();
-        });
+        };
+        navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) { updatePending = true; applyUpdateQuietly(); } });
+        document.addEventListener("visibilitychange", () => setTimeout(applyUpdateQuietly, 1500));
         navigator.serviceWorker.register("sw.js").then((reg) => reg.update().catch(() => {})).catch(() => {});
     }
     keepAwake();
@@ -8062,7 +8069,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "47.1";
+const APP_VERSION = "48.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -10684,7 +10691,9 @@ function _proPrioritize() {
     const anchor = document.getElementById("health-pulse") || document.getElementById("reality-banner");
     if (!anchor || !anchor.parentNode) return;
     let after = anchor;
-    for (const id of ["v32-server-card", "signal-tile", "v32-status-card"]) {
+    // One shared order for every module that pins cards (radar, self-healing) — otherwise two
+    // modules keep moving each other's cards and the page visibly jumps.
+    for (const id of ["v32-server-card", "signal-tile", "v39-radar-card", "v44-heal-card", "v32-status-card"]) {
         const el = document.getElementById(id);
         if (!el || el.parentNode !== anchor.parentNode) continue;
         if (after.nextElementSibling !== el) after.parentNode.insertBefore(el, after.nextElementSibling);
@@ -11184,9 +11193,12 @@ function _npCheck() {
     NP.shown = [...cand, ...NP.shown];
     NP.queue = [...NP.shown.splice(NP.max), ...NP.queue].slice(0, 12);
     _npRender();
-    const top = cand[0], coins = _npCoins(top).map(_jvName);
-    window.dispatchEvent(new CustomEvent("jarvis", { detail: { kind: "news", level: "news",
-        text: `Neue Meldung von ${top.trusted.replace(" · via CMC", "")}${coins.length ? ` zu ${coins.join(" und ")}` : ""}.${cand.length > 1 ? ` Insgesamt ${cand.length} neue Meldungen.` : ""}` } }));
+    // Jarvis reads the new headlines and gives a short summary (AI-phrased when available).
+    try { _naRefresh(); } catch (e) { /* analysis is optional */ }
+    window.dispatchEvent(new CustomEvent("jarvis-news", { detail: {
+        items: cand.map((n) => ({ title: n.title, source: n.trusted, coins: _npCoins(n), sentiment: _naLabel(_naScore(n).score), topic: _naScore(n).topics[0] || "" })),
+        digest: _naDigest(cand),
+    } }));
 }
 
 function _npRender() {
@@ -11207,6 +11219,7 @@ function _npRender() {
         return `<article class="v40-pop" data-np="${i}" role="status" aria-live="polite">
             <div class="v40-pop-top">
                 <span class="v40-src"><span class="v40-shield" aria-hidden="true">✓</span>${_escHtml(n.trusted)}</span>
+                <span class="v40-sent ${(() => { const l = _naLabel(_naScore(n).score); return l === "positiv" ? "pos" : l === "negativ" ? "neg" : ""; })()}">${_escHtml(_naLabel(_naScore(n).score))}</span>
                 <span class="v40-time">${_escHtml(_npAgo(n.ts))}</span>
                 <button class="v40-x" data-np-close="${i}" aria-label="Meldung schließen" title="Schließen">✕</button>
             </div>
@@ -11427,6 +11440,8 @@ const TBJarvisActions = {
             time: new Date().toLocaleString("de-DE"),
         };
     },
+    newsAnalysis() { const sum = NEWSAI.summary(); return { summary: sum, details: NEWSAI.contextText(), ideas: (NEWSAI.ideaList || []).map((i) => ({ id: i.id, kind: i.kind, symbol: i.symbol, side: i.side, text: i.text, confidence: i.conf })) }; },
+    executeIdea(id) { return { result: NEWSAI.executeId(id) }; },
     price(sym) {
         const s = String(sym || "").toUpperCase().replace(/[^A-Z]/g, "").replace(/USDT$/, "");
         const px = state.prices[`${s}/USDT`] || (RADAR.bySymbol[s] && RADAR.bySymbol[s].price) || null;
@@ -11452,8 +11467,10 @@ async function _jvSayScan() {
 // Commands that need the action layer (async); everything else falls through to _jvAnswer.
 function _jvAnswerActions(raw) {
     const t = String(raw || "").toLowerCase();
-    if (/(news|nachricht|meldung|schlagzeile)/.test(t) && /(lies|vorlesen|vor\b|letzte|neueste|aktuell)/.test(t))
+    if (/(news|nachricht|meldung|schlagzeile)/.test(t) && /(lies|vorlesen|vor\b)/.test(t))
         return _jvSayNews(TBJarvisActions.news(_jvCount(t, 2)));
+    if (/(news|nachricht|meldung|schlagzeile|neuigkeit|was gibt.s neues|was gibt es neues|was ist (los|passiert)|analys|zusammenfass)/.test(t))
+        return NEWSAI.summary();
     if (/(einstieg|setup|gelegenheit|chance|scan|such\w* (nach )?(neuen )?(trade|einstieg|setup))/.test(t)) return _jvSayScan();
     if (/(bot|automatik|handel|trading)\b.*\b(start|starte|starten|an\b|ein\b|fortsetzen|weiter)/.test(t) || /^(starte den bot|bot starten)$/.test(t)) {
         const r = TBJarvisActions.setAuto(true);
@@ -11468,7 +11485,12 @@ function _jvAnswerActions(raw) {
 }
 // Commands with side effects — always executed directly, also when an AI does the talking.
 function _jvAct(raw) {
-    const t = String(raw || "").toLowerCase();
+    const t = String(raw || "").toLowerCase().trim();
+    // Pending news idea: "ja / mach das / umsetzen" executes (demo), "nein / lass" drops it.
+    if (NEWSAI.pending && Date.now() - NEWSAI.pending.at < 5 * 60e3) {
+        if (/^(ja|jap|jo|okay|ok|gerne?|mach( das| es)?|tu das|umsetzen|eröffne\w*|los|bitte)\b/.test(t) && !/nicht|kein/.test(t)) return { say: NEWSAI.confirm() };
+        if (/^(nein|nee|lass|nicht|kein|abbrechen|stopp)\b/.test(t)) { NEWSAI.pending = null; return { say: "Alles klar, ich lasse es." }; }
+    }
     const web = /(such\w*|google\w*|recherchier\w*|schau\w*)\s.*(im (web|internet|netz)|online)|^(such|google|recherchier)\w*\s+(mal\s+)?nach\s/.exec(t);
     if (web) {
         const q = t.replace(/^(jarvis[,\s]*)?(bitte\s*)?/, "").replace(/(such\w*|google\w*|recherchier\w*|schau\w*)\s*(mal\s*)?(bitte\s*)?(im (web|internet|netz)|online)?\s*(nach|über)?\s*/, "").replace(/\s*(im (web|internet|netz)|online)\s*(nach)?\s*/, " ").trim();
@@ -11836,6 +11858,250 @@ if (typeof INFO_DB === "object") {
                <p>Die Maßnahmen machen den Bot nur vorsichtiger, nie riskanter. Ein Strukturbruch kann auch Pech sein — eine Garantie, dass die Ursache „behoben“ ist, gibt es im Trading nicht. Alles im Demo-Konto.</p>`,
     };
 }
+
+// ============================================================================
+// v48 — News-Intelligenz: Stimmung, Themen und betroffene Coins je Meldung, Zusammenfassung,
+// Ideen (mit Bestätigung als Demo-Trade) und automatische Schutzmaßnahmen bei schlechten News.
+// Lexikon-basiert, damit es ohne KI und ohne Kosten funktioniert; mit KI wird zusätzlich formuliert.
+// ============================================================================
+const _NA_BULL = [
+    [/\b(surg|soar|rall|jump|spike|skyrocket)\w*/g, 1.2], [/\b(record|all-time) high|\bath\b|\bnew high/g, 1.2],
+    [/\bapprov\w*|\bgreen ?light/g, 1.3], [/\binflows?\b/g, 1], [/\b(adopt|partner|integrat|accumulat)\w*/g, 0.8],
+    [/\b(launch|upgrade|mainnet|milestone)\w*/g, 0.5], [/\bbullish\b|\boptimis\w*/g, 1], [/\b(rate cuts?|cuts? rates|dovish)\b/g, 0.9],
+    [/\b(gain|climb|rise|rises|rising|rebound|recover)\w*/g, 0.7], [/\b(list(s|ing|ed)?) on\b|\blisting\b/g, 0.6],
+    [/\b(buy|buys|bought|purchas)\w*/g, 0.6], [/\b(reserve|treasury)\b/g, 0.5], [/\bbreakout\b|\boutperform\w*/g, 0.8],
+];
+const _NA_BEAR = [
+    [/\b(hack|exploit|breach|stolen|drain)\w*/g, 1.6], [/\b(outage|halt|halts|halted|downtime|freez)\w*/g, 1.2],
+    [/\b(crash|plung|tumbl|slump|sink|sank|plummet|nosedive)\w*/g, 1.2], [/\bsell-?off\b|\bdump\w*/g, 1], [/\bliquidat\w*/g, 0.9],
+    [/\b(lawsuit|sues?|sued|charg(ed|es)|indict|fraud|scam|ponzi)\b/g, 1.2], [/\b(ban|bans|banned|crackdown|prohibit)\w*/g, 1.1],
+    [/\b(probe|investigat|subpoena)\w*/g, 0.8], [/\bdelist\w*/g, 1.1], [/\boutflows?\b/g, 1], [/\bbearish\b|\bpessimis\w*/g, 1],
+    [/\b(rate hikes?|hawkish)\b/g, 0.9], [/\b(bankrupt|insolven|collapse|default)\w*/g, 1.5], [/\b(depeg|rug ?pull)\w*/g, 1.4],
+    [/\b(fall|falls|fell|drop|drops|dropped|slide|slides|decline|lower|loss|losses)\b/g, 0.7], [/\b(fear|panic|warn)\w*/g, 0.7],
+    [/\b(reject|delay|postpon)\w*/g, 0.8], [/\b(fine|fined|penalt)\w*/g, 0.8], [/\bvulnerab\w*|\battack\w*/g, 1],
+];
+const _NA_TOPICS = [
+    ["Regulierung", /\b(sec|cftc|regulat\w*|law|lawsuit|court|congress|senate|mica|ban|bill|legal)\b/],
+    ["ETF & Fonds", /\b(etf|etfs|fund|inflows?|outflows?|blackrock|grayscale|fidelity|ark)\b/],
+    ["Sicherheit", /\b(hack\w*|exploit\w*|breach|stolen|vulnerab\w*|scam|attack\w*|drain\w*)\b/],
+    ["Makro & Zinsen", /\b(fed|fomc|rates?|inflation|cpi|jobs|payrolls|dollar|yields?|recession|tariffs?|powell)\b/],
+    ["Technik & Netzwerk", /\b(upgrade|fork|mainnet|outage|network|layer|validators?|launch\w*|block production)\b/],
+    ["Kursbewegung", /\b(price|rall\w*|surg\w*|crash\w*|plung\w*|record|ath|liquidat\w*|tops?|\$\d)/],
+    ["Adoption & Firmen", /\b(partner\w*|adopt\w*|payments?|integrat\w*|institution\w*|treasury|reserve|company|bank)\b/],
+];
+const NEWSAI = (window.TBNewsAI = window.TBNewsAI || {});
+NEWSAI.gateAnnounced = NEWSAI.gateAnnounced || {};
+
+function _naScore(n) {
+    const t = ` ${String(n.title || "")} ${String(n.body || "").slice(0, 200)} `.toLowerCase();
+    let bull = 0, bear = 0;
+    for (const [re, w] of _NA_BULL) bull += (t.match(re) || []).length * w;
+    for (const [re, w] of _NA_BEAR) bear += (t.match(re) || []).length * w;
+    const score = bull + bear ? (bull - bear) / (bull + bear) : 0;
+    const topics = _NA_TOPICS.filter(([, re]) => re.test(t)).map(([name]) => name);
+    return { score: Math.max(-1, Math.min(1, score)), strength: Math.min(1, (bull + bear) / 2.5), topics };
+}
+function _naLabel(s) { return s >= 0.35 ? "positiv" : s <= -0.35 ? "negativ" : "neutral"; }
+
+// Analyse of the latest news (default: last 12 h).
+function _naAnalyze(items, hours = 12) {
+    const now = Date.now();
+    const list = (items || state.news || []).filter((n) => now - new Date(n.ts).getTime() < hours * 3600e3).slice(0, 40).map((n) => {
+        const s = _naScore(n), trusted = _newsTrusted(n);
+        const ageH = Math.max(0, (now - new Date(n.ts).getTime()) / 3600e3);
+        const weight = (trusted ? 1 : 0.5) * Math.exp(-ageH / 8) * (0.4 + 0.6 * s.strength);
+        return { ...n, ...s, trusted, coins: _npCoins(n), weight, ageMin: Math.round(ageH * 60) };
+    });
+    const byCoin = {}, topics = {};
+    let wsum = 0, ssum = 0;
+    for (const n of list) {
+        wsum += n.weight; ssum += n.weight * n.score;
+        for (const tp of n.topics) topics[tp] = (topics[tp] || 0) + n.weight;
+        for (const c of n.coins) {
+            const b = (byCoin[c] = byCoin[c] || { coin: c, n: 0, trusted: 0, w: 0, s: 0, top: null });
+            b.n++; if (n.trusted) b.trusted++; b.w += n.weight; b.s += n.weight * n.score;
+            if (!b.top || Math.abs(n.score) * n.weight > Math.abs(b.top.score) * b.top.weight) b.top = n;
+        }
+    }
+    const coins = Object.values(byCoin).map((b) => ({ ...b, score: b.w ? b.s / b.w : 0 })).sort((a, b) => b.w - a.w);
+    const overall = wsum ? ssum / wsum : 0;
+    return {
+        at: now, count: list.length, overall, label: _naLabel(overall), coins,
+        topics: Object.entries(topics).sort((a, b) => b[1] - a[1]).map(([t]) => t).slice(0, 3),
+        top: list.slice().sort((a, b) => Math.abs(b.score) * b.weight - Math.abs(a.score) * a.weight).slice(0, 5),
+        items: list,
+    };
+}
+
+// Ideas: strong, trusted news flow per coin, checked against price action and the edge test.
+function _naIdeas(a) {
+    const ideas = [];
+    for (const c of a.coins) {
+        if (c.trusted < 1 || Math.abs(c.score) < 0.4 || c.w < 0.35) continue;
+        const sym = `${c.coin}/USDT`;
+        const tradable = CFG.symbols.includes(sym);
+        const ch = _jvChange24(c.coin);
+        const pos = broker.positions[sym];
+        const side = c.score > 0 ? "long" : "short";
+        if (pos && pos.side !== side) {
+            ideas.push({ id: `protect-${c.coin}`, kind: "protect", symbol: sym, side: pos.side, coin: c.coin, conf: "mittel",
+                text: `${_jvName(c.coin)}: ${c.score < 0 ? "negative" : "positive"} Nachrichtenlage gegen die offene ${pos.side === "long" ? "Long" : "Short"}-Position — Stop auf Einstand nachziehen` });
+            continue;
+        }
+        if (!tradable || pos) continue;
+        const priced = ch != null && ((side === "long" && ch > 12) || (side === "short" && ch < -12));
+        const validated = _proValidated(sym);
+        ideas.push({
+            id: `${side}-${c.coin}`, kind: "trade", symbol: sym, side, coin: c.coin,
+            conf: priced ? "niedrig" : validated ? "mittel" : "niedrig-mittel",
+            text: `${_jvName(c.coin)} ${side === "long" ? "long" : "short"} — ${c.trusted} geprüfte Meldung${c.trusted > 1 ? "en" : ""}, Thema ${(c.top && c.top.topics[0]) || a.topics[0] || "News"}${priced ? `; Kurs schon ${ch > 0 ? "+" : ""}${ch.toFixed(1)} % in 24 h, wohl großteils eingepreist` : ""}${validated ? "; Edge-Test bestätigt" : "; ohne bestätigte Edge, daher halbe Positionsgröße"}`,
+        });
+    }
+    return ideas.slice(0, 3);
+}
+
+// German summary without an AI (an AI, if present, rephrases it more naturally).
+function _naSummary(a, ideas) {
+    if (!a.count) return "In den letzten Stunden gab es keine neuen Meldungen.";
+    const pos = a.coins.filter((c) => c.score >= 0.35).slice(0, 3).map((c) => _jvName(c.coin));
+    const neg = a.coins.filter((c) => c.score <= -0.35).slice(0, 3).map((c) => _jvName(c.coin));
+    const parts = [`Ich habe ${a.count} Meldungen der letzten zwölf Stunden ausgewertet. Die Lage ist insgesamt ${a.label}.`];
+    if (a.topics.length) parts.push(`Hauptthemen: ${a.topics.join(", ")}.`);
+    if (pos.length) parts.push(`Positiv für ${pos.join(", ")}.`);
+    if (neg.length) parts.push(`Negativ für ${neg.join(", ")}.`);
+    const t = a.top[0];
+    if (t) parts.push(`Wichtigste Meldung: ${t.trusted ? t.trusted.replace(" · via CMC", "") : t.source}${t.coins.length ? ` zu ${t.coins.map(_jvName).join(" und ")}` : ""}, ${_naLabel(t.score)}${t.topics[0] ? `, Thema ${t.topics[0]}` : ""}.`);
+    if (ideas && ideas.length) parts.push(`Meine Idee: ${ideas[0].text}. Soll ich das ${ideas[0].kind === "protect" ? "umsetzen" : "als Demo-Trade eröffnen"}?`);
+    return parts.join(" ");
+}
+// Short digest for freshly arrived news.
+function _naDigest(items) {
+    const a = _naAnalyze(items, 48);
+    if (!a.count) return "";
+    if (a.count === 1) {
+        const n = a.items[0];
+        return `Neue Meldung von ${(n.trusted || n.source).replace(" · via CMC", "")}${n.coins.length ? ` zu ${n.coins.map(_jvName).join(" und ")}` : ""}: ${_naLabel(n.score)}${n.topics[0] ? `, Thema ${n.topics[0]}` : ""}.`;
+    }
+    const pos = a.items.filter((n) => n.score >= 0.35).length, neg = a.items.filter((n) => n.score <= -0.35).length;
+    const coins = [...new Set(a.items.flatMap((n) => n.coins))].slice(0, 3).map(_jvName);
+    return `${a.count} neue Meldungen${coins.length ? ` zu ${coins.join(", ")}` : ""}: ${pos} positiv, ${neg} negativ${a.topics.length ? `. Themen: ${a.topics.join(", ")}` : ""}.`;
+}
+
+// Ideas waiting for a "yes".
+function _naOffer(idea) { NEWSAI.pending = idea ? { idea, at: Date.now() } : null; }
+function _naExecute(idea) {
+    if (!idea) return "Es liegt gerade keine Idee vor.";
+    const price = state.prices[idea.symbol];
+    if (idea.kind === "protect") {
+        const p = broker.positions[idea.symbol];
+        if (!p) return "Die Position ist inzwischen geschlossen.";
+        const be = p.entry;
+        const better = p.side === "long" ? Math.max(p.stop || 0, Math.min(be, (price || be) * 0.998)) : Math.min(p.stop || Infinity, Math.max(be, (price || be) * 1.002));
+        p.stop = better; if (typeof broker.save === "function") broker.save();
+        renderAll();
+        return `Erledigt. Stop bei ${_jvName(idea.coin)} auf ${better >= 100 ? Math.round(better) : better.toFixed(4)} Dollar nachgezogen.`;
+    }
+    if (!price) return `Für ${_jvName(idea.coin)} habe ich gerade keinen Live-Kurs, deshalb eröffne ich nichts.`;
+    if (broker.positions[idea.symbol]) return `In ${_jvName(idea.coin)} gibt es schon eine Position.`;
+    const candles = state.candles[idea.symbol];
+    let atr = price * 0.02;
+    if (candles && candles.length >= 20) { const a = window.TB.atr(window.TB.highs(candles), window.TB.lows(candles), window.TB.closes(candles), 14); atr = a[a.length - 1] || atr; }
+    const riskPct = dynamicRiskPct(0.5, 0) * (_proValidated(idea.symbol) ? 1 : 0.5);
+    const plan = window.TB.planTrade(idea.side, price, atr, broker.equity(state.prices), { riskPctPerTrade: riskPct, atrStopMult: CFG.atrStopMult, maxNotionalPctPerPosition: CFG.maxNotionalPctPerPosition, tpMultiples: CFG.tpMultiples });
+    if (!plan || plan.size <= 0) return "Die Positionsgröße wäre zu klein, ich eröffne nichts.";
+    broker.submit(idea.symbol, idea.side, plan.size, price, { stop: plan.stop, take_profits: plan.take_profits, strategy: "news-idee" });
+    renderAll();
+    announce(`Demo-Trade aus News-Idee: ${idea.symbol} ${idea.side === "long" ? "gekauft" : "verkauft"} bei ${price.toFixed(2)}. Stop bei ${plan.stop.toFixed(2)}.`, "success");
+    return `Erledigt: Demo-Trade ${_jvName(idea.coin)} ${idea.side === "long" ? "long" : "short"} eröffnet, Risiko etwa ${plan.riskAmount.toFixed(0)} Dollar, Stop bei ${plan.stop >= 100 ? Math.round(plan.stop) : plan.stop.toFixed(4)}.`;
+}
+
+// Automatic protection: no new entries against strongly negative (or positive) trusted news.
+function _naGate(sym, side) {
+    const a = NEWSAI.last;
+    if (!a || Date.now() - a.at > 30 * 60e3) return null;
+    const c = a.coins.find((x) => `${x.coin}/USDT` === sym);
+    if (!c || c.trusted < 1) return null;
+    if (side === "long" && c.score <= -0.5) return `negative Nachrichtenlage (${c.trusted} geprüfte Meldung${c.trusted > 1 ? "en" : ""})`;
+    if (side === "short" && c.score >= 0.5) return `positive Nachrichtenlage (${c.trusted} geprüfte Meldung${c.trusted > 1 ? "en" : ""})`;
+    return null;
+}
+if (typeof makePending === "function" && !makePending._v48) {
+    const _v48Mkp = makePending;
+    makePending = function (symbol, sig, candles, price) {
+        const side = sig && (sig.side || (sig.pro && sig.pro.side));
+        const why = side ? _naGate(symbol, side) : null;
+        if (why) {
+            if (typeof feedEvent === "function") feedEvent("info", `${symbol}: ${side === "long" ? "Long" : "Short"}-Signal ausgesetzt — ${why}`);
+            const k = `${symbol}:${side}`;
+            if (!NEWSAI.gateAnnounced[k] || Date.now() - NEWSAI.gateAnnounced[k] > 6 * 3600e3) {
+                NEWSAI.gateAnnounced[k] = Date.now();
+                announce(`News-Schutz: ${_jvName(symbol.replace("/USDT", ""))} ${side === "long" ? "Long" : "Short"} ausgesetzt wegen ${why}.`, "warn");
+            }
+            return null;
+        }
+        return _v48Mkp(symbol, sig, candles, price);
+    };
+    makePending._v48 = true;
+}
+
+function _naRefresh() {
+    NEWSAI.last = _naAnalyze();
+    NEWSAI.ideaList = _naIdeas(NEWSAI.last);
+    _naRenderCard();
+    // Warn once per position when the news flow turns against it.
+    for (const i of NEWSAI.ideaList.filter((x) => x.kind === "protect")) {
+        const k = `protect:${i.symbol}`;
+        if (NEWSAI.gateAnnounced[k] && Date.now() - NEWSAI.gateAnnounced[k] < 6 * 3600e3) continue;
+        NEWSAI.gateAnnounced[k] = Date.now();
+        _naOffer(i);
+        announce(`Achtung: ${i.text}. Sag „Ja“, wenn ich das tun soll.`, "warn");
+    }
+}
+setTimeout(_naRefresh, 6000);
+setInterval(_naRefresh, 60e3);
+
+function _naRenderCard() {
+    const list = document.getElementById("news-list");
+    if (!list) return;
+    let el = document.getElementById("v48-news-ai");
+    if (!el) { el = document.createElement("div"); el.id = "v48-news-ai"; el.className = "v48-news-ai"; list.before(el); }
+    const a = NEWSAI.last;
+    if (!a || !a.count) { el.innerHTML = `<div class="v48-head"><strong>KI-Analyse</strong><span class="v48-mood neutral">wartet auf Meldungen</span></div>`; return; }
+    const chip = (c) => `<span class="v48-coin ${c.score >= 0.35 ? "pos" : c.score <= -0.35 ? "neg" : ""}">${_escHtml(c.coin)} ${c.score >= 0.35 ? "▲" : c.score <= -0.35 ? "▼" : "•"}</span>`;
+    el.innerHTML = `
+        <div class="v48-head"><strong>KI-Analyse</strong><span class="v48-mood ${a.label === "positiv" ? "pos" : a.label === "negativ" ? "neg" : "neutral"}">Stimmung ${a.label}</span></div>
+        <p class="v48-sum">${_escHtml(_naSummary(a, []).replace(/^Ich habe /, "").replace(/^(\d+) Meldungen der letzten zwölf Stunden ausgewertet\. /, "$1 Meldungen (12 h). "))}</p>
+        ${a.coins.length ? `<div class="v48-coins">${a.coins.slice(0, 8).map(chip).join("")}</div>` : ""}
+        ${NEWSAI.ideaList.length ? `<div class="v48-ideas">${NEWSAI.ideaList.map((i) => `<div class="v48-idea"><div><b>${i.kind === "protect" ? "Schutz" : "Idee"}</b> · ${_escHtml(i.text)} <small>Zuversicht ${_escHtml(i.conf)}</small></div><button class="ghost" data-na-run="${_escHtml(i.id)}">${i.kind === "protect" ? "Umsetzen" : "Demo-Trade"}</button></div>`).join("")}</div>` : ""}`;
+}
+document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("[data-na-run]");
+    if (!b) return;
+    const idea = (NEWSAI.ideaList || []).find((i) => i.id === b.dataset.naRun);
+    const msg = _naExecute(idea);
+    if (typeof feedEvent === "function") feedEvent("info", msg);
+    window.dispatchEvent(new CustomEvent("jarvis", { detail: { text: msg, level: "info", kind: "trades" } }));
+    _naRefresh();
+});
+
+// Public surface for Jarvis (rules, local AI, Claude tools).
+Object.assign(NEWSAI, {
+    analyze: () => { _naRefresh(); return NEWSAI.last; },
+    ideas: () => { _naRefresh(); return NEWSAI.ideaList; },
+    summary: () => { _naRefresh(); const ideas = NEWSAI.ideaList; _naOffer(ideas[0] || null); return _naSummary(NEWSAI.last, ideas); },
+    digest: _naDigest, score: _naScore, label: _naLabel,
+    offer: _naOffer,
+    confirm: () => { const p = NEWSAI.pending; if (!p || Date.now() - p.at > 5 * 60e3) return null; NEWSAI.pending = null; return _naExecute(p.idea); },
+    executeId: (id) => _naExecute((NEWSAI.ideaList || []).find((i) => i.id === id)),
+    contextText: () => {
+        _naRefresh();
+        const L = NEWSAI.last;
+        if (!L || !L.count) return "Keine aktuellen Meldungen.";
+        return `News-Analyse (12 h, ${L.count} Meldungen): Stimmung ${L.label}; Themen ${L.topics.join(", ") || "-"}; Coins: ${L.coins.slice(0, 6).map((c) => `${c.coin} ${_naLabel(c.score)} (${c.n})`).join(", ")}.\n`
+            + `Wichtigste Meldungen:\n${L.top.map((n) => `- [${_naLabel(n.score)}] ${(n.trusted || n.source)}, vor ${n.ageMin} Min.: ${n.title}`).join("\n")}\n`
+            + `Ideen des Bots: ${(NEWSAI.ideaList || []).map((i) => i.text).join(" | ") || "keine"}`;
+    },
+});
 
 (function showVersion() {
     const f = document.querySelector("footer");

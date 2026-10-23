@@ -29,9 +29,10 @@ Führe ein echtes Gespräch: geh auf das Gesagte ein, beziehe dich auf vorher Ge
 
 Jede Nachricht des Nutzers enthält einen aktuellen <bot_status>-Block mit Depot, Positionen, Modus, validierten Edges und Radar. Nutze ihn für Fragen zum Bot, ohne ihn vorzulesen.
 
+Bei Fragen zu News oder „was gibt es Neues“: nutze get_news_analysis, fasse die Lage in zwei bis drei Sätzen zusammen (Stimmung, Themen, betroffene Coins), schlage die beste Idee vor und frage, ob du sie im Demo-Konto umsetzen sollst. Erst nach einem klaren Ja rufst du execute_idea auf.
 Werkzeuge: Nutze get_news, um Meldungen vorzulesen — übersetze englische Schlagzeilen sinngemäß ins Deutsche und nenne die Quelle. Nutze scan_for_entries, wenn nach Einstiegen oder Gelegenheiten gefragt wird, und erkläre das Ergebnis knapp. Nutze set_auto_mode, wenn der Nutzer den Bot pausieren, stoppen oder starten will, und bestätige danach. Nutze get_price für Kurse. Nutze die Websuche nur, wenn die Frage aktuelle Informationen außerhalb des Bots braucht, und nenne die Quelle kurz.
 
-Grenzen: Du kannst keine Kauf- oder Verkaufsorders auslösen, keine Einstellungen außer der Automatik ändern und kein Geld bewegen — sag das freundlich, wenn danach gefragt wird. Gib keine Gewinnversprechen; bei Einschätzungen zu Kursen weise kurz auf die Unsicherheit hin. Wenn ein Werkzeug fehlschlägt, sag ehrlich, was du nicht weißt.`;
+Grenzen: Trades eröffnest du nur als Demo-Trade aus einer Bot-Idee über execute_idea und nur nach Zustimmung; sonst änderst du nichts außer der Automatik und bewegst nie echtes Geld. Gib keine Gewinnversprechen; bei Einschätzungen zu Kursen weise kurz auf die Unsicherheit hin. Wenn ein Werkzeug fehlschlägt, sag ehrlich, was du nicht weißt.`;
     }
 
     const TOOLS = [
@@ -41,6 +42,10 @@ Grenzen: Du kannst keine Kauf- oder Verkaufsorders auslösen, keine Einstellunge
           input_schema: { type: "object", properties: {}, required: [], additionalProperties: false } },
         { name: "set_auto_mode", description: "Schaltet die Vollautomatik des Demo-Bots an (enabled=true) oder pausiert sie (enabled=false). Offene Positionen behalten ihre Stops.", strict: true, eager_input_streaming: true,
           input_schema: { type: "object", properties: { enabled: { type: "boolean" } }, required: ["enabled"], additionalProperties: false } },
+        { name: "get_news_analysis", description: "Analysiert die Meldungen der letzten 12 Stunden: Stimmung, Themen, betroffene Coins, wichtigste Schlagzeilen und konkrete Ideen des Bots (mit id).", strict: true, eager_input_streaming: true,
+          input_schema: { type: "object", properties: {}, required: [], additionalProperties: false } },
+        { name: "execute_idea", description: "Setzt eine Idee aus get_news_analysis im DEMO-Konto um (Demo-Trade eröffnen oder Stop absichern). Nur aufrufen, nachdem der Nutzer ausdrücklich zugestimmt hat.", strict: true, eager_input_streaming: true,
+          input_schema: { type: "object", properties: { idea_id: { type: "string" } }, required: ["idea_id"], additionalProperties: false } },
         { name: "get_price", description: "Aktueller Kurs in USDT und 24-Stunden-Veränderung eines Coins, z. B. BTC, ETH, SOL.", strict: true, eager_input_streaming: true,
           input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false } },
     ];
@@ -53,6 +58,8 @@ Grenzen: Du kannst keine Kauf- oder Verkaufsorders auslösen, keine Einstellunge
             case "get_news": return { items: A.news(Number.isInteger(inp.count) ? inp.count : 2, inp.trusted_only === true) };
             case "scan_for_entries": return A.scan();
             case "set_auto_mode": return typeof inp.enabled === "boolean" ? A.setAuto(inp.enabled) : { error: "enabled fehlt" };
+            case "get_news_analysis": return A.newsAnalysis();
+            case "execute_idea": return typeof inp.idea_id === "string" ? A.executeIdea(inp.idea_id) : { error: "idea_id fehlt" };
             case "get_price": return typeof inp.symbol === "string" ? A.price(inp.symbol) : { error: "symbol fehlt" };
             default: return { error: `unbekanntes Werkzeug ${name}` };
         }
@@ -138,6 +145,14 @@ Grenzen: Du kannst keine Kauf- oder Verkaufsorders auslösen, keine Einstellunge
         }
     }
 
+    async function summarize(prompt) {
+        const api = await getClient();
+        const msg = await api.messages.create({ model: C.model, max_tokens: 300, output_config: { effort: "low" },
+            system: "Du bist J.A.R.V.I.S. Antworte auf Deutsch in ein bis zwei kurzen, gesprochenen Sätzen, ohne Listen, Markdown oder Links.",
+            messages: [{ role: "user", content: prompt }] });
+        if (msg.stop_reason === "refusal") return "";
+        return msg.content.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
+    }
     function reset() { history = []; }
     // Checks a key without a billed request (model lookup).
     async function verify(key) {
@@ -149,5 +164,5 @@ Grenzen: Du kannst keine Kauf- oder Verkaufsorders auslösen, keine Einstellunge
     }
     // Loads the SDK ahead of the first question so the first answer isn't slower than the rest.
     function warm() { getClient().catch(() => {}); }
-    window.JarvisAI = { config: C, save, models: MODELS, ask, reset, verify, warm, available: () => !!C.apiKey };
+    window.JarvisAI = { config: C, save, models: MODELS, ask, summarize, reset, verify, warm, available: () => !!C.apiKey };
 })();

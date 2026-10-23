@@ -1,4 +1,4 @@
-const CACHE = "trading-bot-standalone-v16";
+const CACHE = "trading-bot-standalone-v17";
 const ASSETS = ["./", "./app.css", "./app.js", "./lib.js", "./pro.js", "./radar.js", "./pro-worker.js", "./jarvis-local.js", "./jarvis-llm-worker.js", "./jarvis-ai.js", "./jarvis.js", "./jarvis-tts-worker.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {

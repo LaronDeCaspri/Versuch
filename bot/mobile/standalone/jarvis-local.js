@@ -176,8 +176,9 @@ ${ctx}`;
         const A = window.TBJarvisActions;
         if (!A) return extra || "";
         const st = A.status();
-        const news = A.news(5, false).map((n, i) => `${i + 1}. ${n.source}, vor ${n.minutes_ago} Min.: ${n.title}`).join("\n");
-        return `Bot-Status: ${JSON.stringify(st)}\nNeueste Meldungen:\n${news || "keine"}${extra ? `\n\nZUSATZINFOS ZUR FRAGE:\n${extra}` : ""}`;
+        const news = window.TBNewsAI && window.TBNewsAI.contextText ? window.TBNewsAI.contextText()
+            : A.news(5, false).map((n, i) => `${i + 1}. ${n.source}, vor ${n.minutes_ago} Min.: ${n.title}`).join("\n");
+        return `Bot-Status: ${JSON.stringify(st)}\n${news || "Keine Meldungen."}${extra ? `\n\nZUSATZINFOS ZUR FRAGE:\n${extra}` : ""}`;
     }
 
     async function ask(text, { onSentence, extra } = {}) {
@@ -240,6 +241,15 @@ ${ctx}`;
         return out;
     }
 
+    // One-off text job (e.g. summarising fresh headlines) — does not touch the conversation.
+    async function summarize(prompt) {
+        const engine = await load();
+        const r = await engine.chat.completions.create({
+            messages: [{ role: "system", content: "Du bist J.A.R.V.I.S. Antworte auf Deutsch in ein bis zwei kurzen, gesprochenen Sätzen, ohne Listen, Markdown oder Links." }, { role: "user", content: prompt }],
+            stream: false, temperature: 0.4, max_tokens: 160, extra_body: { enable_thinking: false },
+        });
+        return String((r.choices && r.choices[0] && r.choices[0].message && r.choices[0].message.content) || "").replace(/<\/?think>/g, "").trim();
+    }
     function reset() { S.history = []; }
     async function remove() {
         try {
@@ -250,7 +260,7 @@ ${ctx}`;
     }
 
     window.JarvisLocal = {
-        MODELS, config: C, save, state: S, supported, load, ask, reset, remove, webSearch, size,
+        MODELS, config: C, save, state: S, supported, load, ask, summarize, reset, remove, webSearch, size,
         fsSupported, pickDir, savedDir,
         ready: () => !!S.engine, loading: () => !!S.loading && !S.engine,
     };

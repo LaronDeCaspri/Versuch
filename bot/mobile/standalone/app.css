@@ -2991,3 +2991,22 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 #v44-pop.ok .v44-pop-last { color: #6ee7b7; background: rgba(16, 185, 129, 0.07); }
 .v44-pop-more { margin-top: 10px; width: 100%; min-height: 36px; font-size: 0.8rem; }
 @media (prefers-reduced-motion: reduce) { #v44-pop, #v44-pop.live .v44-pop-icon { animation: none; } }
+
+/* v48: news intelligence */
+.v48-news-ai { margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; background: linear-gradient(180deg, rgba(139, 92, 246, 0.07), rgba(139, 92, 246, 0.02)); border: 1px solid rgba(139, 92, 246, 0.25); }
+.v48-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.86rem; }
+.v48-mood { font-size: 0.72rem; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.v48-mood.pos { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.08); }
+.v48-mood.neg { color: #fca5a5; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.08); }
+.v48-sum { margin: 8px 0; font-size: 0.82rem; line-height: 1.45; color: var(--text-2); }
+.v48-coins { display: flex; flex-wrap: wrap; gap: 6px; }
+.v48-coin { font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border); color: var(--text-2); }
+.v48-coin.pos { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.35); }
+.v48-coin.neg { color: #fca5a5; border-color: rgba(239, 68, 68, 0.35); }
+.v48-ideas { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.v48-idea { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: rgba(0, 0, 0, 0.2); font-size: 0.8rem; color: var(--text-2); line-height: 1.4; }
+.v48-idea small { display: block; color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
+.v48-idea button { width: auto; min-height: 34px; padding: 4px 12px; font-size: 0.76rem; white-space: nowrap; }
+.v40-sent { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; color: var(--muted); border: 1px solid var(--border); white-space: nowrap; }
+.v40-sent.pos { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
+.v40-sent.neg { color: #fca5a5; border-color: rgba(239, 68, 68, 0.4); }
