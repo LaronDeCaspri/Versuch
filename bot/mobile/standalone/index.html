@@ -216,6 +216,8 @@
             <label class="jv2-field"><span>Tempo</span><input type="range" id="jv2-rate" min="0.7" max="1.4" step="0.05"></label>
             <label class="jv2-field"><span>Lautstärke</span><input type="range" id="jv2-vol" min="0.1" max="1" step="0.05"></label>
             <div class="jv2-checks">
+                <label><input type="checkbox" id="jv2-fx"> Jarvis-Klang (tiefer, klarer, digitaler Raum)</label>
+                <label><input type="checkbox" id="jv2-convo"> Gesprächsmodus (hört nach jeder Antwort weiter zu)</label>
                 <label><input type="checkbox" id="jv2-wake"> Wake-Word „Jarvis“ (Mikrofon hört mit)</label>
                 <label><input type="checkbox" id="jv2-brief-auto"> Tages-Briefing beim ersten Öffnen</label>
                 <label><input type="checkbox" id="jv2-say-trades"> Trades ansagen</label>
@@ -223,6 +225,20 @@
                 <label><input type="checkbox" id="jv2-say-news"> Eilmeldungen ansagen</label>
                 <label><input type="checkbox" id="jv2-say-radar"> Radar-HYPE ansagen</label>
                 <label><input type="checkbox" id="jv2-say-info"> Sonstige Hinweise</label>
+            </div>
+            <div class="jv2-section">
+                <div class="jv2-section-head"><strong>KI-Gespräch (Claude)</strong><span id="jv2-ai-state" class="jv2-pill">aus</span></div>
+                <small>Damit sprichst du mit Jarvis wie mit einem Menschen: freie Fragen, News auf Deutsch vorlesen, Märkte scannen, Bot starten/pausieren, Websuche. Eigener API-Schlüssel von console.anthropic.com — bleibt nur auf diesem Gerät und geht ausschließlich an api.anthropic.com. Kosten laufen über dein Anthropic-Konto.</small>
+                <label class="jv2-field"><span>API-Schlüssel</span><input type="password" id="jv2-ai-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></label>
+                <label class="jv2-field"><span>Modell</span><select id="jv2-ai-model"></select></label>
+                <label class="jv2-field"><span>Anrede</span><input type="text" id="jv2-ai-address" placeholder="Sir" maxlength="40"></label>
+                <label class="jv2-inline"><input type="checkbox" id="jv2-ai-web"> Websuche erlauben</label>
+            </div>
+            <div class="jv2-section">
+                <div class="jv2-section-head"><strong>Premium-Stimme (optional)</strong></div>
+                <small>Studio-Qualität über ElevenLabs mit eigenem Schlüssel (elevenlabs.io). Voreinstellung: tiefe, ruhige britische Männerstimme, spricht Deutsch. Eigene Voice-ID möglich.</small>
+                <label class="jv2-field"><span>Schlüssel</span><input type="password" id="jv2-el-key" placeholder="ElevenLabs API-Key" autocomplete="off" spellcheck="false"></label>
+                <label class="jv2-field"><span>Voice-ID</span><input type="text" id="jv2-el-voice" placeholder="onwK4e9ZLuTAKqWW03F9" spellcheck="false"></label>
             </div>
             <div class="jv2-row-btns"><button class="ghost" data-jv="test">Stimme testen</button><button class="ghost" data-jv="purge">Neurale Stimme vom Gerät löschen</button></div>
         </details>
@@ -725,6 +741,7 @@
 <script src="lib.js"></script>
 <script src="pro.js"></script>
 <script src="radar.js"></script>
+<script src="jarvis-ai.js"></script>
 <script src="jarvis.js"></script>
 <script src="app.js"></script>
 </body>

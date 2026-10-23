@@ -113,6 +113,26 @@ function announce(text, level = "info") {
     window.dispatchEvent(new CustomEvent("jarvis", { detail: { text, level } }));
 }
 
+// v42: every timed refresh runs through _tbEvery, so each card can show an exact countdown.
+// Errors inside a refresh are swallowed here: the card keeps its last good data.
+function _tbEvery(key, ms, fn) {
+    const T = (window.__tbTimers = window.__tbTimers || {});
+    T[key] = { ms, next: Date.now() + ms, busy: false };
+    setInterval(async () => {
+        const t = T[key];
+        t.busy = true;
+        t.next = Date.now() + ms;
+        try { await fn(); } catch (e) { /* keep last good data */ }
+        t.busy = false;
+    }, ms);
+}
+function _tbCountdown(key) {
+    const t = window.__tbTimers && window.__tbTimers[key];
+    if (key === "radar" && window.RADAR) return { next: window.RADAR.nextAt, busy: window.RADAR.loading };
+    if (key === "pro" && typeof _proNextCloseMs === "function") return { next: Date.now() + _proNextCloseMs(), busy: false };
+    return t ? { next: t.next, busy: t.busy } : null;
+}
+
 async function keepAwake() {
     if ("wakeLock" in navigator) {
         try {
@@ -1993,12 +2013,12 @@ async function boot() {
     refresh24hTickers();
 
     // v16: aggressive loops — everything fresh
-    setInterval(scanAll, CFG.scanIntervalSec * 1000);       // 30s
-    setInterval(refreshPrices, 5 * 1000);                    // 5s (was 10s)
-    setInterval(refreshFng, 60 * 1000);                      // 60s (was 5min)
-    setInterval(() => { fetchNews().then(renderNewsList); }, 90 * 1000);   // 90s
-    setInterval(() => { fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable); }, 60 * 1000);   // 60s
-    setInterval(refresh24hTickers, 30 * 1000);               // 30s (was 60s)
+    _tbEvery("scan", CFG.scanIntervalSec * 1000, scanAll);       // 30s
+    _tbEvery("prices", 5 * 1000, refreshPrices);                    // 5s
+    _tbEvery("fng", 60 * 1000, refreshFng);                      // 60s
+    _tbEvery("news", 2 * 60 * 1000, () => fetchNews(true).then(renderNewsList));   // 2 min
+    _tbEvery("futures", 60 * 1000, () => fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable));   // 60s
+    _tbEvery("tickers", 30 * 1000, refresh24hTickers);               // 30s
 }
 
 // ============ v6: THEME TOGGLE ============
@@ -3707,10 +3727,10 @@ const INFO_DB = {
     "jarvis": {
         title: "Jarvis — Sprachassistent",
         body: `
-            <p><strong>Stimme:</strong> Neurale deutsche Stimme (Piper „Thorsten“), die komplett im Browser auf deinem Gerät läuft — kein Server, kein Konto, keine Kosten. Einmal laden (63 MB, HD 114 MB), danach offline gespeichert. Bis dahin nutzt Jarvis automatisch die beste Systemstimme deines Geräts.</p>
-            <p><strong>Ansagen:</strong> Trades, Stops, Alarme, Eilmeldungen geprüfter Redaktionen und Radar-HYPE — einzeln abschaltbar. Unwichtiges wird weggelassen, damit er nicht nervt.</p>
-            <p><strong>Sprachbefehle</strong> (Knopf „Sprechen“ oder Wake-Word „Jarvis …“): „Lagebericht“, „Positionen“, „Wie steht Bitcoin?“, „Was zeigt das Radar?“, „Gibt es News?“, „Ergebnis heute“, „Bot pausieren“, „Automatik an“, „leiser“, „stopp“.</p>
-            <p><strong>Sicherheit:</strong> Jarvis kann den Bot pausieren, aber niemals eine Order auslösen. Gehandelt wird ausschließlich im Demo-Konto. Spracherkennung nutzt die Web-Speech-API des Browsers (Chrome/Edge senden Audio dafür an den Browser-Hersteller).</p>
+            <p><strong>Stimme:</strong> Jarvis spricht mit der neuralen Männerstimme „Thorsten“ (Piper), die komplett auf deinem Gerät läuft — mit „Jarvis-Klang“: etwas tiefer, klarer, mit leichtem digitalem Raum. Sie wird beim Aktivieren automatisch einmal geladen (63 MB) und bleibt offline gespeichert. Optional: Premium-Stimme über ElevenLabs mit eigenem Schlüssel.</p>
+            <p><strong>Gespräch:</strong> Mit einem eigenen Claude-API-Schlüssel (Einstellungen) sprichst du frei mit Jarvis wie mit einem Menschen. Im Gesprächsmodus hört er nach jeder Antwort weiter zu; „danke“ oder Stille beendet das Gespräch.</p>
+            <p><strong>Befehle</strong> (auch ohne Schlüssel): „Lies mir die letzten zwei News vor“, „Such nach neuen Einstiegen“, „Bot pausieren“, „Bot starten“, „Lagebericht“, „Wie steht Bitcoin?“, „Was zeigt das Radar?“, „Ergebnis heute“, „leiser“, „stopp“. Websuche mit Antwort gibt es im KI-Modus.</p>
+            <p><strong>Sicherheit:</strong> Jarvis kann den Bot pausieren und starten, aber niemals eine Order auslösen. Gehandelt wird ausschließlich im Demo-Konto. Schlüssel bleiben auf diesem Gerät und gehen nur an den jeweiligen Anbieter.</p>
         `,
     },
     "positions": {
@@ -5591,7 +5611,7 @@ function collectSourceStatus() {
 
     // News
     sources.push({
-        name: "Live-News", url: "GDELT · CoinDesk · CryptoCompare · RSS (CoinDesk, Cointelegraph, Decrypt, Bitcoin Magazine, The Block, Google News) · Reddit",
+        name: "Live-News", url: "CoinMarketCap · CoinDesk · The Block · Reuters · u. a. (12 Quellen)",
         lastOk: state.lastNewsFetch,
         age: state.lastNewsFetch ? now - state.lastNewsFetch : null,
         status: (state.news?.length > 0) ? _statusFromAge(state.lastNewsFetch ? now - state.lastNewsFetch : null, 10 * 60 * 1000, 30 * 60 * 1000) : "err",
@@ -5708,7 +5728,9 @@ function renderSymbolDataStatus() {
 async function renderStatusHealth() {
     const el = $("#health-panel-status");
     if (!el) return;
-    el.innerHTML = HEALTH_ENDPOINTS.map((e) => `<div class="status-row pending" data-hname="${e.name}"><span class="status-light pending"></span><div><strong>${e.name}</strong></div><span class="status-badge off">…prüfe</span><div class="status-details">–</div></div>`).join("");
+    // Keep the last result visible while re-checking (no "…prüfe" flash on every refresh).
+    if (el.querySelectorAll("[data-hname]").length !== HEALTH_ENDPOINTS.length)
+        el.innerHTML = HEALTH_ENDPOINTS.map((e) => `<div class="status-row pending" data-hname="${e.name}"><span class="status-light pending"></span><div><strong>${e.name}</strong></div><span class="status-badge off">…prüfe</span><div class="status-details">–</div></div>`).join("");
     for (const ep of HEALTH_ENDPOINTS) {
         const start = performance.now();
         try {
@@ -6591,11 +6613,11 @@ document.addEventListener("DOMContentLoaded", () => {
         refreshWhales();
         renderEconCalendar();
     }, 2000);
-    setInterval(refreshMarketCtx, 90 * 1000);          // v16: 90s (was 5min)
-    setInterval(refreshOnChain, 60 * 1000);            // v16: 60s (was 5min)
-    setInterval(refreshEurRate, 60 * 1000);            // v16: 60s (was 15min) — user complaint
-    setInterval(checkHealth, 3 * 60 * 1000);           // v16: 3min (was 10min)
-    setInterval(refreshWhales, 60 * 1000);             // v16: 60s (was 3min)
+    _tbEvery("marketctx", 90 * 1000, refreshMarketCtx);          // 90s
+    _tbEvery("onchain", 60 * 1000, refreshOnChain);            // 60s
+    _tbEvery("eur", 60 * 1000, refreshEurRate);            // 60s
+    _tbEvery("health", 3 * 60 * 1000, checkHealth);           // 3 min
+    _tbEvery("whales", 60 * 1000, refreshWhales);             // 60s
     setInterval(renderEconCalendar, 30 * 1000);
 });
 
@@ -8035,7 +8057,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "41.0";
+const APP_VERSION = "42.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -8736,7 +8758,7 @@ if (typeof makePending === "function" && !makePending._v29vix) {
 }
 
 // Auto-refresh VIX every 5 minutes (it updates only during US market hours)
-setInterval(refreshVix, 5 * 60 * 1000);
+_tbEvery("vix", 5 * 60 * 1000, refreshVix);
 document.addEventListener("DOMContentLoaded", () => setTimeout(refreshVix, 5000));
 
 // VIX info popup
@@ -10746,49 +10768,77 @@ function _rdLevelChip(level) {
     return _proChip(level, tone);
 }
 
+// v42: each source keeps its last good answer (max. 45 min). A failed or rate-limited
+// refresh never empties the radar — it silently reuses the cache and retries next round.
+RADAR.cache = RADAR.cache || {};
+const RD_PERIOD = 5 * 60e3;
+async function _rdSource(key, fn, ok) {
+    try {
+        const v = await fn();
+        if (ok(v)) { RADAR.cache[key] = { v, ts: Date.now() }; return { v, state: "ok" }; }
+    } catch (e) { /* fall back below */ }
+    const c = RADAR.cache[key];
+    return c && Date.now() - c.ts < 45 * 60e3 ? { v: c.v, state: "stale" } : { v: null, state: "off" };
+}
 async function _rdRefresh() {
     if (RADAR.loading) return;
     RADAR.loading = true;
-    const sources = {};
-    const symbols = _proSymbols();
-    const tracked = symbols.map((s) => ({ symbol: s.replace("/USDT", "") }));
-    let trending = [], markets = [], vols = {};
-    try { trending = await RD.fetchTrending(); sources.trends = trending.length > 0; } catch (e) { sources.trends = false; }
+    _rdFootState();
     try {
+        const symbols = _proSymbols();
+        const tracked = symbols.map((s) => ({ symbol: s.replace("/USDT", "") }));
+        const tr = await _rdSource("trending", () => RD.fetchTrending(), (v) => Array.isArray(v) && v.length > 0);
+        const trending = tr.v || [];
         const ids = [...tracked.map((t) => RD.GECKO_IDS[t.symbol]), ...trending.map((t) => t.id)];
-        markets = await RD.fetchMarkets(ids);
-        sources.markets = markets.length > 0;
-    } catch (e) { sources.markets = false; }
-    try { vols = await RD.fetchVolumeRatios(symbols); sources.volume = Object.values(vols).some((v) => Number.isFinite(v.volRatio)); } catch (e) { sources.volume = false; }
-    for (const t of tracked) {
-        const v = vols[`${t.symbol}/USDT`] || {};
-        const d = PRO.deriv[`${t.symbol}/USDT`];
-        Object.assign(t, { volRatio: v.volRatio, change24h: v.change24h, price: v.price, fundingZ: d ? d.fundingZ : undefined, oiChange1h: d ? d.oiChange1h : undefined });
+        const mk = await _rdSource("markets", () => RD.fetchMarkets(ids), (v) => Array.isArray(v) && v.length > 0);
+        const vo = await _rdSource("volume", () => RD.fetchVolumeRatios(symbols), (v) => v && Object.values(v).some((x) => Number.isFinite(x.volRatio)));
+        const vols = vo.v || {};
+        for (const t of tracked) {
+            const v = vols[`${t.symbol}/USDT`] || {};
+            const d = PRO.deriv[`${t.symbol}/USDT`];
+            Object.assign(t, { volRatio: v.volRatio, change24h: v.change24h, price: v.price, fundingZ: d ? d.fundingZ : undefined, oiChange1h: d ? d.oiChange1h : undefined });
+        }
+        const sources = { trends: tr.state, markets: mk.state, volume: vo.state, news: (state.news || []).length ? "ok" : "off" };
+        const anyData = [tr, mk, vo].some((x) => x.state !== "off") || sources.news === "ok";
+        // Nothing reachable and we already show something: keep the current picture untouched.
+        if (!anyData && RADAR.coins.length) { RADAR.sources = { ...RADAR.sources, ...sources }; return; }
+        const now = Date.now();
+        const coins = RD.computeAttention({ tracked, trending, markets: mk.v || [], news: state.news || [] }, now);
+        // Keep known logos/sparklines if this round could not deliver them.
+        for (const c of coins) {
+            const old = RADAR.bySymbol[c.symbol];
+            if (old) { if (!c.sparkline && old.sparkline) c.sparkline = old.sparkline; if (!Number.isFinite(c.price) && Number.isFinite(old.price)) c.price = old.price; }
+        }
+        RADAR.coins = coins;
+        RADAR.bySymbol = Object.fromEntries(coins.map((c) => [c.symbol, c]));
+        for (const c of coins) c.trend = RD.trendFor(RADAR.history, c.symbol, c.score, now);
+        const last = RADAR.history[RADAR.history.length - 1];
+        if (!last || now - last.t >= 5 * 60e3) {
+            RADAR.history.push({ t: now, scores: Object.fromEntries(coins.map((c) => [c.symbol, c.score])) });
+            RADAR.history = RADAR.history.filter((h) => now - h.t < 48 * 3600e3);
+            try { localStorage.setItem("tb_radar_hist", JSON.stringify(RADAR.history)); } catch (e) { /* storage full */ }
+        }
+        if (!RADAR.selected || !RADAR.bySymbol[RADAR.selected]) RADAR.selected = coins[0] ? coins[0].symbol : null;
+        const newHype = coins.filter((c) => c.level === "HYPE" && c.tracked && !(RADAR._lastHype || []).includes(c.symbol));
+        if (newHype.length && typeof feedEvent === "function") feedEvent("info", `Aufmerksamkeits-Radar: HYPE bei ${newHype.map((c) => c.symbol).join(", ")} — ${newHype[0].advice}`);
+        if (newHype.length) window.dispatchEvent(new CustomEvent("jarvis", { detail: { kind: "radar", level: "info",
+            text: `Radar: ungewöhnlich viel Aufmerksamkeit bei ${newHype.map((c) => c.name).join(" und ")}. ${newHype[0].advice}` } }));
+        RADAR._lastHype = coins.filter((c) => c.level === "HYPE").map((c) => c.symbol);
+        RADAR.sources = sources;
+        RADAR.updatedAt = now;
+    } finally {
+        RADAR.loading = false;
+        RADAR.nextAt = Date.now() + RD_PERIOD;
+        _rdRender();
     }
-    sources.news = (state.news || []).length > 0;
-    const now = Date.now();
-    RADAR.coins = RD.computeAttention({ tracked, trending, markets, news: state.news || [] }, now);
-    RADAR.bySymbol = Object.fromEntries(RADAR.coins.map((c) => [c.symbol, c]));
-    for (const c of RADAR.coins) c.trend = RD.trendFor(RADAR.history, c.symbol, c.score, now);
-    const last = RADAR.history[RADAR.history.length - 1];
-    if (!last || now - last.t >= 5 * 60e3) {
-        RADAR.history.push({ t: now, scores: Object.fromEntries(RADAR.coins.map((c) => [c.symbol, c.score])) });
-        RADAR.history = RADAR.history.filter((h) => now - h.t < 48 * 3600e3);
-        try { localStorage.setItem("tb_radar_hist", JSON.stringify(RADAR.history)); } catch (e) { /* storage full */ }
-    }
-    if (!RADAR.selected || !RADAR.bySymbol[RADAR.selected]) RADAR.selected = RADAR.coins[0] ? RADAR.coins[0].symbol : null;
-    const newHype = RADAR.coins.filter((c) => c.level === "HYPE" && c.tracked && !(RADAR._lastHype || []).includes(c.symbol));
-    if (newHype.length && typeof feedEvent === "function") feedEvent("info", `Aufmerksamkeits-Radar: HYPE bei ${newHype.map((c) => c.symbol).join(", ")} — ${newHype[0].advice}`);
-    if (newHype.length) window.dispatchEvent(new CustomEvent("jarvis", { detail: { kind: "radar", level: "info",
-        text: `Radar: ungewöhnlich viel Aufmerksamkeit bei ${newHype.map((c) => c.name).join(" und ")}. ${newHype[0].advice}` } }));
-    RADAR._lastHype = RADAR.coins.filter((c) => c.level === "HYPE").map((c) => c.symbol);
-    RADAR.sources = sources;
-    RADAR.updatedAt = now;
-    RADAR.loading = false;
-    _rdRender();
 }
-setTimeout(() => { _rdRefresh().catch(() => { RADAR.loading = false; }); }, 2500);
-setInterval(() => { _rdRefresh().catch(() => { RADAR.loading = false; }); }, 5 * 60e3);
+// Self-scheduling loop so the countdown always matches the real next refresh.
+function _rdSchedule(ms) {
+    clearTimeout(RADAR._timer);
+    RADAR.nextAt = Date.now() + ms;
+    RADAR._timer = setTimeout(() => { _rdRefresh().catch(() => {}).finally(() => _rdSchedule(RD_PERIOD)); }, ms);
+}
+_rdSchedule(2500);
 
 function _rdSparkSvg(prices) {
     if (!Array.isArray(prices) || prices.length < 2) return `<div class="v39-spark-empty">kein Verlauf</div>`;
@@ -10907,8 +10957,50 @@ function _rdPin(el = document.getElementById("v39-radar-card"), home = document.
     else if (!el.parentElement) home.prepend(el);
 }
 setInterval(() => _rdPin(), 1500);
+function _rdLvl(c) { return c.level === "HYPE" ? "hype" : c.level === "ERHÖHT" ? "warm" : "calm"; }
+function _rdSrcHtml() {
+    const src = RADAR.sources || {};
+    return [["trends", "Suchtrends"], ["markets", "Kurse & Logos"], ["volume", "Volumen"], ["news", "News"]].map(([k, l]) => {
+        const st = src[k] === true ? "ok" : src[k] || "off";
+        return `<span class="${st === "ok" ? "ok" : st === "stale" ? "stale" : "off"}" title="${st === "stale" ? "letzter guter Stand (Quelle gerade nicht erreichbar)" : ""}">${st === "off" ? "○" : "●"} ${l}</span>`;
+    }).join("");
+}
+function _rdFootState() {
+    const el = document.getElementById("v39-radar-card");
+    if (!el) return;
+    const btn = el.querySelector("[data-v39-refresh]");
+    if (btn) btn.classList.toggle("busy", !!RADAR.loading);
+}
+// Builds the static skeleton once; afterwards only values move (no flicker, no image reloads).
+function _rdSkeleton(el) {
+    el.innerHTML = `
+        <h2>Aufmerksamkeits-Radar <span class="v39-head-chip"></span> ${_cdChipHtml("radar", "Aufmerksamkeits-Radar")} <span class="info" data-info="radar">ⓘ</span></h2>
+        <div class="perf-hint">Worauf der Markt gerade schaut: Suchtrends, News-Erwähnungen, ungewöhnliches Volumen und Positionierung. Je näher an der Mitte, desto mehr Aufmerksamkeit. Nur ein Hinweis, keine Handelsentscheidung.</div>
+        <div class="v39-layout">
+            <div class="v39-scope-wrap">
+                <div class="v39-scope" role="group" aria-label="Radar der Coins nach Aufmerksamkeit">
+                    <svg class="v39-grid" viewBox="0 0 100 100" aria-hidden="true">
+                        <circle cx="50" cy="50" r="49.5" class="v39-zone-calm"/>
+                        <circle cx="50" cy="50" r="${_RD_ZONE_R.warm}" class="v39-zone-warm"/>
+                        <circle cx="50" cy="50" r="${_RD_ZONE_R.hype}" class="v39-zone-hype"/>
+                        <circle cx="50" cy="50" r="12" class="v39-ring-line"/><circle cx="50" cy="50" r="24.5" class="v39-ring-line"/><circle cx="50" cy="50" r="37" class="v39-ring-line"/>
+                        <line x1="50" y1="1" x2="50" y2="99" class="v39-axis"/><line x1="1" y1="50" x2="99" y2="50" class="v39-axis"/>
+                        <text x="50" y="${50 - _RD_ZONE_R.hype + 3.6}" class="v39-zone-label hype">HYPE</text>
+                        <text x="50" y="${50 - _RD_ZONE_R.warm + 3.6}" class="v39-zone-label warm">ERHÖHT</text>
+                        <text x="50" y="4.6" class="v39-zone-label">RUHIG</text>
+                    </svg>
+                    <div class="v39-sweep" aria-hidden="true"></div>
+                    <div class="v39-core" aria-hidden="true"></div>
+                    <div class="v39-empty">Radar wird geladen …</div>
+                </div>
+                <div class="v39-legend"><span><i class="lg tracked"></i>vom Bot beobachtet</span><span><i class="lg trend"></i>nur im Trend</span></div>
+            </div>
+            <div class="v39-detail"></div>
+        </div>
+        <div class="v39-list"></div>
+        <div class="v39-foot"><span class="v39-src"></span><span class="v39-stand"></span><button class="ghost v39-refresh" data-v39-refresh>↻ Aktualisieren</button></div>`;
+}
 function _rdRender() {
-    // v40: lives on the Start tab directly below the live signal — the first thing you see.
     const home = document.querySelector('[data-pane="dashboard"]');
     if (!home) return;
     let el = document.getElementById("v39-radar-card");
@@ -10916,60 +11008,77 @@ function _rdRender() {
         el = document.createElement("div");
         el.id = "v39-radar-card";
         el.className = "card v31-card v39-radar-card";
+        _rdSkeleton(el);
     }
     _rdPin(el, home);
     const coins = RADAR.coins;
     const shown = coins.slice(0, 14);
     const hype = coins.filter((c) => c.level === "HYPE").length;
-    const scopeEl = el.querySelector(".v39-scope");
-    const scopeW = scopeEl && scopeEl.clientWidth ? scopeEl.clientWidth : Math.min(440, Math.max(0, el.clientWidth - 40));
+    el.querySelector(".v39-head-chip").innerHTML = hype ? _proChip(`${hype} HYPE`, "red") : _proChip(RADAR.updatedAt ? "RUHIG" : "LÄDT", "neutral");
+
+    const scope = el.querySelector(".v39-scope");
+    const scopeW = scope.clientWidth || Math.min(440, Math.max(0, el.clientWidth - 40));
     const pos = _rdLayout(shown, scopeW);
     RADAR._lastW = scopeW;
+    const empty = scope.querySelector(".v39-empty");
+    empty.hidden = shown.length > 0;
+    if (!shown.length) empty.textContent = RADAR.updatedAt ? "Gerade keine Daten — neuer Versuch läuft automatisch" : "Radar wird geladen …";
     const intro = shown.length && !RADAR._introDone;
-    if (intro) RADAR._introDone = true;
-    const blips = shown.map((c, i) => {
-        const { x, y } = pos[i];
-        const lvl = c.level === "HYPE" ? "hype" : c.level === "ERHÖHT" ? "warm" : "calm";
-        return `<button class="v39-blip lvl-${lvl} ${c.tracked ? "tracked" : ""} ${c.symbol === RADAR.selected ? "selected" : ""}" style="left:${x.toFixed(2)}%; top:${y.toFixed(2)}%; --d:${(i * 0.37 % 2).toFixed(2)}s" data-v39-coin="${_escHtml(c.symbol)}" aria-label="${_escHtml(c.name)}, Aufmerksamkeit ${c.score} von 100, ${c.level}">
-            <span class="v39-ring"></span>${_rdLogo(c, 34)}<span class="v39-tag">${_escHtml(c.symbol)}</span>
-        </button>`;
-    }).join("");
-    const list = coins.slice(0, 8).map((c) => `
-        <button class="v39-row ${c.symbol === RADAR.selected ? "selected" : ""}" data-v39-coin="${_escHtml(c.symbol)}">
-            ${_rdLogo(c, 28)}
-            <span class="v39-row-name"><strong>${_escHtml(c.symbol)}</strong><small>${_escHtml(c.name)}${c.tracked ? " · Bot" : ""}</small></span>
-            <span class="v39-row-score"><span class="v39-row-track"><span class="v39-row-fill lvl-${c.level === "HYPE" ? "hype" : c.level === "ERHÖHT" ? "warm" : "calm"}" style="width:${c.score}%"></span></span><span class="num">${c.score}</span></span>
-            <span class="v39-row-chg num ${Number.isFinite(c.change24h) ? (c.change24h >= 0 ? "v32-pos" : "v32-neg") : ""}">${Number.isFinite(c.change24h) ? `${c.change24h >= 0 ? "+" : ""}${c.change24h.toFixed(1)}%` : "–"}</span>
-        </button>`).join("");
-    const src = RADAR.sources;
-    const srcTxt = [["trends", "Suchtrends"], ["markets", "Kurse & Logos"], ["volume", "Volumen"], ["news", "News"]]
-        .map(([k, l]) => `<span class="${src[k] ? "ok" : "off"}">${src[k] ? "●" : "○"} ${l}</span>`).join("");
-    el.innerHTML = `
-        <h2>Aufmerksamkeits-Radar ${hype ? _proChip(`${hype} HYPE`, "red") : _proChip(RADAR.updatedAt ? "RUHIG" : "LÄDT", "neutral")} <span class="info" data-info="radar">ⓘ</span></h2>
-        <div class="perf-hint">Worauf der Markt gerade schaut: Suchtrends, News-Erwähnungen, ungewöhnliches Volumen und Positionierung. Je näher an der Mitte, desto mehr Aufmerksamkeit. Nur ein Hinweis, keine Handelsentscheidung.</div>
-        <div class="v39-layout">
-            <div class="v39-scope-wrap">
-                <div class="v39-scope ${intro ? "v39-intro" : ""}" role="group" aria-label="Radar der Coins nach Aufmerksamkeit">
-                    <svg class="v39-grid" viewBox="0 0 100 100" aria-hidden="true">
-                        <circle cx="50" cy="50" r="49.5" class="v39-zone-calm"/>
-                        <circle cx="50" cy="50" r="${(0.14 + 0.55 * 0.76) * 50}" class="v39-zone-warm"/>
-                        <circle cx="50" cy="50" r="${(0.14 + 0.30 * 0.76) * 50}" class="v39-zone-hype"/>
-                        <circle cx="50" cy="50" r="12" class="v39-ring-line"/><circle cx="50" cy="50" r="24.5" class="v39-ring-line"/><circle cx="50" cy="50" r="37" class="v39-ring-line"/>
-                        <line x1="50" y1="1" x2="50" y2="99" class="v39-axis"/><line x1="1" y1="50" x2="99" y2="50" class="v39-axis"/>
-                        <text x="50" y="${50 - (0.14 + 0.30 * 0.76) * 50 + 3.6}" class="v39-zone-label hype">HYPE</text>
-                        <text x="50" y="${50 - (0.14 + 0.55 * 0.76) * 50 + 3.6}" class="v39-zone-label warm">ERHÖHT</text>
-                        <text x="50" y="4.6" class="v39-zone-label">RUHIG</text>
-                    </svg>
-                    <div class="v39-sweep" aria-hidden="true"></div>
-                    <div class="v39-core" aria-hidden="true"></div>
-                    ${shown.length ? blips : `<div class="v39-empty">${RADAR.loading || !RADAR.updatedAt ? "Radar wird geladen …" : "Keine Daten erreichbar"}</div>`}
-                </div>
-                <div class="v39-legend"><span><i class="lg tracked"></i>vom Bot beobachtet</span><span><i class="lg trend"></i>nur im Trend</span></div>
-            </div>
-            <div class="v39-detail">${_rdDetail(RADAR.bySymbol[RADAR.selected])}</div>
-        </div>
-        ${coins.length ? `<div class="v39-list">${list}</div>` : ""}
-        <div class="v39-foot"><span class="v39-src">${srcTxt}</span><span>${RADAR.updatedAt ? `Stand ${new Date(RADAR.updatedAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : ""}</span><button class="ghost v39-refresh" data-v39-refresh ${RADAR.loading ? "disabled" : ""}>↻ Aktualisieren</button></div>`;
+    if (intro) { RADAR._introDone = true; scope.classList.add("v39-intro"); setTimeout(() => scope.classList.remove("v39-intro"), 3000); }
+    // Blips: keyed by symbol — move/update existing ones, add new, fade out removed.
+    const keep = new Set(shown.map((c) => c.symbol));
+    scope.querySelectorAll(".v39-blip").forEach((b) => { if (!keep.has(b.dataset.v39Coin)) b.remove(); });
+    shown.forEach((c, i) => {
+        let b = scope.querySelector(`.v39-blip[data-v39-coin="${CSS.escape(c.symbol)}"]`);
+        if (!b) {
+            b = document.createElement("button");
+            b.dataset.v39Coin = c.symbol;
+            b.innerHTML = `<span class="v39-ring"></span>${_rdLogo(c, 34)}<span class="v39-tag">${_escHtml(c.symbol)}</span>`;
+            b.style.setProperty("--d", `${(i * 0.37 % 2).toFixed(2)}s`);
+            scope.appendChild(b);
+        } else if (c.image && !b.querySelector(".v39-img")) {
+            b.querySelector(".v39-logo").outerHTML = _rdLogo(c, 34);
+        }
+        b.className = `v39-blip lvl-${_rdLvl(c)} ${c.tracked ? "tracked" : ""} ${c.symbol === RADAR.selected ? "selected" : ""}`;
+        b.style.left = `${pos[i].x.toFixed(2)}%`;
+        b.style.top = `${pos[i].y.toFixed(2)}%`;
+        b.setAttribute("aria-label", `${c.name}, Aufmerksamkeit ${c.score} von 100, ${c.level}`);
+    });
+    // Detail: only rebuilt when the selected coin's numbers actually changed.
+    const sel = RADAR.bySymbol[RADAR.selected];
+    const sig = sel ? JSON.stringify([sel.symbol, sel.score, sel.level, sel.price, sel.change24h, sel.trend, sel.image, (sel.sparkline || []).length]) : "none";
+    const det = el.querySelector(".v39-detail");
+    if (det.dataset.sig !== sig) { det.dataset.sig = sig; det.innerHTML = _rdDetail(sel); }
+    // Ranking rows: keyed and re-ordered in place.
+    const list = el.querySelector(".v39-list");
+    const top = coins.slice(0, 8);
+    const keepRows = new Set(top.map((c) => c.symbol));
+    list.querySelectorAll(".v39-row").forEach((r) => { if (!keepRows.has(r.dataset.v39Coin)) r.remove(); });
+    top.forEach((c) => {
+        let r = list.querySelector(`.v39-row[data-v39-coin="${CSS.escape(c.symbol)}"]`);
+        if (!r) {
+            r = document.createElement("button");
+            r.dataset.v39Coin = c.symbol;
+            r.innerHTML = `${_rdLogo(c, 28)}<span class="v39-row-name"><strong>${_escHtml(c.symbol)}</strong><small></small></span>
+                <span class="v39-row-score"><span class="v39-row-track"><span class="v39-row-fill"></span></span><span class="num"></span></span><span class="v39-row-chg num"></span>`;
+        } else if (c.image && !r.querySelector(".v39-img")) {
+            r.querySelector(".v39-logo").outerHTML = _rdLogo(c, 28);
+        }
+        r.className = `v39-row ${c.symbol === RADAR.selected ? "selected" : ""}`;
+        r.querySelector("small").textContent = `${c.name}${c.tracked ? " · Bot" : ""}`;
+        const fill = r.querySelector(".v39-row-fill");
+        fill.className = `v39-row-fill lvl-${_rdLvl(c)}`;
+        fill.style.width = `${c.score}%`;
+        r.querySelector(".v39-row-score .num").textContent = c.score;
+        const chg = r.querySelector(".v39-row-chg");
+        chg.className = `v39-row-chg num ${Number.isFinite(c.change24h) ? (c.change24h >= 0 ? "v32-pos" : "v32-neg") : ""}`;
+        chg.textContent = Number.isFinite(c.change24h) ? `${c.change24h >= 0 ? "+" : ""}${c.change24h.toFixed(1)}%` : "–";
+        list.appendChild(r);
+    });
+    list.hidden = !top.length;
+    el.querySelector(".v39-src").innerHTML = _rdSrcHtml();
+    el.querySelector(".v39-stand").textContent = RADAR.updatedAt ? `Stand ${new Date(RADAR.updatedAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : "";
+    _rdFootState();
 }
 
 // Selecting a coin swaps only the detail panel and the highlight — no rebuild.
@@ -10998,7 +11107,7 @@ document.addEventListener("click", (e) => {
     const coin = e.target.closest && e.target.closest("[data-v39-coin]");
     if (coin) { _rdSelect(coin.dataset.v39Coin); return; }
     const ref = e.target.closest && e.target.closest("[data-v39-refresh]");
-    if (ref) _rdRefresh().catch(() => { RADAR.loading = false; });
+    if (ref && !RADAR.loading) _rdSchedule(0);
 });
 setTimeout(_rdRender, 400);
 let _rdResizeT = null;
@@ -11267,7 +11376,154 @@ function _jvAnswer(raw) {
     }
     return null;
 }
-window.TBJarvisBrain = { answer: _jvAnswer, briefing: _jvBriefing };
+// v42: Jarvis-Aktionen — eine Schnittstelle für Sprachbefehle und den KI-Modus.
+// Erlaubt: lesen, scannen, Automatik an/aus (Papierhandel). Nicht erlaubt: Orders.
+const _JV_NUM = { ein: 1, eine: 1, einen: 1, eins: 1, zwei: 2, drei: 3, vier: 4, fünf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9, zehn: 10 };
+function _jvCount(t, def) {
+    const m = /\b(\d{1,2})\b/.exec(t);
+    if (m) return Math.max(1, Math.min(10, Number(m[1])));
+    for (const [w, n] of Object.entries(_JV_NUM)) if (new RegExp(`\\b${w}\\b`).test(t)) return n;
+    return def;
+}
+const TBJarvisActions = {
+    news(count = 2, trustedOnly = false) {
+        const all = (state.news || []).map((n) => ({ ...n, trusted: _newsTrusted(n) }));
+        const list = (trustedOnly ? all.filter((n) => n.trusted) : all).slice(0, Math.max(1, Math.min(10, count)));
+        return list.map((n) => ({ title: n.title, source: n.trusted || n.source, minutes_ago: Math.max(0, Math.round((Date.now() - new Date(n.ts).getTime()) / 60e3)), coins: _npCoins(n), summary: n.body || "", url: n.url }));
+    },
+    setAuto(enabled) {
+        if (!!enabled === !!state.autoMode) return { changed: false, auto_mode: state.autoMode };
+        $("#mode-toggle").click();
+        return { changed: true, auto_mode: state.autoMode };
+    },
+    async scan() {
+        try { await scanAll(); } catch (e) { /* report what we have */ }
+        const res = (state.lastScan || []).filter((r) => !r.error);
+        const setups = res.filter((r) => r.side).sort((a, b) => b.score - a.score);
+        const watch = res.filter((r) => !r.side).sort((a, b) => b.score - a.score).slice(0, 3);
+        const validated = ((PRO.research && PRO.research.results) || []).filter((r) => !r.error && r.live && r.live.params).map((r) => r.symbol);
+        return {
+            scanned: res.length,
+            setups: setups.map((r) => ({ symbol: r.symbol, side: r.side, score: Math.round(r.score * 100) / 100, signals: (r.signals || []).slice(0, 4).map((s) => s.name || s.strategy || String(s)), price: r.price, edge_validated: validated.includes(r.symbol) })),
+            closest_without_setup: watch.map((r) => ({ symbol: r.symbol, score: Math.round(r.score * 100) / 100 })),
+            pending: (state.pending || []).map((p) => ({ symbol: p.symbol, side: p.side, entry: p.entry, stop: p.stop })),
+            note: PRO.strict ? "Strenger Modus: gehandelt wird nur, wo der Walk-Forward eine Edge nach Kosten bestätigt hat." : "",
+        };
+    },
+    status() {
+        const eq = broker.equity(state.prices);
+        return {
+            demo_only: true, equity_usdt: Math.round(eq * 100) / 100, today_usdt: Math.round((eq - state.dayStartEquity) * 100) / 100,
+            realized_usdt: Math.round(broker.realizedPnl() * 100) / 100, auto_mode: state.autoMode, halted: !!state.halted,
+            positions: _jvPositions().map((p) => ({ symbol: p.sym, side: p.side, unrealized_usdt: Math.round(p.upnl * 100) / 100, pct: Math.round(p.pct * 10) / 10 })),
+            validated_edges: ((PRO.research && PRO.research.results) || []).filter((r) => !r.error && r.live && r.live.params).map((r) => r.symbol),
+            radar_top: (RADAR.coins || []).filter((c) => c.score > 0).slice(0, 3).map((c) => ({ coin: c.name, score: c.score, level: c.level })),
+            btc_usdt: state.prices["BTC/USDT"] ? Math.round(state.prices["BTC/USDT"]) : null,
+            time: new Date().toLocaleString("de-DE"),
+        };
+    },
+    price(sym) {
+        const s = String(sym || "").toUpperCase().replace(/[^A-Z]/g, "").replace(/USDT$/, "");
+        const px = state.prices[`${s}/USDT`] || (RADAR.bySymbol[s] && RADAR.bySymbol[s].price) || null;
+        return { symbol: s, price_usdt: px, change_24h_pct: _jvChange24(s) };
+    },
+};
+window.TBJarvisActions = TBJarvisActions;
+
+function _jvSayNews(items) {
+    if (!items.length) return "Gerade liegen keine Meldungen vor.";
+    return items.map((n, i) => `${items.length > 1 ? `Meldung ${i + 1}: ` : ""}${n.source.replace(" · via CMC", "")}, ${n.minutes_ago < 1 ? "gerade eben" : n.minutes_ago < 60 ? `vor ${n.minutes_ago} Minuten` : `vor ${Math.round(n.minutes_ago / 60)} Stunden`}: ${n.title}.`).join(" ");
+}
+async function _jvSayScan() {
+    const r = await TBJarvisActions.scan();
+    if (!r.scanned) return "Der Scan hat gerade keine Marktdaten bekommen. Ich versuche es beim nächsten Durchlauf erneut.";
+    if (r.setups.length) {
+        const s = r.setups.slice(0, 3).map((x) => `${_jvName(x.symbol.replace("/USDT", ""))} ${x.side === "long" ? "long" : "short"}${x.edge_validated ? ", mit bestätigter Edge" : ", ohne bestätigte Edge"}`);
+        return `Scan fertig, ${r.scanned} Märkte geprüft. Mögliche Einstiege: ${s.join("; ")}. ${r.note}`.trim();
+    }
+    const near = r.closest_without_setup.map((x) => _jvName(x.symbol.replace("/USDT", ""))).join(", ");
+    return `Scan fertig, ${r.scanned} Märkte geprüft. Kein Einstieg erfüllt gerade alle Bedingungen.${near ? ` Am nächsten dran: ${near}.` : ""}`;
+}
+// Commands that need the action layer (async); everything else falls through to _jvAnswer.
+function _jvAnswerActions(raw) {
+    const t = String(raw || "").toLowerCase();
+    if (/(news|nachricht|meldung|schlagzeile)/.test(t) && /(lies|vorlesen|vor\b|letzte|neueste|aktuell)/.test(t))
+        return _jvSayNews(TBJarvisActions.news(_jvCount(t, 2)));
+    if (/(einstieg|setup|gelegenheit|chance|scan|such\w* (nach )?(neuen )?(trade|einstieg|setup))/.test(t)) return _jvSayScan();
+    if (/(bot|automatik|handel|trading)\b.*\b(start|starte|starten|an\b|ein\b|fortsetzen|weiter)/.test(t) || /^(starte den bot|bot starten)$/.test(t)) {
+        const r = TBJarvisActions.setAuto(true);
+        return r.changed ? "Vollautomatik läuft. Gehandelt wird nur im Demo-Konto." : "Die Vollautomatik läuft bereits.";
+    }
+    if (/(such\w*|google\w*|recherchier\w*).*(im (web|internet|netz)|online)|^(such|google)\w* nach/.test(t)) {
+        const q = t.replace(/^(jarvis\s*)?/, "").replace(/(bitte\s*)?(such\w*|google\w*|recherchier\w*)\s*(mal\s*)?(im (web|internet|netz)|online)?\s*(nach)?\s*/, "").trim();
+        if (q) try { window.open(`https://duckduckgo.com/?q=${encodeURIComponent(q)}`, "_blank", "noopener"); } catch (e) { /* popup blocked */ }
+        return `Für eine echte Websuche mit Antwort brauche ich den KI-Modus — den Claude-Schlüssel in den Jarvis-Einstellungen. ${q ? "Ich habe die Suche im Browser geöffnet." : ""}`;
+    }
+    return null;
+}
+window.TBJarvisBrain = {
+    briefing: _jvBriefing,
+    answer: (raw) => _jvAnswerActions(raw) ?? _jvAnswer(raw),
+};
+
+
+// ============================================================================
+// v42 — Countdown-Chips: jede zeitgesteuerte Aktualisierung zeigt, wann sie wieder läuft.
+// ============================================================================
+const _CD_MOUNTS = [
+    ["#signal-tile .signal-badge", "scan", "Nächster Scan"],
+    [".compact-portfolio h2", "prices", "Nächste Preis-Aktualisierung"],
+    ["#fng-value", "fng", "Fear & Greed"],
+    ["#ticker24", "tickers", "24h-Übersicht"],
+    ["#vix-panel", "vix", "VIX"],
+    ["#market-ctx", "marketctx", "Markt-Kontext"],
+    ["#onchain", "onchain", "On-Chain"],
+    ["#whale-list", "whales", "Whale-Transfers"],
+    ["#futures-table", "futures", "Futures-Sentiment"],
+    ["#news-list", "news", "Live-News"],
+    ["#health-panel", "health", "System-Health"],
+];
+function _cdChipHtml(key, label) {
+    return `<span class="tb-cd" data-cd="${key}" title="${_escHtml(label)}: nächste Aktualisierung"><i></i><b></b></span>`;
+}
+function _cdMount() {
+    for (const [sel, key, label] of _CD_MOUNTS) {
+        const anchor = document.querySelector(sel);
+        if (!anchor) continue;
+        const h2 = anchor.matches("h2, .signal-badge") ? anchor : anchor.closest(".card") && anchor.closest(".card").querySelector("h2");
+        if (!h2 || h2.querySelector(`.tb-cd[data-cd="${key}"]`)) continue;
+        const info = h2.querySelector(".info");
+        const tmp = document.createElement("span");
+        tmp.innerHTML = _cdChipHtml(key, label);
+        if (info) h2.insertBefore(tmp.firstChild, info); else h2.appendChild(tmp.firstChild);
+    }
+    // EUR rate refreshes on its own clock — small chip on the EUR tile.
+    const eurK = document.querySelector("#equity-eur") && document.querySelector("#equity-eur").previousElementSibling;
+    if (eurK && !eurK.querySelector(".tb-cd")) eurK.insertAdjacentHTML("beforeend", " " + _cdChipHtml("eur", "EUR-Kurs"));
+}
+function _cdFmt(ms) {
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    return s < 60 ? `0:${String(s).padStart(2, "0")}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+function _cdTick() {
+    const now = Date.now();
+    document.querySelectorAll(".tb-cd[data-cd]").forEach((el) => {
+        const c = _tbCountdown(el.dataset.cd);
+        if (!c || !c.next) { el.hidden = true; return; }
+        el.hidden = false;
+        const left = c.next - now;
+        const period = (window.__tbTimers && window.__tbTimers[el.dataset.cd] && window.__tbTimers[el.dataset.cd].ms) || (el.dataset.cd === "radar" ? 5 * 60e3 : 60e3);
+        const busy = c.busy || left <= 0;
+        el.classList.toggle("busy", busy);
+        el.style.setProperty("--p", busy ? 1 : Math.max(0, Math.min(1, 1 - left / period)).toFixed(3));
+        const b = el.querySelector("b");
+        const txt = busy ? "lädt" : _cdFmt(left);
+        if (b && b.textContent !== txt) b.textContent = txt;
+    });
+}
+setTimeout(_cdMount, 500);
+setInterval(_cdMount, 3000);
+setInterval(_cdTick, 1000);
 
 (function showVersion() {
     const f = document.querySelector("footer");

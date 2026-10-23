@@ -2840,3 +2840,56 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 @media (max-width: 640px) { .jv2-fab { bottom: calc(80px + env(safe-area-inset-bottom)); width: 48px; height: 48px; min-height: 48px; } }
 @media (orientation: landscape) and (max-height: 520px) { .jv2-fab { bottom: 14px; left: calc(88px + env(safe-area-inset-left)); } }
 @media (prefers-reduced-motion: reduce) { .jv2-fab-ring { animation: none !important; } }
+
+/* v42: status rows — name never squeezed; details always on their own line below the name */
+.status-row { grid-template-columns: auto minmax(0, 1fr) auto !important; row-gap: 4px; }
+.status-row > div:nth-child(2) { min-width: 0; }
+.status-row > div:nth-child(2) strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-row > .status-details {
+    grid-column: 2 / -1 !important; text-align: left !important;
+    display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; color: var(--muted);
+    overflow-wrap: normal; word-break: normal;
+}
+.status-row > .status-details > div { font-size: 0.7rem; }
+
+/* v42: countdown chip — ring fills up until the next refresh */
+.tb-cd {
+    display: inline-flex; align-items: center; gap: 5px; vertical-align: middle;
+    margin-left: 6px; padding: 2px 7px 2px 3px; border-radius: 999px;
+    font: 600 0.66rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2px;
+    text-transform: none; color: var(--muted);
+    background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.07);
+    white-space: nowrap; flex: none;
+}
+.tb-cd[hidden] { display: none; }
+.tb-cd i {
+    width: 11px; height: 11px; border-radius: 50%; flex: none;
+    background: conic-gradient(#8b5cf6 calc(var(--p, 0) * 360deg), rgba(255, 255, 255, 0.10) 0);
+    -webkit-mask: radial-gradient(circle, transparent 2.5px, #000 3px); mask: radial-gradient(circle, transparent 2.5px, #000 3px);
+}
+.tb-cd b { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 2.6em; }
+.tb-cd.busy i { background: conic-gradient(#8b5cf6 0 90deg, rgba(255, 255, 255, 0.10) 0); animation: tb-cd-spin 0.9s linear infinite; }
+@keyframes tb-cd-spin { to { transform: rotate(360deg); } }
+.signal-badge .tb-cd { margin-left: 8px; }
+.mkt-tile .k .tb-cd { margin-left: 4px; padding: 1px 5px 1px 2px; font-size: 0.6rem; }
+:root[data-theme="light"] .tb-cd { background: rgba(15, 23, 42, 0.04); border-color: rgba(15, 23, 42, 0.10); }
+@media (prefers-reduced-motion: reduce) { .tb-cd.busy i { animation: none; } }
+
+/* v42: radar — in-place updates */
+.v39-empty[hidden], .v39-list[hidden] { display: none !important; }
+.v39-src .stale { color: #fbbf24; }
+.v39-refresh.busy { pointer-events: none; opacity: 0.6; }
+.v39-refresh.busy::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: tb-cd-spin 0.8s linear infinite; }
+.v39-blip { transition: left 0.9s cubic-bezier(.2, .8, .2, 1), top 0.9s cubic-bezier(.2, .8, .2, 1), transform 0.2s; }
+.jv2-section { margin: 4px 0 14px; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.02); }
+.jv2-section small { display: block; margin: 4px 0 10px; color: var(--muted); font-size: 0.75rem; line-height: 1.45; }
+.jv2-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.86rem; }
+.jv2-pill { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; color: var(--muted); border: 1px solid var(--border); }
+.jv2-pill.on { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.08); }
+.jv2-field input[type="text"], .jv2-field input[type="password"] { width: 100%; min-height: 38px; }
+.jv2-inline { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-2); }
+.jv2-inline input { width: 16px; height: 16px; accent-color: #8b5cf6; }
+.jv-dialog .jv-text { color: #e9d5ff; }
+/* v42: headings with countdown chips wrap instead of overflowing on narrow phones */
+.card h2 { flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+.card h2 .info { margin-left: auto; }

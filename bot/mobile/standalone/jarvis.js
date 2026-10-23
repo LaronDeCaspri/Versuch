@@ -27,12 +27,15 @@
     const KEY = "tb_jarvis";
     const DEFAULTS = {
         enabled: localStorage.getItem("jarvis_on") === "1",
-        engine: "neural",                 // "neural" | "system"
+        engine: "neural",                 // "neural" | "premium" | "system"
         neuralVoice: "thorsten-medium",
         neuralReady: false,               // model fully downloaded once
         systemVoice: localStorage.getItem("jarvis_voice") || "",
         rate: 1.0, volume: 0.9,
         wake: false, briefing: true,
+        fx: true,                         // Jarvis-Klang: tiefer, klarer, leicht digitaler Raum
+        convo: true,                      // Gesprächsmodus: nach jeder Antwort automatisch weiter zuhören
+        premiumKey: "", premiumVoice: "onwK4e9ZLuTAKqWW03F9",   // ElevenLabs (optional, eigener Schlüssel)
         speak: { trades: true, alerts: true, news: true, radar: true, info: false },
     };
     const S = (() => {
@@ -102,18 +105,52 @@
         if (R.ctx) { if (R.ctx.state === "suspended") R.ctx.resume().catch(() => {}); return R.ctx; }
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return null;
-        R.ctx = new AC();
-        R.gain = R.ctx.createGain();
+        const ctx = R.ctx = new AC();
+        R.gain = ctx.createGain();
         R.gain.gain.value = S.volume;
-        // Gentle broadcast chain: presence lift + light compression for a clear, even voice.
-        const hp = R.ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 70;
-        const pres = R.ctx.createBiquadFilter(); pres.type = "peaking"; pres.frequency.value = 3200; pres.Q.value = 0.9; pres.gain.value = 2.5;
-        const comp = R.ctx.createDynamicsCompressor();
+        const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 70;
+        // Jarvis voicing: warm low end, forward presence, a little air on top.
+        const warm = ctx.createBiquadFilter(); warm.type = "lowshelf"; warm.frequency.value = 180;
+        const pres = ctx.createBiquadFilter(); pres.type = "peaking"; pres.frequency.value = 3200; pres.Q.value = 0.9; pres.gain.value = 2.5;
+        const air = ctx.createBiquadFilter(); air.type = "highshelf"; air.frequency.value = 9000;
+        const dry = ctx.createGain();
+        // Subtle digital "presence": two short modulated delays (chorus) + a small synthetic room.
+        const chorusIn = ctx.createGain();
+        const wet = ctx.createGain();
+        [0.011, 0.017].forEach((base, i) => {
+            const d = ctx.createDelay(0.05); d.delayTime.value = base;
+            const lfo = ctx.createOscillator(); lfo.frequency.value = 0.25 + i * 0.17;
+            const depth = ctx.createGain(); depth.gain.value = 0.0012;
+            lfo.connect(depth); depth.connect(d.delayTime); lfo.start();
+            chorusIn.connect(d); d.connect(wet);
+        });
+        const room = ctx.createConvolver();
+        const len = Math.round(ctx.sampleRate * 0.55), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+        for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
+        room.buffer = ir;
+        const roomGain = ctx.createGain();
+        chorusIn.connect(room); room.connect(roomGain);
+        const comp = ctx.createDynamicsCompressor();
         comp.threshold.value = -20; comp.knee.value = 18; comp.ratio.value = 3; comp.attack.value = 0.004; comp.release.value = 0.2;
-        R.analyser = R.ctx.createAnalyser(); R.analyser.fftSize = 512; R.analyser.smoothingTimeConstant = 0.75;
-        R.gain.connect(hp); hp.connect(pres); pres.connect(comp); comp.connect(R.analyser); R.analyser.connect(R.ctx.destination);
-        return R.ctx;
+        R.analyser = ctx.createAnalyser(); R.analyser.fftSize = 512; R.analyser.smoothingTimeConstant = 0.75;
+        R.gain.connect(hp); hp.connect(warm); warm.connect(pres); pres.connect(air);
+        air.connect(dry); air.connect(chorusIn);
+        dry.connect(comp); wet.connect(comp); roomGain.connect(comp);
+        comp.connect(R.analyser); R.analyser.connect(ctx.destination);
+        R.fxNodes = { warm, air, wet, roomGain };
+        applyFx();
+        return ctx;
     }
+    function applyFx() {
+        const n = R.fxNodes;
+        if (!n) return;
+        n.warm.gain.value = S.fx ? 2.5 : 0;
+        n.air.gain.value = S.fx ? 2 : 0;
+        n.wet.gain.value = S.fx ? 0.16 : 0;
+        n.roomGain.gain.value = S.fx ? 0.07 : 0;
+    }
+    // Jarvis-Klang lowers the pitch a touch; synthesis runs faster by the same factor so the tempo stays.
+    const fxPitch = () => (S.fx ? 0.93 : 1);
     function chime(kind) {
         const ctx = audio();
         if (!ctx) return Promise.resolve();
@@ -137,6 +174,7 @@
             buf.copyToChannel(pcm, 0);
             const src = ctx.createBufferSource();
             src.buffer = buf;
+            src.playbackRate.value = fxPitch();
             src.connect(R.gain);
             src.onended = () => { if (R.current === src) R.current = null; R.played = (R.played || 0) + 1; resolve(); };
             R.current = src;
@@ -183,7 +221,7 @@
         const id = ++R.seq;
         return new Promise((resolve, reject) => {
             R.pending.set(id, { resolve, reject });
-            worker().postMessage({ type: "speak", id, text, rate: S.rate });
+            worker().postMessage({ type: "speak", id, text, rate: S.rate / fxPitch() });
         });
     }
     async function speakNeural(text) {
@@ -197,6 +235,37 @@
         }
     }
 
+    // ------------------------------------------------------------------ premium engine (ElevenLabs, optional)
+    async function synthPremium(text) {
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(S.premiumVoice || "onwK4e9ZLuTAKqWW03F9")}?output_format=mp3_44100_128`, {
+            method: "POST",
+            headers: { "xi-api-key": S.premiumKey, "Content-Type": "application/json", Accept: "audio/mpeg" },
+            body: JSON.stringify({ text, model_id: "eleven_multilingual_v2", voice_settings: { stability: 0.55, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true } }),
+        });
+        if (!res.ok) throw new Error(`ElevenLabs HTTP ${res.status}`);
+        const ctx = audio();
+        return ctx.decodeAudioData(await res.arrayBuffer());
+    }
+    function playBuffer(buf) {
+        return new Promise((resolve) => {
+            const ctx = audio();
+            const src = ctx.createBufferSource();
+            src.buffer = buf;
+            src.connect(R.gain);
+            src.onended = () => { if (R.current === src) R.current = null; R.played = (R.played || 0) + 1; resolve(); };
+            R.current = src;
+            src.start();
+        });
+    }
+    async function speakPremium(text) {
+        const jobs = sentences(text).map((p) => synthPremium(p));
+        for (const job of jobs) {
+            const buf = await job;
+            if (R.cancelled) return;
+            await playBuffer(buf);
+        }
+    }
+
     // ------------------------------------------------------------------ system engine (fallback)
     function systemVoices() { return window.speechSynthesis ? window.speechSynthesis.getVoices() : []; }
     function rankVoice(v) {
@@ -204,7 +273,9 @@
         let s = 0;
         if (/^de/i.test(v.lang)) s += 100;
         if (/natural|neural|online|premium|enhanced|wavenet|studio/.test(n)) s += 40;
-        if (/google deutsch|conrad|katja|florian|seraphina|killian|amala|anna|petra|markus|yannick|helena/.test(n)) s += 15;
+        // Jarvis is a male voice: prefer male German voices, push female ones down.
+        if (/conrad|killian|florian|markus|yannick|stefan|viktor|martin|bernd|male|männlich|-deg|-deb/.test(n)) s += 35;
+        if (/google deutsch|katja|seraphina|amala|anna|petra|helena|hedda|marlene|vicki|female|weiblich/.test(n)) s -= 25;
         if (/compact|espeak|robot/.test(n)) s -= 30;
         if (v.localService === false) s += 5;
         return s;
@@ -261,20 +332,39 @@
     }
     async function drain() {
         const item = R.queue.shift();
-        if (!item) { R.busy = false; setPhase(R.recActive ? "listening" : "idle"); resumeWake(); return; }
+        if (!item) {
+            R.busy = false;
+            if (R.convoOn && S.enabled && !R.recActive) { setTimeout(() => { if (!R.busy && R.convoOn) startListening(false, true); }, 350); return; }
+            setPhase(R.recActive ? "listening" : "idle"); resumeWake(); return;
+        }
         R.busy = true; R.cancelled = false;
         pauseWake();
         setPhase("speaking", item.say);
         try {
             if (item.chime) await chime(item.level);
-            if (S.engine === "neural" && S.neuralReady) {
-                try { await loadNeural(); await speakNeural(item.say); }
-                catch (e) { await speakSystem(item.say, item.level); }
+            if (S.engine === "premium" && S.premiumKey) {
+                try { await speakPremium(item.say); }
+                catch (e) { voiceFailed("Premium-Stimme", e); await speakLocal(item); }
             } else {
-                await speakSystem(item.say, item.level);
+                await speakLocal(item);
             }
         } catch (e) { /* keep the queue alive */ }
         setTimeout(drain, 220);
+    }
+    async function speakLocal(item) {
+        if (S.engine !== "system" && S.neuralReady) {
+            try { await loadNeural(); await speakNeural(item.say); return; }
+            catch (e) { voiceFailed("Neurale Stimme", e); }
+        }
+        await speakSystem(item.say, item.level);
+    }
+    // A failing engine is never silent: show why, once per minute, and keep talking with the fallback.
+    function voiceFailed(what, e) {
+        if (Date.now() - (R.lastVoiceErr || 0) < 60e3) return;
+        R.lastVoiceErr = Date.now();
+        const msg = `${what} gerade nicht verfügbar (${(e && e.message) || "Fehler"}) — spreche mit Systemstimme.`;
+        writeLog(msg, "warn");
+        setSub(msg);
     }
     function stopSpeaking() {
         R.queue = []; R.cancelled = true;
@@ -296,7 +386,7 @@
                 if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript;
             }
             showTranscript(final || interim, !final);
-            if (final) onHeard(final.trim());
+            if (final) { R.heard = true; onHeard(final.trim()); }
         };
         rec.onerror = (e) => {
             if (e.error === "not-allowed" || e.error === "service-not-allowed") {
@@ -306,18 +396,21 @@
         };
         rec.onend = () => {
             R.recActive = false;
+            // Follow-up listening that heard nothing ends the conversation quietly.
+            if (R.followUp && !R.heard) R.convoOn = false;
             if (S.enabled && S.wake && R.wakeArmed && !R.busy) setTimeout(() => startListening(true), 400);
             else if (!R.busy) setPhase("idle");
         };
         R.rec = rec;
         return rec;
     }
-    function startListening(wakeMode = false) {
+    function startListening(wakeMode = false, followUp = false) {
         const rec = recognizer();
         if (!rec) { setSub("Spracheingabe wird von diesem Browser nicht unterstützt (Chrome, Edge oder Safari nutzen)."); return; }
         if (R.recActive) return;
         audio();
         R.wakeMode = wakeMode;
+        R.heard = false; R.followUp = followUp;
         rec.continuous = wakeMode;
         try { rec.start(); R.recActive = true; setPhase("listening"); } catch (e) { /* already running */ }
     }
@@ -335,18 +428,43 @@
         }
         handleCommand(cmd);
     }
-    function handleCommand(text) {
-        const t = text.toLowerCase();
+    async function handleCommand(text) {
+        const t = text.toLowerCase().trim();
         writeLog(`Du: ${text}`, "user");
-        if (/^(stopp?|ruhe|halt)\b|sei still|still sein/.test(t) && !/bot|automatik|handel/.test(t)) { stopSpeaking(); return; }
+        if (/^(stopp?|ruhe|halt)\b|sei still|still sein/.test(t) && !/bot|automatik|handel/.test(t)) { R.convoOn = false; stopSpeaking(); return; }
+        if (/^(danke|vielen dank|das wars?|das wäre alles|tschüss|ende|fertig)\b/.test(t)) {
+            R.convoOn = false;
+            if (window.JarvisAI && window.JarvisAI.available()) window.JarvisAI.reset();
+            speak(/danke/.test(t) ? "Sehr gern." : "Ich bin hier, wenn Sie mich brauchen.", "info", { force: true, chime: false, kind: "dialog" });
+            return;
+        }
         if (/leiser/.test(t)) { setVolume(S.volume - 0.15); speak("Etwas leiser.", "info", { force: true }); return; }
         if (/lauter/.test(t)) { setVolume(S.volume + 0.15); speak("Etwas lauter.", "info", { force: true }); return; }
         if (/schneller/.test(t)) { setRate(S.rate + 0.1); speak("Ich spreche etwas schneller.", "info", { force: true }); return; }
         if (/langsamer/.test(t)) { setRate(S.rate - 0.1); speak("Ich spreche etwas langsamer.", "info", { force: true }); return; }
+        R.convoOn = S.convo;
         setPhase("thinking");
+        const say = (x) => speak(x, "info", { force: true, chime: false, kind: "dialog" });
+        // KI-Modus: echte Unterhaltung mit Werkzeugen; Sätze werden gesprochen, sobald sie fertig sind.
+        if (window.JarvisAI && window.JarvisAI.available()) {
+            let spoke = false;
+            try {
+                await window.JarvisAI.ask(text, {
+                    onSentence: (x) => { spoke = true; say(x); },
+                    onStatus: (x) => { if (!R.busy) setSub(`Jarvis ${x}`); },
+                });
+                if (!spoke) say("Erledigt.");
+                return;
+            } catch (e) {
+                const m = String((e && e.message) || e);
+                writeLog(`KI-Modus: ${m}`, "warn");
+                if (/401|authentication|invalid x-api-key/i.test(m)) { say("Der Claude-Schlüssel wird nicht akzeptiert. Bitte in den Jarvis-Einstellungen prüfen."); return; }
+                // fall through to the built-in commands
+            }
+        }
         let reply = null;
-        try { reply = window.TBJarvisBrain ? window.TBJarvisBrain.answer(text) : null; } catch (e) { reply = null; }
-        speak(reply || "Das habe ich nicht verstanden. Sag zum Beispiel: Lagebericht, Positionen oder Bitcoin-Kurs.", "info", { force: true, chime: false });
+        try { reply = window.TBJarvisBrain ? await window.TBJarvisBrain.answer(text) : null; } catch (e) { reply = null; }
+        say(reply || "Das habe ich nicht verstanden. Sag zum Beispiel: Lagebericht, lies die letzten zwei News, suche nach Einstiegen oder Bot pausieren.");
     }
 
     // ------------------------------------------------------------------ UI
@@ -384,7 +502,10 @@
     function setSub(t) { const el = $("jv2-sub"); if (el) el.textContent = t; }
     function engineLabel() {
         if (!S.enabled) return "Aktivieren, damit Jarvis spricht und zuhört.";
-        if (S.engine === "neural" && S.neuralReady) return `Stimme: ${VOICES[S.neuralVoice].label} · lokal auf diesem Gerät`;
+        const ai = window.JarvisAI && window.JarvisAI.available() ? " · KI-Gespräch aktiv" : "";
+        if (S.engine === "premium" && S.premiumKey) return `Stimme: Premium (ElevenLabs)${ai}`;
+        if (S.engine === "neural" && S.neuralReady) return `Stimme: ${VOICES[S.neuralVoice].label}${S.fx ? " · Jarvis-Klang" : ""}${ai}`;
+        if (S.engine === "neural" && R.pending.has("init")) return "Jarvis-Stimme wird geladen — bis dahin Systemstimme.";
         const v = bestSystemVoice();
         return v ? `Stimme: ${v.name} (Systemstimme)` : "Systemstimme";
     }
@@ -438,14 +559,25 @@
     function syncSettings() {
         const set = (id, v) => { const el = $(id); if (el) { if (el.type === "checkbox") el.checked = !!v; else el.value = v; } };
         set("jv2-rate", S.rate); set("jv2-vol", S.volume);
-        set("jv2-wake", S.wake); set("jv2-brief-auto", S.briefing);
+        set("jv2-wake", S.wake); set("jv2-brief-auto", S.briefing); set("jv2-fx", S.fx); set("jv2-convo", S.convo);
+        set("jv2-el-key", S.premiumKey); set("jv2-el-voice", S.premiumVoice);
+        const AI = window.JarvisAI;
+        if (AI) {
+            set("jv2-ai-key", AI.config.apiKey); set("jv2-ai-address", AI.config.address); set("jv2-ai-web", AI.config.web);
+            const ms = $("jv2-ai-model");
+            if (ms && !ms.options.length) ms.innerHTML = Object.entries(AI.models).map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join("");
+            if (ms) ms.value = AI.config.model;
+            const st = $("jv2-ai-state");
+            if (st) { st.textContent = AI.available() ? "KI-Gespräch aktiv" : "aus — nur feste Sprachbefehle"; st.classList.toggle("on", AI.available()); }
+        }
         for (const k of Object.keys(S.speak)) set(`jv2-say-${k}`, S.speak[k]);
         const sel = $("jarvis-voice-picker");
         if (sel) {
             const sys = systemVoices().slice().sort((a, b) => rankVoice(b) - rankVoice(a));
-            sel.innerHTML = Object.values(VOICES).map((v) => `<option value="neural:${v.key}">${esc(v.label)}</option>`).join("")
+            sel.innerHTML = Object.values(VOICES).map((v) => `<option value="neural:${v.key}">${esc(v.label)} · Jarvis</option>`).join("")
+                + `<option value="premium:eleven">Premium · ElevenLabs (eigener Schlüssel)</option>`
                 + (sys.length ? `<optgroup label="Systemstimmen">${sys.map((v) => `<option value="system:${esc(v.name)}">${esc(v.name)} (${esc(v.lang)})</option>`).join("")}</optgroup>` : "");
-            sel.value = S.engine === "neural" ? `neural:${S.neuralVoice}` : `system:${S.systemVoice || (bestSystemVoice() || {}).name || ""}`;
+            sel.value = S.engine === "neural" ? `neural:${S.neuralVoice}` : S.engine === "premium" ? "premium:eleven" : `system:${S.systemVoice || (bestSystemVoice() || {}).name || ""}`;
         }
         const btn = $("jarvis-toggle");
         if (btn) { btn.textContent = S.enabled ? "Jarvis aus" : "Jarvis aktivieren"; btn.classList.toggle("primary", !S.enabled); }
@@ -531,10 +663,19 @@
         // Unlock speechSynthesis on iOS within the user gesture.
         try { if (window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch (e) { /* ignore */ }
         syncSettings();
-        if (S.engine === "neural" && S.neuralReady) loadNeural().catch(() => {});
+        if (S.engine === "neural") ensureNeural();
         if (S.wake) { R.wakeArmed = true; startListening(true); }
-        const brief = window.TBJarvisBrain && window.TBJarvisBrain.answer("lagebericht");
+        const brief = window.TBJarvisBrain && window.TBJarvisBrain.briefing();
         speak(brief ? `Jarvis online. ${brief}` : "Jarvis online. Ich melde mich bei Trades, Alarmen und wichtigen Nachrichten.", "info", { force: true });
+    }
+    // The Jarvis voice is what the user asked for: load it right away (once), announce when ready.
+    function ensureNeural() {
+        if (R.workerReady) return;
+        const first = !S.neuralReady;
+        loadNeural().then(() => {
+            syncSettings();
+            if (first && S.enabled) speak("Meine Stimme ist jetzt geladen. So klinge ich ab sofort.", "info", { force: true, kind: "dialog" });
+        }).catch(() => {});
     }
     function disable() {
         stopSpeaking(); stopListening();
@@ -564,6 +705,10 @@
                     S.engine = "neural"; S.neuralVoice = name;
                     if (changed) { S.neuralReady = false; R.workerReady = false; }
                     save(); setVoiceStatus(S.neuralReady ? "ready" : "none");
+                    audio(); ensureNeural();
+                } else if (eng === "premium") {
+                    S.engine = "premium"; save();
+                    if (!S.premiumKey) setSub("Für die Premium-Stimme bitte unten den ElevenLabs-Schlüssel eintragen.");
                 } else { S.engine = "system"; S.systemVoice = name; save(); }
                 syncSettings();
                 if (S.enabled) speak("Stimme geändert.", "info", { force: true });
@@ -573,6 +718,18 @@
                 S.wake = el.checked; save();
                 if (S.wake && S.enabled) { R.wakeArmed = true; startListening(true); } else stopListening();
             } else if (el.id === "jv2-brief-auto") { S.briefing = el.checked; save(); }
+            else if (el.id === "jv2-fx") { S.fx = el.checked; save(); applyFx(); syncSettings(); if (S.enabled) speak(S.fx ? "Jarvis-Klang aktiv." : "Natürlicher Klang.", "info", { force: true }); }
+            else if (el.id === "jv2-convo") { S.convo = el.checked; save(); }
+            else if (el.id === "jv2-el-key") { S.premiumKey = el.value.trim(); if (S.premiumKey) S.engine = "premium"; save(); syncSettings(); }
+            else if (el.id === "jv2-el-voice") { S.premiumVoice = el.value.trim() || DEFAULTS.premiumVoice; save(); }
+            else if (el.id && el.id.startsWith("jv2-ai-") && window.JarvisAI) {
+                const AI = window.JarvisAI, k = el.id.slice(7);
+                if (k === "key") AI.config.apiKey = el.value.trim();
+                else if (k === "model") AI.config.model = el.value;
+                else if (k === "address") AI.config.address = el.value.trim() || "Sir";
+                else if (k === "web") AI.config.web = el.checked;
+                AI.save(); AI.reset(); syncSettings();
+            }
             else if (el.id && el.id.startsWith("jv2-say-")) { S.speak[el.id.slice(8)] = el.checked; save(); }
         });
     }
@@ -599,7 +756,7 @@
             const arm = () => {
                 document.removeEventListener("pointerdown", arm, true);
                 audio();
-                if (S.engine === "neural" && S.neuralReady) loadNeural().catch(() => {});
+                if (S.engine === "neural") ensureNeural();
                 if (S.wake) { R.wakeArmed = true; startListening(true); }
                 maybeBriefing();
             };
