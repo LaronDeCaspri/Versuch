@@ -2940,3 +2940,11 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 .v44-rules { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .v44-rules span { font-size: 0.72rem; padding: 3px 9px; border-radius: 999px; color: #fcd34d; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); }
 @media (prefers-reduced-motion: reduce) { .v44-ph.now i { animation: none; } }
+.jv2-brain .jv2-track { margin-top: 10px; }
+.jv2-brain[data-state="idle"] .jv2-track { display: none; }
+.jv2-brain[data-state="ready"] .jv2-bar { background: linear-gradient(90deg, #10b981, #6ee7b7); }
+.jv2-brain small { color: var(--muted) !important; }
+.jv2-brain[data-state="error"] small { color: #fcd34d !important; }
+.jv2-brain select { min-height: 42px; width: 100%; min-width: 0; }
+.jv2-claude { margin-top: 12px; font-size: 0.78rem; color: var(--muted); }
+.jv2-claude summary { cursor: pointer; padding: 4px 0 8px; }

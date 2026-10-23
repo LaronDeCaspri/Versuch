@@ -8062,7 +8062,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "44.0";
+const APP_VERSION = "45.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -11466,8 +11466,28 @@ function _jvAnswerActions(raw) {
     }
     return null;
 }
+// Commands with side effects — always executed directly, also when an AI does the talking.
+function _jvAct(raw) {
+    const t = String(raw || "").toLowerCase();
+    const web = /(such\w*|google\w*|recherchier\w*|schau\w*)\s.*(im (web|internet|netz)|online)|^(such|google|recherchier)\w*\s+(mal\s+)?nach\s/.exec(t);
+    if (web) {
+        const q = t.replace(/^(jarvis[,\s]*)?(bitte\s*)?/, "").replace(/(such\w*|google\w*|recherchier\w*|schau\w*)\s*(mal\s*)?(bitte\s*)?(im (web|internet|netz)|online)?\s*(nach|über)?\s*/, "").replace(/\s*(im (web|internet|netz)|online)\s*(nach)?\s*/, " ").trim();
+        if (q.length > 1) return { search: q };
+    }
+    if (/(einstieg|setup|gelegenheit|chance|scan\b|scanne|such\w* (nach )?(neuen )?(trade|einstieg|setup))/.test(t)) return { say: _jvSayScan() };
+    if (/(bot|automatik|handel|trading)\b.*\b(pause|pausier\w*|stopp\w*|stop|anhalten|aus\b)|^(pause|pausieren)$|manueller modus/.test(t)) {
+        const r = TBJarvisActions.setAuto(false);
+        return { say: r.changed ? "Verstanden. Vollautomatik pausiert. Offene Positionen behalten ihre Stops." : "Der Bot ist bereits pausiert." };
+    }
+    if (/(bot|automatik|handel|trading)\b.*\b(start\w*|an\b|ein\b|fortsetzen|weiter)/.test(t)) {
+        const r = TBJarvisActions.setAuto(true);
+        return { say: r.changed ? "Vollautomatik läuft. Gehandelt wird nur im Demo-Konto." : "Die Vollautomatik läuft bereits." };
+    }
+    return null;
+}
 window.TBJarvisBrain = {
     briefing: _jvBriefing,
+    act: _jvAct,
     answer: (raw) => _jvAnswerActions(raw) ?? _jvAnswer(raw),
 };
 

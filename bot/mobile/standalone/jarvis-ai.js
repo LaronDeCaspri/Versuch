@@ -93,7 +93,7 @@ Grenzen: Du kannst keine Kauf- oder Verkaufsorders auslösen, keine Einstellunge
             const flush = (final) => {
                 // The very first chunk may end at a clause (comma, colon, dash) so the voice starts
                 // as early as possible; after that whole sentences sound more natural.
-                const re = final ? /[\s\S]+/ : !spokenAny ? /^(?:[\s\S]{24,}?[,;:–](?=\s)|[\s\S]*?[.!?…](?=\s|$))/ : /^[\s\S]*?[.!?…](?=\s|$)/;
+                const re = final ? /[\s\S]+/ : !spokenAny ? /^(?:[\s\S]{24,}?[,;:–](?=\s)|[\s\S]{8,}?[.!?…](?=\s|$))/ : /^[\s\S]{12,}?[.!?…](?=\s|$)/;
                 for (;;) {
                     const m = re.exec(buf);
                     if (!m || !m[0].trim()) break;

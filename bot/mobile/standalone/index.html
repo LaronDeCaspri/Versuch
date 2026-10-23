@@ -281,10 +281,18 @@
             <button id="jv2-brief">Lagebericht</button>
         </div>
         <div class="jv2-ai-setup" id="jv2-ai-setup" hidden>
-            <div class="jv2-ai-setup-head"><strong>Normal mit Jarvis reden</strong><span class="jv2-pill">1 Minute Einrichtung</span></div>
-            <p>Für ein echtes Gespräch braucht Jarvis ein Sprachmodell. Hol dir einen Schlüssel unter <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a> und füg ihn hier ein. Er bleibt nur auf diesem Gerät.</p>
-            <div class="jv2-ai-setup-row"><input type="password" id="jv2-ai-setup-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><button class="primary" data-jv="ai-connect">Verbinden</button></div>
-            <small id="jv2-ai-setup-msg" aria-live="polite"></small>
+            <div class="jv2-ai-setup-head"><strong>Normal mit Jarvis reden</strong><span class="jv2-pill on">kostenlos</span></div>
+            <p>Jarvis bekommt ein eigenes KI-Gehirn (Qwen 3.5), das komplett auf deinem Gerät läuft — kein Konto, kein Schlüssel, keine Kosten, nach dem Laden auch offline. Braucht Chrome oder Edge mit Grafikbeschleunigung (WebGPU).</p>
+            <div class="jv2-brain" id="jv2-brain" data-state="idle">
+                <div class="jv2-ai-setup-row"><select id="jv2-brain-size" aria-label="Größe des KI-Gehirns"></select><button class="primary" id="jv2-brain-load">Kostenlos laden</button></div>
+                <div class="jv2-track"><div id="jv2-brain-bar" class="jv2-bar"></div></div>
+                <small id="jv2-brain-txt" aria-live="polite"></small>
+            </div>
+            <details class="jv2-claude">
+                <summary>Optional: noch klüger mit eigenem Claude-Schlüssel (kostenpflichtig)</summary>
+                <div class="jv2-ai-setup-row"><input type="password" id="jv2-ai-setup-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><button class="ghost" data-jv="ai-connect">Verbinden</button></div>
+                <small id="jv2-ai-setup-msg" aria-live="polite"></small>
+            </details>
         </div>
         <div class="jv2-say-row">
             <input type="text" id="jv2-text" placeholder="Oder schreib Jarvis etwas …" autocomplete="off" enterkeyhint="send">
@@ -822,6 +830,7 @@
 <script src="lib.js"></script>
 <script src="pro.js"></script>
 <script src="radar.js"></script>
+<script src="jarvis-local.js"></script>
 <script src="jarvis-ai.js"></script>
 <script src="jarvis.js"></script>
 <script src="app.js"></script>

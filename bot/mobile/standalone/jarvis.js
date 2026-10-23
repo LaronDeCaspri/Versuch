@@ -470,6 +470,7 @@
         if (/^(danke|vielen dank|das wars?|das wäre alles|tschüss|ende|fertig)\b/.test(t)) {
             R.convoOn = false;
             if (window.JarvisAI && window.JarvisAI.available()) window.JarvisAI.reset();
+            if (window.JarvisLocal) window.JarvisLocal.reset();
             speak(/danke/.test(t) ? "Sehr gern." : "Ich bin hier, wenn Sie mich brauchen.", "info", { force: true, chime: false, kind: "dialog" });
             return;
         }
@@ -498,15 +499,37 @@
                 // fall through to the built-in commands
             }
         }
-        let reply = null;
-        try { reply = window.TBJarvisBrain ? await window.TBJarvisBrain.answer(text) : null; } catch (e) { reply = null; }
-        if (reply) { say(reply); return; }
-        if (window.JarvisAI && !window.JarvisAI.available()) {
-            showAiSetup(true);
-            say("Frei unterhalten kann ich mich erst mit dem KI-Gespräch. Trag dafür einmal deinen Claude-Schlüssel in der Jarvis-Karte ein, dann reden wir ganz normal. Feste Befehle wie Lagebericht, News vorlesen, Einstiege suchen oder Bot pausieren gehen schon jetzt.");
-            return;
+        const B = window.TBJarvisBrain, L = window.JarvisLocal;
+        // 1) Commands with side effects run directly (pause, start, scan, web search).
+        let act = null;
+        try { act = B && B.act ? B.act(text) : null; } catch (e) { act = null; }
+        if (act && act.say) { say(await act.say); return; }
+        let extra = "";
+        if (act && act.search) {
+            setSub(`Jarvis sucht im Web nach „${act.search}“ …`);
+            say("Einen Moment, ich schaue nach.");
+            let hits = [];
+            try { hits = L ? await L.webSearch(act.search) : []; } catch (e) { hits = []; }
+            if (!hits.length) { say(`Zu „${act.search}“ habe ich gerade nichts gefunden.`); return; }
+            if (!(L && (L.ready() || L.loading()))) { say(hits[0].replace(/^Wikipedia „[^“]*“: /, "").split(/(?<=[.!?])\s/).slice(0, 2).join(" ")); return; }
+            extra = `Websuche nach „${act.search}“:\n${hits.join("\n")}\nBeantworte die Frage anhand dieser Ergebnisse und nenne kurz die Quelle.`;
         }
-        say("Das habe ich akustisch nicht verstanden. Sag es bitte noch einmal.");
+        // 2) Free on-device AI: real conversation, no key, no costs.
+        if (L && (L.ready() || L.loading())) {
+            let spoke = false;
+            try {
+                if (!L.ready()) { setSub("KI-Gehirn startet …"); await L.load(onBrainProgress); }
+                await L.ask(text, { extra, onSentence: (x) => { spoke = true; say(x); } });
+                if (!spoke) say("Dazu fällt mir gerade nichts ein.");
+                return;
+            } catch (e) { writeLog(`KI-Gehirn: ${(e && e.message) || e}`, "warn"); }
+        }
+        // 3) Built-in answers.
+        let reply = null;
+        try { reply = B ? await B.answer(text) : null; } catch (e) { reply = null; }
+        if (reply) { say(reply); return; }
+        showAiSetup(true);
+        say("Für ein freies Gespräch brauche ich mein KI-Gehirn. Tipp in der Jarvis-Karte einmal auf „Kostenlos laden“ — es läuft danach komplett auf deinem Gerät, ohne Kosten. Befehle wie Lagebericht, News vorlesen, Einstiege suchen oder Bot pausieren gehen schon jetzt.");
     }
 
     // ------------------------------------------------------------------ UI
@@ -541,12 +564,40 @@
         const label = !S.enabled ? "Jarvis öffnen" : R.phase === "speaking" ? "Jarvis unterbrechen" : R.phase === "listening" ? "Zuhören beenden" : "Mit Jarvis sprechen";
         b.setAttribute("aria-label", label); b.title = label;
     }
+    // Setup panel: free on-device brain first, Claude key only as an optional extra.
     function showAiSetup(highlight) {
         const box = $("jv2-ai-setup");
         if (!box) return;
-        const has = !!(window.JarvisAI && window.JarvisAI.available());
-        box.hidden = has;
+        const L = window.JarvisLocal;
+        const has = !!(window.JarvisAI && window.JarvisAI.available()) || !!(L && L.ready());
+        box.hidden = has && !(L && L.loading());
+        renderBrain();
         if (highlight && !has) { box.classList.add("pulse"); box.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => box.classList.remove("pulse"), 2400); }
+    }
+    function renderBrain() {
+        const L = window.JarvisLocal, el = $("jv2-brain");
+        if (!L || !el) return;
+        const sel = $("jv2-brain-size");
+        if (sel && !sel.options.length) sel.innerHTML = Object.entries(L.MODELS).map(([k, m]) => `<option value="${k}">${esc(m.label)} · Speicher ${esc(m.mem)}</option>`).join("");
+        if (sel) sel.value = L.size();
+        const st = L.state;
+        el.dataset.state = L.ready() ? "ready" : L.loading() ? "loading" : st.error ? "error" : "idle";
+        const bar = $("jv2-brain-bar"); if (bar) bar.style.width = `${Math.round((st.progress || 0) * 100)}%`;
+        const txt = $("jv2-brain-txt");
+        if (txt) txt.textContent = L.ready() ? "KI-Gehirn bereit — sprich einfach los." : L.loading() ? (st.text || "lädt …").slice(0, 120) : st.error ? st.error : (L.config.downloaded ? "Bereits auf dem Gerät — startet beim Aktivieren automatisch." : "Einmaliger Download, danach offline. Im WLAN empfohlen.");
+        const btn = $("jv2-brain-load"); if (btn) { btn.disabled = L.loading() || L.ready(); btn.textContent = L.ready() ? "Bereit" : L.loading() ? "Lädt …" : "Kostenlos laden"; }
+    }
+    function onBrainProgress() { renderBrain(); }
+    function loadBrain(announceReady) {
+        const L = window.JarvisLocal;
+        if (!L || L.ready()) return;
+        audio();
+        const p = L.load(onBrainProgress);
+        renderBrain();
+        p.then(() => {
+            renderBrain(); showAiSetup(false); syncSettings();
+            if (announceReady && S.enabled) speak("Mein KI-Gehirn ist geladen. Jetzt können wir ganz normal miteinander reden.", "info", { force: true, kind: "dialog" });
+        }).catch(() => renderBrain());
     }
     async function connectAi() {
         const inp = $("jv2-ai-setup-key"), msg = $("jv2-ai-setup-msg"), AI = window.JarvisAI;
@@ -569,7 +620,7 @@
     function setSub(t) { const el = $("jv2-sub"); if (el) el.textContent = t; }
     function engineLabel() {
         if (!S.enabled) return "Aktivieren, damit Jarvis spricht und zuhört.";
-        const ai = window.JarvisAI && window.JarvisAI.available() ? " · KI-Gespräch aktiv" : "";
+        const ai = window.JarvisAI && window.JarvisAI.available() ? " · KI-Gespräch (Claude)" : window.JarvisLocal && window.JarvisLocal.ready() ? " · KI-Gehirn lokal" : "";
         if (S.engine === "premium" && S.premiumKey) return `Stimme: Premium (ElevenLabs)${ai}`;
         if (S.engine === "neural" && S.neuralReady) return `Stimme: ${VOICES[S.neuralVoice].label}${S.fx ? " · Jarvis-Klang" : ""}${ai}`;
         if (S.engine === "neural" && R.pending.has("init")) return "Jarvis-Stimme wird geladen — bis dahin Systemstimme.";
@@ -733,6 +784,7 @@
         syncSettings();
         if (S.engine === "neural") ensureNeural();
         if (window.JarvisAI && window.JarvisAI.available()) window.JarvisAI.warm();
+        else if (window.JarvisLocal && window.JarvisLocal.config.downloaded) loadBrain(false);
         if (S.wake) { R.wakeArmed = true; startListening(true); }
         const brief = window.TBJarvisBrain && window.TBJarvisBrain.briefing();
         speak(brief ? `Jarvis online. ${brief}` : "Jarvis online. Ich melde mich bei Trades, Alarmen und wichtigen Nachrichten.", "info", { force: true });
@@ -763,6 +815,7 @@
             else if (b.id === "jv2-brief") { if (!S.enabled) enable(); else handleCommand("Lagebericht"); }
             else if (b.dataset.jv === "load") { audio(); S.engine = "neural"; save(); loadNeural().then(() => { syncSettings(); speak("Neurale Stimme bereit. So klinge ich ab jetzt.", "info", { force: true }); }).catch(() => {}); }
             else if (b.dataset.jv === "ai-connect") connectAi();
+            else if (b.id === "jv2-brain-load") { if (!S.enabled) enable(); loadBrain(true); }
             else if (b.dataset.jv === "send") { const i = $("jv2-text"); const v = i && i.value.trim(); if (v) { i.value = ""; if (!S.enabled) enable(); stopSpeaking(); handleCommand(v); } }
             else if (b.dataset.jv === "test") { if (!S.enabled) enable(); else speak("Guten Tag. Bitcoin steht bei achtundsechzigtausend Dollar, plus eins Komma zwei Prozent. Alle Positionen sind abgesichert.", "info", { force: true }); }
             else if (b.dataset.jv === "purge") { if (R.worker) R.worker.postMessage({ type: "purge" }); else { try { caches.delete("jarvis-voice-v1"); } catch (err) { /* ignore */ } S.neuralReady = false; save(); setVoiceStatus("none"); } S.engine = "system"; save(); syncSettings(); }
@@ -796,6 +849,7 @@
             } else if (el.id === "jv2-brief-auto") { S.briefing = el.checked; save(); }
             else if (el.id === "jv2-fx") { S.fx = el.checked; save(); applyFx(); syncSettings(); if (S.enabled) speak(S.fx ? "Jarvis-Klang aktiv." : "Natürlicher Klang.", "info", { force: true }); }
             else if (el.id === "jv2-convo") { S.convo = el.checked; save(); }
+            else if (el.id === "jv2-brain-size" && window.JarvisLocal) { window.JarvisLocal.config.size = el.value; window.JarvisLocal.save(); renderBrain(); }
             else if (el.id === "jv2-el-key") { S.premiumKey = el.value.trim(); if (S.premiumKey) S.engine = "premium"; save(); syncSettings(); }
             else if (el.id === "jv2-el-voice") { S.premiumVoice = el.value.trim() || DEFAULTS.premiumVoice; save(); }
             else if (el.id && el.id.startsWith("jv2-ai-") && window.JarvisAI) {
@@ -834,6 +888,7 @@
                 audio();
                 if (S.engine === "neural") ensureNeural();
                 if (S.wake) { R.wakeArmed = true; startListening(true); }
+                if (window.JarvisLocal && window.JarvisLocal.config.downloaded && !(window.JarvisAI && window.JarvisAI.available())) loadBrain(false);
                 maybeBriefing();
             };
             document.addEventListener("pointerdown", arm, true);
