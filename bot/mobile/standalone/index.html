@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="de" class="booting">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -10,9 +10,80 @@
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
+    <style id="boot-style">
+        /* v44: boot screen — inline so it paints before any other CSS or script loads */
+        html.booting, html.booting body { overflow: hidden; }
+        #boot { position: fixed; inset: 0; z-index: 100000; display: grid; place-items: center; background: radial-gradient(1200px 800px at 50% 38%, #1a1030 0%, #0b0a12 55%, #06060a 100%); color: #e9e7f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; transition: opacity .7s ease, visibility .7s ease, transform .7s ease; }
+        #boot.out { opacity: 0; visibility: hidden; transform: scale(1.04); }
+        #boot .bt-wrap { display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 24px; text-align: center; }
+        #boot .bt-reactor { position: relative; width: min(46vw, 210px); aspect-ratio: 1; }
+        #boot .bt-reactor svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+        #boot .r1 { animation: bt-spin 6s linear infinite; transform-origin: 50% 50%; }
+        #boot .r2 { animation: bt-spin 3.6s linear infinite reverse; transform-origin: 50% 50%; }
+        #boot .r3 { animation: bt-spin 10s linear infinite; transform-origin: 50% 50%; }
+        #boot .core { animation: bt-breathe 2.2s ease-in-out infinite; transform-origin: 50% 50%; }
+        #boot .bt-glow { position: absolute; inset: 18%; border-radius: 50%; background: radial-gradient(circle, rgba(167,139,250,.55), rgba(139,92,246,.12) 55%, transparent 70%); filter: blur(14px); animation: bt-breathe 2.2s ease-in-out infinite; }
+        #boot .bt-title { font-size: 1.35rem; font-weight: 700; letter-spacing: .32em; text-transform: uppercase; background: linear-gradient(90deg, #c4b5fd, #ffffff 45%, #a78bfa); -webkit-background-clip: text; background-clip: text; color: transparent; padding-left: .32em; }
+        #boot .bt-sub { margin-top: -12px; font-size: .74rem; letter-spacing: .18em; text-transform: uppercase; color: #8b87a3; }
+        #boot .bt-bar { width: min(64vw, 260px); height: 3px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
+        #boot .bt-bar i { display: block; height: 100%; width: 6%; border-radius: inherit; background: linear-gradient(90deg, #7c3aed, #c4b5fd); box-shadow: 0 0 12px rgba(167,139,250,.8); transition: width .6s cubic-bezier(.2,.8,.2,1); }
+        #boot .bt-step { min-height: 1.2em; font-size: .8rem; color: #b4b0c9; letter-spacing: .02em; }
+        #boot .bt-step b { color: #6ee7b7; font-weight: 600; }
+        #boot .bt-demo { position: absolute; bottom: max(18px, env(safe-area-inset-bottom)); font-size: .66rem; letter-spacing: .16em; color: #f59e0b; opacity: .75; text-transform: uppercase; }
+        @keyframes bt-spin { to { transform: rotate(360deg); } }
+        @keyframes bt-breathe { 50% { transform: scale(1.06); opacity: .85; } }
+        @media (prefers-reduced-motion: reduce) { #boot .r1, #boot .r2, #boot .r3, #boot .core, #boot .bt-glow { animation: none; } }
+    </style>
     <link rel="stylesheet" href="app.css">
 </head>
 <body>
+
+<!-- v44: boot screen (removed by the inline script below once the app has data) -->
+<div id="boot" role="status" aria-live="polite" aria-label="App wird geladen">
+    <div class="bt-wrap">
+        <div class="bt-reactor" aria-hidden="true">
+            <div class="bt-glow"></div>
+            <svg viewBox="0 0 200 200">
+                <defs><linearGradient id="btg" x1="0" x2="1"><stop offset="0" stop-color="#7c3aed"/><stop offset="1" stop-color="#e9d5ff"/></linearGradient></defs>
+                <g class="r3"><circle cx="100" cy="100" r="94" fill="none" stroke="rgba(167,139,250,.18)" stroke-width="1"/><circle cx="100" cy="100" r="94" fill="none" stroke="url(#btg)" stroke-width="2" stroke-dasharray="2 10" /></g>
+                <g class="r1"><circle cx="100" cy="100" r="78" fill="none" stroke="url(#btg)" stroke-width="3" stroke-linecap="round" stroke-dasharray="120 370" /><circle cx="100" cy="100" r="78" fill="none" stroke="rgba(196,181,253,.35)" stroke-width="3" stroke-linecap="round" stroke-dasharray="40 450" stroke-dashoffset="-200" /></g>
+                <g class="r2"><circle cx="100" cy="100" r="60" fill="none" stroke="rgba(196,181,253,.55)" stroke-width="1.5" stroke-dasharray="6 6" /></g>
+                <g class="core"><circle cx="100" cy="100" r="34" fill="none" stroke="url(#btg)" stroke-width="2"/><circle cx="100" cy="100" r="22" fill="#a78bfa" opacity=".9"/><circle cx="100" cy="100" r="12" fill="#ffffff"/></g>
+            </svg>
+        </div>
+        <div class="bt-title">Trading Bot</div>
+        <div class="bt-sub">Pro-Engine · Jarvis · Live-Daten</div>
+        <div class="bt-bar"><i id="bt-bar"></i></div>
+        <div class="bt-step" id="bt-step">Starte Systeme …</div>
+    </div>
+    <div class="bt-demo">Demo-Modus · kein Echtgeld</div>
+</div>
+<script>
+(function () {
+    // Real milestones from app.js ("tb-boot" events); the screen leaves once market data is in,
+    // after at least 1.4 s (so it never flashes) and at the latest after 7 s (slow network).
+    var t0 = Date.now(), done = false, pct = 6;
+    var steps = { engine: [30, "Engine geladen"], ui: [55, "Oberfläche bereit"], data: [90, "Live-Marktdaten verbunden"], ready: [100, "Bereit"] };
+    function set(p, text) { pct = Math.max(pct, p); var b = document.getElementById("bt-bar"), s = document.getElementById("bt-step"); if (b) b.style.width = pct + "%"; if (s && text) s.innerHTML = "<b>✓</b> " + text; }
+    function hide() {
+        if (done) return; done = true;
+        set(100, "Bereit");
+        setTimeout(function () {
+            var el = document.getElementById("boot"); if (!el) return;
+            el.classList.add("out");
+            document.documentElement.classList.remove("booting");
+            setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 800);
+        }, Math.max(0, 1400 - (Date.now() - t0)));
+    }
+    window.addEventListener("tb-boot", function (e) {
+        var k = e.detail && e.detail.step, st = steps[k];
+        if (st) set(st[0], st[1]);
+        if (k === "data" || k === "ready") setTimeout(hide, 350);
+    });
+    var creep = setInterval(function () { if (done) return clearInterval(creep); if (pct < 85) set(pct + 1.5); }, 220);
+    setTimeout(function () { set(pct, "Fast fertig …"); hide(); }, 7000);
+})();
+</script>
 
 <!-- news popup -->
 <div id="news-popup" class="news-popup hidden">

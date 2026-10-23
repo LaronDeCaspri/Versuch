@@ -4,6 +4,9 @@
  * ============================================================ */
 (function () {
 
+const _boot = (step) => { try { window.dispatchEvent(new CustomEvent("tb-boot", { detail: { step } })); } catch (e) { /* boot screen is optional */ } };
+_boot("engine");
+
 const ALL_SYMBOLS = [
     "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT",
     "AVAX/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT", "TRX/USDT", "TON/USDT",
@@ -2006,7 +2009,9 @@ async function boot() {
     }
 
     // initial scan + news + futures
+    _boot("ui");
     await scanAll();
+    _boot(state.klinesLastUpdate ? "data" : "ready");
     refreshFng();
     fetchNews().then(renderNewsList);
     fetchFuturesData(CFG.symbols.slice(0, 5)).then(renderFuturesTable);
@@ -8057,7 +8062,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "43.0";
+const APP_VERSION = "44.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -11524,6 +11529,255 @@ function _cdTick() {
 setTimeout(_cdMount, 500);
 setInterval(_cdMount, 3000);
 setInterval(_cdTick, 1000);
+
+// ============================================================================
+// v44 — Selbstheilung bei Strukturbruch: pausieren → Ursache finden → beheben → fortsetzen.
+// Alles im Demo-Konto. Maßnahmen sind konservativ (weniger Risiko, Märkte sperren, neu testen),
+// nie aggressiver als vorher.
+// ============================================================================
+const SB = (window.TBRecovery = window.TBRecovery || {});
+(function _sbLoad() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem("tb_recovery") || "{}"); } catch (e) { s = {}; }
+    SB.resetTs = s.resetTs || 0;               // CUSUM watches only equity after this point
+    SB.quarantine = s.quarantine || {};        // symbol -> until (ms)
+    SB.riskMult = s.riskMult || 1;
+    SB.probationUntil = s.probationUntil || 0;
+    SB.incidents = Array.isArray(s.incidents) ? s.incidents.slice(-10) : [];
+    SB.active = s.active || null;              // incident in progress
+})();
+function _sbSave() {
+    try { localStorage.setItem("tb_recovery", JSON.stringify({ resetTs: SB.resetTs, quarantine: SB.quarantine, riskMult: SB.riskMult, probationUntil: SB.probationUntil, incidents: SB.incidents.slice(-10), active: SB.active })); } catch (e) { /* storage full */ }
+}
+function _sbStep(text, kind = "info") {
+    const inc = SB.active;
+    if (!inc) return;
+    inc.steps.push({ at: Date.now(), text, kind });
+    _sbSave(); _sbRender();
+}
+
+// Negative breaks only (unusually good performance is not a problem), and only on equity
+// recorded since the last reset — otherwise the same old drawdown would trigger again.
+function _sbDetect() {
+    const hist = (state.equityHistory || []).filter((h) => h.ts > SB.resetTs);
+    if (hist.length < 40) return { ready: false, n: hist.length };
+    const rets = [];
+    for (let i = 1; i < hist.length; i++) {
+        const r = (hist[i].eq - hist[i - 1].eq) / (hist[i - 1].eq || 1);
+        if (Number.isFinite(r)) rets.push(r);
+    }
+    if (rets.length < 30) return { ready: false, n: hist.length };
+    const half = Math.floor(rets.length / 2);
+    const base = rets.slice(0, half), mon = rets.slice(half);
+    const mean = base.reduce((s, r) => s + r, 0) / base.length;
+    const std = Math.sqrt(base.reduce((s, r) => s + (r - mean) ** 2, 0) / base.length) || 1e-9;
+    const K = 0.5 * std, H = 5 * std;
+    let neg = 0, worst = 0;
+    for (const r of mon) { neg = Math.min(0, neg + (r - mean) + K); worst = Math.min(worst, neg); }
+    const drop = (hist[hist.length - 1].eq - hist[half].eq) / (hist[half].eq || 1);
+    return { ready: true, n: hist.length, level: Math.abs(worst) / H, breakDetected: Math.abs(worst) > H && drop < 0, drop };
+}
+
+SB.check = () => checkStructuralBreak();
+checkStructuralBreak = function () {
+    if (SB.active) return;
+    const d = _sbDetect();
+    SB.lastCheck = d;
+    if (d.breakDetected) _sbStart(d).catch((e) => { _sbStep(`Selbstheilung abgebrochen: ${e.message}`, "warn"); _sbFinish(false); });
+};
+
+function _sbDiagnose() {
+    const findings = [];
+    const trades = _pairTrades();
+    const recent = trades.slice(-20);
+    // 1) Which markets / strategy families cause the losses?
+    const by = (key) => {
+        const m = {};
+        for (const t of recent) { const k = key(t); if (!k) continue; (m[k] = m[k] || { n: 0, losses: 0, pnl: 0 }); m[k].n++; m[k].pnl += t.pnl; if (t.pnl < 0) m[k].losses++; }
+        return m;
+    };
+    const losersSym = Object.entries(by((t) => t.symbol)).filter(([, v]) => v.losses >= 2 && v.pnl < 0).sort((a, b) => a[1].pnl - b[1].pnl);
+    if (losersSym.length) findings.push({ code: "LOSERS", symbols: losersSym.map(([k]) => k), text: `Verluste konzentriert auf ${losersSym.map(([k, v]) => `${k.replace("/USDT", "")} (${v.losses} Verluste, ${v.pnl.toFixed(2)} USDT)`).join(", ")}` });
+    const losersStrat = Object.entries(by((t) => (t.strategy || "").replace(/^pro:/, ""))).filter(([, v]) => v.losses >= 3 && v.pnl < 0);
+    if (losersStrat.length) findings.push({ code: "STRATEGY", text: `Schwache Strategie-Familien: ${losersStrat.map(([k]) => k).join(", ")}` });
+    // 2) Market changed: volatility shock or regime flip vs. the tested history
+    const shocks = [], flips = [];
+    for (const sym of _proSymbols()) {
+        const c = state.candles[sym];
+        if (!c || c.length < 120) continue;
+        try {
+            const reg = PE.regimeOf(c);
+            if (reg.volPct >= 0.9) shocks.push(sym);
+            const prev = PE.regimeOf(c.slice(0, -48));
+            if (prev.regime !== reg.regime && reg.regime !== "mixed") flips.push(`${sym.replace("/USDT", "")}: ${PE.REGIME_LABELS ? (PE.REGIME_LABELS[prev.regime] || prev.regime) : prev.regime} → ${PE.REGIME_LABELS ? (PE.REGIME_LABELS[reg.regime] || reg.regime) : reg.regime}`);
+        } catch (e) { /* skip symbol */ }
+    }
+    if (shocks.length) findings.push({ code: "VOL", symbols: shocks, text: `Volatilitätsschock (oberste 10 % der letzten 200 Kerzen) bei ${shocks.map((s) => s.replace("/USDT", "")).join(", ")}` });
+    if (flips.length) findings.push({ code: "REGIME", text: `Marktphase gewechselt: ${flips.join("; ")}` });
+    // 3) Is the tested edge still current, and does live trading match the test?
+    if (_proResearchStale()) findings.push({ code: "STALE", text: "Walk-Forward-Test ist veraltet (älter als 24 h oder unvollständig)" });
+    for (const sym of new Set(recent.map((t) => t.symbol))) {
+        const live = recent.filter((t) => t.symbol === sym);
+        const r = _proResult(sym);
+        if (live.length < 5 || !r || !r.stats) continue;
+        const wr = live.filter((t) => t.pnl > 0).length / live.length;
+        if (wr < r.stats.winRate - 0.2) findings.push({ code: "DRIFT", symbols: [sym], text: `${sym.replace("/USDT", "")}: Trefferquote live ${Math.round(wr * 100)} % statt ${Math.round(r.stats.winRate * 100)} % im Test` });
+    }
+    // 4) Data and news
+    if (!state.klinesLastUpdate || Date.now() - state.klinesLastUpdate > 5 * 60e3) findings.push({ code: "DATA", text: "Marktdaten sind nicht frisch — Entscheidungen könnten auf alten Kursen beruhen" });
+    const loserSyms = new Set(losersSym.map(([k]) => k.replace("/USDT", "")));
+    const hot = (state.news || []).filter((n) => Date.now() - new Date(n.ts).getTime() < 3 * 3600e3 && _npCoins(n).some((c) => loserSyms.has(c)));
+    if (hot.length) findings.push({ code: "NEWS", text: `${hot.length} aktuelle Meldungen zu den betroffenen Coins — mögliche News-Bewegung` });
+    if (!findings.length) findings.push({ code: "NOISE", text: "Keine eindeutige Ursache — wahrscheinlich eine ungünstige Serie; Risiko wird vorsorglich reduziert" });
+    return findings;
+}
+
+async function _sbWait(cond, timeoutMs, everyMs = 2000) {
+    const t0 = Date.now();
+    timeoutMs *= SB.waitScale || 1;          // tests shorten the waits
+    everyMs = Math.min(everyMs, Math.max(100, timeoutMs / 10));
+    while (Date.now() - t0 < timeoutMs) { if (cond()) return true; await new Promise((r) => setTimeout(r, everyMs)); }
+    return false;
+}
+
+async function _sbStart(d, prevAuto) {
+    SB.active = { id: Date.now(), startedAt: Date.now(), drop: d.drop, prevAuto: prevAuto ?? !!state.autoMode, phase: "paused", steps: [], findings: [], actions: [] };
+    _sbStep(`Strukturbruch erkannt: Equity ${(d.drop * 100).toFixed(2)} % im Überwachungsfenster, statistisch außerhalb des bisherigen Musters.`, "alert");
+    if (state.autoMode) $("#mode-toggle").click();
+    _sbStep("Vollautomatik pausiert. Offene Positionen behalten ihre Stops.");
+    announce("Strukturbruch erkannt. Ich pausiere die Vollautomatik, suche die Ursache und behebe sie.", "alert");
+
+    SB.active.phase = "diagnose"; _sbSave(); _sbRender();
+    await new Promise((r) => setTimeout(r, 400));
+    const findings = _sbDiagnose();
+    SB.active.findings = findings;
+    findings.forEach((f) => _sbStep(`Befund: ${f.text}`, "find"));
+
+    SB.active.phase = "fix"; _sbSave(); _sbRender();
+    const until = Date.now() + 24 * 3600e3;
+    const quarantine = new Set();
+    for (const f of findings) if ((f.code === "LOSERS" || f.code === "DRIFT") && f.symbols) f.symbols.forEach((s) => quarantine.add(s));
+    for (const s of quarantine) SB.quarantine[s] = until;
+    if (quarantine.size) _sbStep(`Maßnahme: ${[...quarantine].map((s) => s.replace("/USDT", "")).join(", ")} für 24 h gesperrt.`, "fix");
+    SB.riskMult = findings.some((f) => f.code === "VOL") ? 0.5 : 0.75;
+    SB.probationUntil = until;
+    _sbStep(`Maßnahme: Risiko pro Trade für 24 h auf ${Math.round(SB.riskMult * 100)} % gesenkt (Probephase).`, "fix");
+    if (findings.some((f) => f.code === "DATA")) {
+        _sbStep("Maßnahme: warte auf frische Marktdaten …", "fix");
+        try { await scanAll(); } catch (e) { /* retried by the regular loop */ }
+        const ok = await _sbWait(() => state.klinesLastUpdate && Date.now() - state.klinesLastUpdate < 3 * 60e3, 5 * 60e3);
+        _sbStep(ok ? "Marktdaten wieder frisch." : "Marktdaten weiterhin verzögert — bleibe vorsichtig.", ok ? "fix" : "warn");
+    }
+    _sbStep("Maßnahme: Walk-Forward-Test mit den neuesten Daten neu gestartet …", "fix");
+    const t0 = Date.now();
+    if (typeof PRO.runResearch === "function") PRO.runResearch();
+    await _sbWait(() => !PRO.running, 12 * 60e3, 2000);
+    const done = !!(PRO.researchAll && PRO.researchAll.computedAt > t0);
+    const validated = _proSymbols().filter((s) => _proValidated(s) && !SB.quarantine[s]);
+    _sbStep(done ? `Neuer Test fertig: ${validated.length ? `bestätigte Edge bei ${validated.map((s) => s.replace("/USDT", "")).join(", ")}` : "aktuell keine bestätigte Edge — der Bot wartet auf bessere Bedingungen"}.` : "Neuer Test noch nicht fertig — der Bot nutzt bis dahin den letzten Stand.", done ? "fix" : "warn");
+    SB.resetTs = Date.now();
+    _sbStep("Überwachung neu kalibriert (Bruch-Erkennung startet mit neuer Basis).", "fix");
+    _sbFinish(true, validated);
+}
+
+function _sbFinish(ok, validated = []) {
+    const inc = SB.active;
+    if (!inc) return;
+    inc.phase = "done"; inc.endedAt = Date.now(); inc.ok = ok;
+    if (inc.prevAuto && !state.autoMode) $("#mode-toggle").click();
+    _sbStep(inc.prevAuto ? "Vollautomatik wieder aktiv — mit reduziertem Risiko in der Probephase." : "Automatik war vorher aus und bleibt aus.", "ok");
+    SB.incidents.push(inc); SB.active = null; SB.lastCheck = _sbDetect(); _sbSave(); _sbRender();
+    const q = Object.keys(SB.quarantine).filter((s) => SB.quarantine[s] > Date.now()).map((s) => _jvName(s.replace("/USDT", "")));
+    announce(`Selbstheilung abgeschlossen. ${inc.findings.length ? `Ursache: ${inc.findings[0].text}.` : ""} ${q.length ? `${q.join(" und ")} vorerst gesperrt. ` : ""}Risiko für 24 Stunden reduziert${inc.prevAuto ? ", Bot läuft wieder" : ""}.`, "success");
+}
+
+// Hooks: quarantined markets get no new entries; probation scales risk down.
+if (typeof makePending === "function" && !makePending._v44) {
+    const _v44Mkp = makePending;
+    makePending = function (symbol, sig, candles, price) {
+        const until = SB.quarantine[symbol];
+        if (until && until > Date.now()) {
+            if (sig && sig.side && typeof feedEvent === "function") feedEvent("info", `${symbol}: Signal ignoriert — nach Strukturbruch bis ${new Date(until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} gesperrt`);
+            return null;
+        }
+        return _v44Mkp(symbol, sig, candles, price);
+    };
+    makePending._v44 = true;
+}
+if (typeof dynamicRiskPct === "function" && !dynamicRiskPct._v44) {
+    const _v44Dyn = dynamicRiskPct;
+    dynamicRiskPct = function (score, riskScore) {
+        const base = _v44Dyn(score, riskScore);
+        return SB.probationUntil > Date.now() ? base * SB.riskMult : base;
+    };
+    dynamicRiskPct._v44 = true;
+}
+// Expired quarantines and probation clean themselves up.
+setInterval(() => {
+    let ch = false;
+    for (const [s, t] of Object.entries(SB.quarantine)) if (t <= Date.now()) { delete SB.quarantine[s]; ch = true; }
+    if (SB.probationUntil && SB.probationUntil <= Date.now()) { SB.probationUntil = 0; SB.riskMult = 1; ch = true; }
+    if (ch) { _sbSave(); _sbRender(); }
+}, 60e3);
+// An incident interrupted by a reload continues from the diagnosis.
+setTimeout(() => {
+    if (SB.active && SB.active.phase !== "done") {
+        const prev = SB.active; SB.active = null;
+        _sbStart({ drop: prev.drop || 0 }, prev.prevAuto).catch(() => {});
+    }
+}, 15000);
+
+function _sbRender() {
+    const home = document.querySelector('[data-pane="dashboard"]');
+    if (!home) return;
+    let el = document.getElementById("v44-heal-card");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "v44-heal-card";
+        el.className = "card v31-card v44-card";
+        const after = document.getElementById("v39-radar-card") || document.getElementById("signal-tile");
+        if (after && after.parentElement === home) after.after(el); else home.appendChild(el);
+    }
+    const inc = SB.active || SB.incidents[SB.incidents.length - 1];
+    const live = !!SB.active;
+    const d = SB.lastCheck || _sbDetect();
+    const lvl = d.ready ? Math.min(1, d.level || 0) : 0;
+    const q = Object.entries(SB.quarantine).filter(([, t]) => t > Date.now());
+    const phaseIdx = { paused: 0, diagnose: 1, fix: 2, done: 3 }[live ? SB.active.phase : "done"];
+    const steps = ["Pausiert", "Diagnose", "Behebung", "Wieder aktiv"].map((s, i) => `<div class="v44-ph ${live ? (i < phaseIdx ? "done" : i === phaseIdx ? "now" : "") : ""}"><i></i><span>${s}</span></div>`).join("");
+    const status = live ? _proChip("SELBSTHEILUNG LÄUFT", "amber")
+        : SB.probationUntil > Date.now() ? _proChip("PROBEPHASE", "amber") : _proChip("ÜBERWACHT", "green");
+    const log = inc ? inc.steps.slice(-8).reverse().map((s) => `<div class="v44-step k-${s.kind}"><span>${new Date(s.at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</span><p>${_escHtml(s.text)}</p></div>`).join("") : "";
+    el.innerHTML = `
+        <h2>Selbstheilung ${status} <span class="info" data-info="selfheal">ⓘ</span></h2>
+        <div class="v44-gauge">
+            <div class="v44-gauge-top"><span>Strukturbruch-Wächter</span><strong>${d.ready ? `${Math.round(lvl * 100)} %` : `sammelt Daten (${d.n}/40)`}</strong></div>
+            <div class="v44-track"><div class="v44-fill ${lvl > 0.7 ? "hot" : lvl > 0.4 ? "warm" : ""}" style="width:${Math.round(lvl * 100)}%"></div></div>
+            <small>100 % = Strukturbruch: Bot pausiert automatisch, sucht die Ursache und behebt sie.</small>
+        </div>
+        ${live || (inc && Date.now() - (inc.endedAt || 0) < 48 * 3600e3) ? `<div class="v44-phases ${live ? "live" : ""}">${steps}</div><div class="v44-log">${log}</div>` : ""}
+        ${SB.probationUntil > Date.now() || q.length ? `<div class="v44-rules">
+            ${SB.probationUntil > Date.now() ? `<span>Risiko ${Math.round(SB.riskMult * 100)} % bis ${new Date(SB.probationUntil).toLocaleString("de-DE", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}</span>` : ""}
+            ${q.map(([s, t]) => `<span>${_escHtml(s.replace("/USDT", ""))} gesperrt bis ${new Date(t).toLocaleString("de-DE", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}</span>`).join("")}
+        </div>` : ""}`;
+}
+setTimeout(_sbRender, 900);
+setInterval(() => {
+    const heal = document.getElementById("v44-heal-card"), radar = document.getElementById("v39-radar-card");
+    if (heal && radar && radar.nextElementSibling !== heal) radar.after(heal);
+}, 1500);
+setInterval(() => { if (!SB.active) _sbRender(); }, 30e3);
+if (typeof INFO_DB === "object") {
+    INFO_DB["selfheal"] = {
+        title: "Selbstheilung bei Strukturbruch",
+        body: `<p>Ein CUSUM-Wächter vergleicht die jüngste Equity-Entwicklung mit dem bisherigen Muster. Fällt die Performance statistisch signifikant ab (Strukturbruch), passiert automatisch:</p>
+               <ol><li><strong>Pausieren:</strong> Vollautomatik aus, offene Positionen behalten ihre Stops.</li>
+               <li><strong>Diagnose:</strong> Welche Märkte und Strategien verlieren? Volatilitätsschock oder Wechsel der Marktphase? Ist der Walk-Forward-Test veraltet, weicht live vom Test ab? Sind die Daten frisch, gibt es News?</li>
+               <li><strong>Behebung:</strong> Verlustbringer 24 h sperren, Risiko senken (Probephase), Walk-Forward mit neuesten Daten neu rechnen, Wächter neu kalibrieren.</li>
+               <li><strong>Fortsetzen:</strong> Automatik wieder an (falls sie vorher an war) — gehandelt wird nur, wo der neue Test eine Edge bestätigt.</li></ol>
+               <p>Die Maßnahmen machen den Bot nur vorsichtiger, nie riskanter. Ein Strukturbruch kann auch Pech sein — eine Garantie, dass die Ursache „behoben“ ist, gibt es im Trading nicht. Alles im Demo-Konto.</p>`,
+    };
+}
 
 (function showVersion() {
     const f = document.querySelector("footer");
