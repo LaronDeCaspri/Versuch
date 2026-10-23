@@ -1120,6 +1120,7 @@ const NEWS_FEEDS = [
     { name: "Decrypt", url: "https://decrypt.co/feed" },
     { name: "Bitcoin Magazine", url: "https://bitcoinmagazine.com/.rss/full/" },
     { name: "The Block", url: "https://www.theblock.co/rss.xml" },
+    { name: "Google News", url: "https://news.google.com/rss/search?q=bitcoin+OR+ethereum+OR+crypto+when:1d&hl=en-US&gl=US&ceid=US:en" },
 ];
 const RSS_PROXIES = [
     { name: "allorigins", wrap: (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u) },
@@ -1155,6 +1156,18 @@ async function _fetchTimeout(url, ms = 8000) {
     const t = setTimeout(() => ctl && ctl.abort(), ms);
     try { return await fetch(url, ctl ? { signal: ctl.signal } : undefined); }
     finally { clearTimeout(t); }
+}
+
+// GDELT: global news index, keyless and CORS-enabled
+async function _fetchGdelt() {
+    const q = encodeURIComponent("(bitcoin OR ethereum OR cryptocurrency OR crypto) sourcelang:english");
+    const res = await _fetchTimeout(`https://api.gdeltproject.org/api/v2/doc/doc?query=${q}&mode=artlist&format=json&maxrecords=40&sort=datedesc&timespan=1d`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const raw = await res.json();
+    const list = raw && raw.articles;
+    if (!Array.isArray(list) || !list.length) throw new Error("keine Artikel");
+    const ts = (v) => { const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(v || ""); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : Date.now(); };
+    return list.map((a) => _newsItem({ title: a.title, url: a.url, source: a.domain || "GDELT", ts: ts(a.seendate), categories: [], body: "" })).filter(Boolean);
 }
 
 async function _fetchCoinDeskData() {
@@ -1241,7 +1254,7 @@ async function fetchNews(force = false) {
     if (!force && Date.now() - state.lastNewsFetch < 5 * 60 * 1000 && state.news.length) return;
     // Stage 1: direct APIs + rss2json in parallel; stage 2 (only if thin): RSS via CORS proxies; stage 3: Reddit.
     const stages = [
-        [{ name: "CoinDesk Data", fn: _fetchCoinDeskData }, { name: "CryptoCompare", fn: _fetchCryptoCompare },
+        [{ name: "GDELT", fn: _fetchGdelt }, { name: "CoinDesk Data", fn: _fetchCoinDeskData }, { name: "CryptoCompare", fn: _fetchCryptoCompare },
          ...NEWS_FEEDS.slice(0, 3).map((f) => ({ name: `${f.name} (rss2json)`, fn: () => _fetchRss2Json(f) }))],
         NEWS_FEEDS.map((f) => ({ name: f.name, fn: () => _fetchRssViaProxy(f) })),
         [{ name: "Reddit", fn: _fetchReddit }],
@@ -1889,7 +1902,16 @@ async function boot() {
     renderWatchlistOptions();
     renderBacktestOptions();
     renderAll();
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+    if ("serviceWorker" in navigator) {
+        // After an update the new worker takes over; reload once so the new code actually runs.
+        const hadController = !!navigator.serviceWorker.controller;
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+            if (!hadController) return;
+            try { if (sessionStorage.getItem("tb_sw_reloaded")) return; sessionStorage.setItem("tb_sw_reloaded", "1"); } catch (e) { /* storage unavailable */ }
+            location.reload();
+        });
+        navigator.serviceWorker.register("sw.js").then((reg) => reg.update().catch(() => {})).catch(() => {});
+    }
     keepAwake();
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") keepAwake();
@@ -1986,9 +2008,10 @@ const HEALTH_ENDPOINTS = [
     { name: "Binance Futures API", url: "https://fapi.binance.com/fapi/v1/ping" },
     { name: "alternative.me F&G", url: "https://api.alternative.me/fng/?limit=1" },
     { name: "CoinGecko", url: "https://api.coingecko.com/api/v3/ping" },
-    { name: "Frankfurter EUR", url: "https://api.frankfurter.app/latest?from=USD&to=EUR" },
+    { name: "Frankfurter EUR", url: "https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR" },
     { name: "mempool.space", url: "https://mempool.space/api/v1/fees/recommended" },
-    { name: "rss2json (news)", url: "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fdecrypt.co%2Ffeed" },
+    { name: "GDELT (News)", url: "https://api.gdeltproject.org/api/v2/doc/doc?query=bitcoin&mode=artlist&format=json&maxrecords=1" },
+    { name: "rss2json (News)", url: "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fdecrypt.co%2Ffeed" },
 ];
 
 async function checkHealth() {
@@ -5497,7 +5520,7 @@ function collectSourceStatus() {
 
     // EUR rate — refreshes every 60s, fresh <= 5min, stale <= 30min
     sources.push({
-        name: "EUR-Rate (Frankfurter)", url: "api.frankfurter.app",
+        name: "EUR-Kurs", url: "Frankfurter (EZB) · exchangerate.host · open.er-api · Binance BTC/EUR",
         lastOk: state.eurRateLastUpdate,
         age: state.eurRateLastUpdate ? now - state.eurRateLastUpdate : null,
         status: state.eurRate
@@ -5508,7 +5531,7 @@ function collectSourceStatus() {
 
     // News
     sources.push({
-        name: "Live-News", url: "CoinDesk · CryptoCompare · RSS (CoinDesk, Cointelegraph, Decrypt, Bitcoin Magazine, The Block) · Reddit",
+        name: "Live-News", url: "GDELT · CoinDesk · CryptoCompare · RSS (CoinDesk, Cointelegraph, Decrypt, Bitcoin Magazine, The Block, Google News) · Reddit",
         lastOk: state.lastNewsFetch,
         age: state.lastNewsFetch ? now - state.lastNewsFetch : null,
         status: (state.news?.length > 0) ? _statusFromAge(state.lastNewsFetch ? now - state.lastNewsFetch : null, 10 * 60 * 1000, 30 * 60 * 1000) : "err",
@@ -7952,7 +7975,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "32.0";
+const APP_VERSION = "38.0";
 const APP_BUILD = "2026-09-25";
 
 // ---- 1. First-launch splash screen ----
@@ -10512,7 +10535,7 @@ function _proRenderSettings() {
             <span><strong>Nur validierte Edge</strong><br><small>Aus: alle Symbole werden mit den regulären Regeln gehandelt. An: nur Symbole mit Urteil „Edge bestätigt" oder „vielversprechend".</small></span></label>
         <label class="v32-toggle"><input type="checkbox" id="v32-wakelock-toggle" ${PRO.wakeLockWanted ? "checked" : ""}>
             <span><strong>Bildschirm wach halten</strong><br><small>Solange die App offen ist, geht der Bildschirm nicht aus und der Bot handelt weiter, z. B. nachts am Ladekabel. Im Hintergrund oder bei gesperrtem Handy pausiert jeder Browser den Bot.${PRO.wakeLockWanted ? (PRO.wakeLock ? " · aktiv" : PRO.wakeLockError ? ` · nicht möglich: ${PRO.wakeLockError}` : " · wird aktiviert") : ""}</small></span></label>
-        <div class="v32-note">Kosten im Paper-Broker: ${window.TB.PaperBroker.COSTS.feeBps} bps Gebühr je Seite, Slippage aus dem Live-Orderbuch (Fallback ${window.TB.PaperBroker.COSTS.slipBps} bps). Kelly-Sizing erst ab 300 abgeschlossenen Trades.</div>
+        <div class="v32-note">App-Version ${APP_VERSION}. Kosten im Paper-Broker: ${window.TB.PaperBroker.COSTS.feeBps} bps Gebühr je Seite, Slippage aus dem Live-Orderbuch (Fallback ${window.TB.PaperBroker.COSTS.slipBps} bps). Kelly-Sizing erst ab 300 abgeschlossenen Trades.</div>
         ${PRO.running ? "" : `<button class="ghost v32-btn" data-v32-run>Walk-Forward neu berechnen</button>`}
     `;
 }
@@ -10615,6 +10638,11 @@ if (typeof INFO_DB === "object") {
                <p>Jede Nacht prüft ein Walk-Forward-Test, ob das System auf jedem Symbol out-of-sample nach Kosten Geld verdient hätte. Nur dann gilt die Edge als validiert.</p>`,
     };
 }
+
+(function showVersion() {
+    const f = document.querySelector("footer");
+    if (f && !f.dataset.version) { f.dataset.version = APP_VERSION; f.appendChild(document.createTextNode(` · Version ${APP_VERSION}`)); }
+})();
 
 setTimeout(() => {
     if (typeof feedEvent === "function") feedEvent("info", `v32 Pro-Engine ${PRO.enabled ? "aktiv" : "aus"}: Live = Backtest · Kosten im Broker · Walk-Forward mit Deflated Sharpe · Orderbuch- und Funding-Kontrollen`);

@@ -1631,11 +1631,13 @@ async function fetchVix() {
 }
 
 async function fetchEurRate() {
-    // Try 1: Frankfurter (ECB rates)
-    try {
-        const d = await fetch("https://api.frankfurter.app/latest?from=USD&to=EUR").then((r) => r.json());
-        if (d?.rates?.EUR) return d.rates.EUR;
-    } catch {}
+    // Try 1: Frankfurter (ECB rates) — moved to frankfurter.dev; the old host only redirects
+    for (const url of ["https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR", "https://api.frankfurter.app/latest?from=USD&to=EUR"]) {
+        try {
+            const d = await fetch(url).then((r) => r.json());
+            if (d?.rates?.EUR) return d.rates.EUR;
+        } catch {}
+    }
     // Try 2: exchangerate.host
     try {
         const d = await fetch("https://api.exchangerate.host/latest?base=USD&symbols=EUR").then((r) => r.json());
