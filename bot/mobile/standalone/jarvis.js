@@ -430,9 +430,14 @@
             }, 700);
         };
         rec.onerror = (e) => {
-            if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-                S.listen = "button"; save(); syncSettings();
-                setSub("Mikrofon blockiert — bitte im Browser erlauben.");
+            const err = e.error;
+            if (err === "no-speech" || err === "aborted") return;
+            if (err === "not-allowed" || err === "service-not-allowed" || err === "audio-capture" || err === "network") {
+                // Background listening must not keep retrying against a blocked microphone.
+                R.wakeArmed = false;
+                if (S.listen !== "button") { S.listen = "button"; save(); syncSettings(); }
+                if (err === "not-allowed") micState().then((st) => showMicHelp(IN_APP ? "inapp" : st === "granted" ? "service" : "denied", err));
+                else showMicHelp(err === "service-not-allowed" ? "service" : err === "audio-capture" ? "busy" : "network", err);
             }
         };
         rec.onend = () => {
@@ -448,10 +453,77 @@
         R.rec = rec;
         return rec;
     }
+    // ---- microphone permission & diagnosis --------------------------------------------------------
+    const UA = navigator.userAgent || "";
+    const IS_ANDROID = /Android/i.test(UA), IS_IOS = /iPhone|iPad|iPod/i.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+    // In-app browsers (links opened from chat or social apps) get no microphone for web speech.
+    const IN_APP = /; wv\)|FBAN|FBAV|Instagram|Line\/|Telegram|WhatsApp|Snapchat|TikTok/i.test(UA);
+    const STANDALONE = (() => { try { return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch (e) { return false; } })();
+    async function micState() {
+        try { return (await navigator.permissions.query({ name: "microphone" })).state; } catch (e) { return "unknown"; }
+    }
+    // Ask for the microphone explicitly once: this shows the browser's permission prompt and tells
+    // us exactly why it fails (blocked, no mic, busy) — the speech API alone only says "not-allowed".
+    async function ensureMic() {
+        if (R.micOk) return true;
+        if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return true;
+        try {
+            const st = await navigator.mediaDevices.getUserMedia({ audio: true });
+            st.getTracks().forEach((t) => t.stop());
+            R.micOk = true; hideMicHelp();
+            return true;
+        } catch (e) {
+            const n = e && e.name;
+            showMicHelp(IN_APP ? "inapp" : n === "NotFoundError" || n === "OverconstrainedError" ? "nomic" : n === "NotReadableError" || n === "AbortError" ? "busy" : (await micState()) === "denied" || n === "NotAllowedError" || n === "SecurityError" ? "denied" : "other", n);
+            return false;
+        }
+    }
+    function micSteps(kind) {
+        const here = location.hostname || "diese Seite";
+        if (kind === "inapp") return { title: "Die Seite ist in einem In-App-Browser geöffnet", text: "Links aus Chat- oder Social-Apps öffnen einen eingebauten Browser — der darf das Mikrofon für die Spracherkennung nicht nutzen.", steps: ["Unten auf „In Chrome öffnen“ tippen (oder im Menü ⋮ „Im Browser öffnen“ wählen).", "Dort „Sprechen“ tippen und das Mikrofon erlauben."], chrome: true };
+        if (kind === "service" || kind === "unsupported") return { title: kind === "unsupported" ? "Dieser Browser kann keine Spracheingabe" : "Die Spracherkennung dieses Browsers ist nicht verfügbar", text: "Jarvis nutzt die Spracherkennung des Browsers. Samsung Internet, Firefox und manche Browser bieten sie nicht an.", steps: [IS_IOS ? "Die Seite in Safari öffnen." : "Die Seite in Google Chrome öffnen.", "Oder: unten ins Textfeld tippen und das Mikrofon-Symbol deiner Tastatur nutzen."], chrome: IS_ANDROID };
+        if (kind === "busy") return { title: "Das Mikrofon ist gerade belegt", text: "Eine andere App nutzt das Mikrofon (z. B. Anruf, Sprachnachricht, Diktat).", steps: ["Die andere App bzw. den Anruf beenden.", "Dann erneut „Sprechen“ tippen."] };
+        if (kind === "nomic") return { title: "Kein Mikrofon gefunden", text: "Der Browser findet kein Mikrofon.", steps: ["Headset bzw. Mikrofon prüfen.", "Dann erneut versuchen."] };
+        if (kind === "network") return { title: "Spracherkennung ohne Verbindung", text: "Die Spracherkennung des Browsers braucht Internet.", steps: ["Internetverbindung prüfen, dann erneut „Sprechen“ tippen."] };
+        if (IS_IOS) return { title: "Mikrofon ist gesperrt", text: "Safari darf das Mikrofon für diese Seite nicht nutzen.", steps: ["iPhone-Einstellungen → Apps → Safari → Mikrofon → „Erlauben“.", "Einstellungen → Datenschutz & Sicherheit → Spracherkennung → Safari einschalten.", "Seite neu laden und „Sprechen“ tippen."] };
+        if (IS_ANDROID) return { title: "Mikrofon ist gesperrt", text: `Chrome hat das Mikrofon für ${here} blockiert — vermutlich wurde die Anfrage einmal abgelehnt.`, steps: [
+            STANDALONE ? `Chrome öffnen → ⋮ → Einstellungen → Website-Einstellungen → Mikrofon → „${here}“ → „Zulassen“.` : `Oben in der Adresszeile auf das Symbol links neben „${here}“ tippen → „Berechtigungen“ → „Mikrofon“ → „Zulassen“.`,
+            "Falls das nicht hilft: Android-Einstellungen → Apps → Chrome → Berechtigungen → Mikrofon → „Bei Nutzung der App zulassen“.",
+            "Seite neu laden und „Sprechen“ tippen."] };
+        return { title: "Mikrofon ist gesperrt", text: `Der Browser hat das Mikrofon für ${here} blockiert.`, steps: ["In der Adresszeile auf das Schloss- bzw. Regler-Symbol klicken → Mikrofon → „Zulassen“.", "Windows: Einstellungen → Datenschutz → Mikrofon → Zugriff für Apps und Chrome erlauben.", "Seite neu laden."] };
+    }
+    function showMicHelp(kind, detail) {
+        R.recActive = false; R.micOk = false;
+        setPhase("idle");
+        const m = micSteps(kind);
+        setSub(`${m.title}.`);
+        writeLog(`Mikrofon: ${m.title}${detail ? ` (${detail})` : ""}.`, "warn");
+        let box = $("jv2-mic-help");
+        if (!box) {
+            box = document.createElement("div");
+            box.id = "jv2-mic-help"; box.className = "jv2-mic-help"; box.setAttribute("role", "alert");
+            // Right below the talk buttons, where the eyes are after tapping "Sprechen".
+            const anchor = $("jv2-ai-setup") || document.querySelector("#jarvis-card .jv2-say-row");
+            if (anchor) anchor.before(box); else { const c = $("jarvis-card"); if (!c) return; c.appendChild(box); }
+        }
+        const chromeUrl = `intent://${location.host}${location.pathname}${location.search}#Intent;scheme=https;package=com.android.chrome;end`;
+        box.innerHTML = `<button class="jv2-mic-x" data-jv="mic-x" aria-label="Schließen">✕</button><strong>🎙 ${esc(m.title)}</strong><span>${esc(m.text)}</span><ol>${m.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>
+            <div class="jv2-mic-actions"><button class="primary" data-jv="mic-retry">Erneut versuchen</button>${m.chrome && IS_ANDROID ? `<a class="ghost jv2-btn-link" href="${esc(chromeUrl)}">In Chrome öffnen</a>` : ""}<button class="ghost" data-jv="mic-type">Per Tastatur sprechen</button></div>`;
+        box.hidden = false;
+        try { box.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) { /* old browser */ }
+    }
+    function hideMicHelp() { const b = $("jv2-mic-help"); if (b) b.hidden = true; }
+
     function startListening(wakeMode = false, followUp = false) {
         const rec = recognizer();
-        if (!rec) { setSub("Spracheingabe wird von diesem Browser nicht unterstützt (Chrome, Edge oder Safari nutzen)."); return; }
-        if (R.recActive) return;
+        if (!rec) { showMicHelp("unsupported"); return; }
+        if (R.recActive || R.micChecking) return;
+        if (!R.micOk) {
+            R.micChecking = true;
+            setPhase("listening"); setSub("Mikrofon wird freigegeben …");
+            ensureMic().then((ok) => { R.micChecking = false; if (ok) startListening(wakeMode, followUp); });
+            return;
+        }
         audio();
         R.wakeMode = wakeMode;
         R.heard = false; R.consumed = false; R.followUp = followUp; clearTimeout(R.endT);
@@ -792,7 +864,7 @@
         if (btn) { btn.textContent = S.enabled ? "Jarvis aus" : "Jarvis aktivieren"; btn.classList.toggle("primary", !S.enabled); }
         const badge = $("jarvis-badge");
         if (badge) { badge.textContent = S.enabled ? (S.engine === "neural" && S.neuralReady ? "neural" : "aktiv") : "aus"; badge.classList.toggle("on", S.enabled); }
-        const mic = $("jv2-mic"); if (mic) mic.disabled = !S.enabled || !SR;
+        const mic = $("jv2-mic"); if (mic) mic.disabled = !S.enabled;
         const card = $("jarvis-card"); if (card) card.classList.toggle("on", S.enabled);
         if (R.phase === "idle") setPhase("idle");
         showAiSetup(false);
@@ -914,6 +986,9 @@
             else if (b.id === "jv2-brief") { if (!S.enabled) enable(); else handleCommand("Lagebericht"); }
             else if (b.dataset.jv === "load") { audio(); S.engine = "neural"; save(); loadNeural().then(() => { syncSettings(); speak("Neurale Stimme bereit. So klinge ich ab jetzt.", "info", { force: true }); }).catch(() => {}); }
             else if (b.dataset.jv === "ai-connect") connectAi();
+            else if (b.dataset.jv === "mic-x") hideMicHelp();
+            else if (b.dataset.jv === "mic-retry") { hideMicHelp(); R.micOk = false; if (!S.enabled) enable(); listenNow(); }
+            else if (b.dataset.jv === "mic-type") { hideMicHelp(); const i = $("jv2-text"); if (i) { i.placeholder = "Tippe aufs Mikrofon deiner Tastatur und sprich …"; i.focus(); } }
             else if (b.dataset.jv === "gpu-recheck" && window.JarvisLocal) { const L = window.JarvisLocal; L.state.gpu = null; L.state.recheck = true; L.supported().then(() => { const dg = $("jv2-brain-diag"); if (dg) dg.dataset.reason = ""; renderBrain(); if (L.state.gpu) writeLog("WebGPU ist jetzt verfügbar — das schnelle KI-Gehirn kann geladen werden.", "info"); }); }
             else if (b.id === "jv2-brain-load") pickFolderThenLoad();
             else if (b.dataset.jv === "send") { const i = $("jv2-text"); const v = i && i.value.trim(); if (v) { i.value = ""; if (!S.enabled) enable(); stopSpeaking(); handleCommand(v); } }

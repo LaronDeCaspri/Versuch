@@ -3066,3 +3066,13 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 .jv2-cloud-row small { color: var(--text-2); line-height: 1.35; }
 .jv2-cloud-row em { font-style: normal; color: var(--accent-2); }
 .jv2-brain-hint[hidden] { display: none; }
+/* v52 — microphone help */
+.jv2-mic-help { position: relative; margin: 10px 0; padding: 12px 36px 12px 12px; border-radius: 12px; background: rgba(239, 68, 68, 0.07); border: 1px solid rgba(239, 68, 68, 0.32); font-size: 0.8rem; line-height: 1.45; color: var(--text-2); }
+.jv2-mic-help[hidden] { display: none; }
+.jv2-mic-help strong { display: block; color: #fca5a5; margin-bottom: 4px; font-size: 0.86rem; }
+.jv2-mic-help ol { margin: 6px 0 10px; padding-left: 18px; }
+.jv2-mic-help li { margin: 3px 0; }
+.jv2-mic-x { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 8px; border: 0; background: transparent; color: var(--text-2); font-size: 0.95rem; cursor: pointer; }
+.jv2-mic-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.jv2-mic-actions > * { flex: 1 1 auto; min-height: 40px; }
+.jv2-btn-link { display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; font-size: 0.85rem; }
