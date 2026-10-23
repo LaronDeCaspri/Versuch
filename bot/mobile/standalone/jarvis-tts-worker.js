@@ -86,23 +86,27 @@ async function init(voice) {
     voiceKey = voice.key;
 }
 
-// One phonemizer instance per call: piper_phonemize runs `main` and exits.
-function phonemize(text) {
+// One phonemizer for the whole session: building it costs ~0.3–1 s, a call afterwards ~40 ms.
+let phonMod = null, phonPending = null;
+async function phonemizer() {
+    if (phonMod) return phonMod;
+    phonMod = await createPiperPhonemize({
+        wasmBinary: phonWasm,
+        getPreloadedPackage: () => phonData,
+        print: (line) => { const p = phonPending; phonPending = null; if (!p) return; try { p.resolve(JSON.parse(line).phoneme_ids); } catch (e) { p.reject(e); } },
+        printErr: () => { /* espeak warnings */ },
+        locateFile: (f) => (f.endsWith(".wasm") ? LIBS.phonemizeWasm : f.endsWith(".data") ? LIBS.phonemizeData : f),
+    });
+    return phonMod;
+}
+async function phonemize(text) {
+    const mod = await phonemizer();
     return new Promise((resolve, reject) => {
-        let done = false;
-        createPiperPhonemize({
-            wasmBinary: phonWasm,
-            getPreloadedPackage: () => phonData,
-            print: (line) => {
-                if (done) return;
-                try { done = true; resolve(JSON.parse(line).phoneme_ids); } catch (e) { reject(e); }
-            },
-            printErr: () => { /* espeak warnings */ },
-            locateFile: (f) => (f.endsWith(".wasm") ? LIBS.phonemizeWasm : f.endsWith(".data") ? LIBS.phonemizeData : f),
-        }).then((mod) => {
-            mod.callMain(["-l", config.espeak.voice, "--input", JSON.stringify([{ text }]), "--espeak_data", "/espeak-ng-data"]);
-            if (!done) setTimeout(() => { if (!done) reject(new Error("Phonemisierung ohne Ergebnis")); }, 3000);
-        }, reject);
+        phonPending = { resolve, reject };
+        try { mod.callMain(["-l", config.espeak.voice, "--input", JSON.stringify([{ text }]), "--espeak_data", "/espeak-ng-data"]); }
+        catch (e) { phonPending = null; phonMod = null; reject(e); return; }
+        // print() runs synchronously inside callMain; nothing printed means no phonemes.
+        if (phonPending) { phonPending = null; resolve([]); }
     });
 }
 
@@ -123,13 +127,21 @@ async function synth(text, rate) {
 
 // ONNX sessions must not run concurrently: handle messages strictly one after another.
 let chain = Promise.resolve();
-self.onmessage = (e) => { chain = chain.then(() => handle(e.data || {})); };
+let cancelBefore = 0;
+self.onmessage = (e) => {
+    const m = e.data || {};
+    // Cancel acts immediately (not queued): sentences queued before it are skipped.
+    if (m.type === "cancel") { cancelBefore = m.seq; return; }
+    chain = chain.then(() => handle(m));
+};
 async function handle(m) {
     try {
         if (m.type === "init") {
             await init(m.voice);
+            await phonemizer();
             post({ type: "ready", key: voiceKey, sampleRate: config.audio.sample_rate });
         } else if (m.type === "speak") {
+            if (m.id <= cancelBefore) { post({ type: "error", id: m.id, stage: "speak", message: "abgebrochen" }); return; }
             if (!session) throw new Error("Stimme nicht geladen");
             const t0 = performance.now();
             const pcm = await synth(m.text, m.rate);

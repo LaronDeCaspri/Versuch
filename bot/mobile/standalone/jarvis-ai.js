@@ -9,9 +9,9 @@
 
     const SDK_URL = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.128.0/+esm";
     const MODELS = {
-        "claude-opus-5-5": "Claude Opus 5.5 (beste Antworten)",
-        "claude-sonnet-5-5": "Claude Sonnet 5.5 (schnell)",
-        "claude-haiku-5-5": "Claude Haiku 5.5 (am schnellsten, günstig)",
+        "claude-opus-5-5": "Opus 5.5 — klügste Antworten",
+        "claude-sonnet-5-5": "Sonnet 5.5 — sehr gut und schneller",
+        "claude-haiku-5-5": "Haiku 5.5 — am schnellsten, sehr günstig",
     };
     const KEY = "tb_jarvis_ai";
     const DEF = { apiKey: "", model: "claude-opus-5-5", address: "Sir", web: true };
@@ -24,6 +24,8 @@
         return `Du bist J.A.R.V.I.S., der persönliche Sprachassistent eines Krypto-Trading-Bots. Der Bot handelt ausschließlich im Demo-Modus mit 10 000 USDT Spielgeld; echte Orders sind technisch gesperrt.
 
 Deine Antworten werden vorgelesen. Sprich deshalb natürliches, flüssiges Deutsch wie ein Mensch im Gespräch: meist ein bis drei kurze Sätze, keine Listen, kein Markdown, keine Emojis, keine Links. Runde Zahlen sinnvoll (Kurse ohne Nachkommastellen ab 100 Dollar, Prozente mit einer Nachkommastelle). Sprich den Nutzer gelegentlich mit „${C.address || "Sir"}“ an, nicht in jedem Satz. Ton: ruhig, souverän, präzise, mit einem Hauch trockenem britischem Humor — nie albern.
+
+Führe ein echtes Gespräch: geh auf das Gesagte ein, beziehe dich auf vorher Gesagtes, stell eine kurze Rückfrage, wenn etwas wirklich unklar ist, und plaudere auch über Dinge außerhalb des Tradings, wenn der Nutzer das möchte. Die Eingaben kommen aus einer Spracherkennung: Wörter können verwechselt, Satzzeichen fehlen oder Sätze abgebrochen sein — interpretiere wohlwollend, was gemeint ist, statt auf Formulierungen herumzureiten. Antworte zügig und ohne Einleitungsfloskeln.
 
 Jede Nachricht des Nutzers enthält einen aktuellen <bot_status>-Block mit Depot, Positionen, Modus, validierten Edges und Radar. Nutze ihn für Fragen zum Bot, ohne ihn vorzulesen.
 
@@ -89,7 +91,9 @@ Grenzen: Du kannst keine Kauf- oder Verkaufsorders auslösen, keine Einstellunge
         for (let round = 0; round < 6; round++) {
             let buf = "";
             const flush = (final) => {
-                const re = final ? /[\s\S]+/ : /^[\s\S]*?[.!?…](?=\s|$)/;
+                // The very first chunk may end at a clause (comma, colon, dash) so the voice starts
+                // as early as possible; after that whole sentences sound more natural.
+                const re = final ? /[\s\S]+/ : !spokenAny ? /^(?:[\s\S]{24,}?[,;:–](?=\s)|[\s\S]*?[.!?…](?=\s|$))/ : /^[\s\S]*?[.!?…](?=\s|$)/;
                 for (;;) {
                     const m = re.exec(buf);
                     if (!m || !m[0].trim()) break;
@@ -135,5 +139,15 @@ Grenzen: Du kannst keine Kauf- oder Verkaufsorders auslösen, keine Einstellunge
     }
 
     function reset() { history = []; }
-    window.JarvisAI = { config: C, save, models: MODELS, ask, reset, available: () => !!C.apiKey };
+    // Checks a key without a billed request (model lookup).
+    async function verify(key) {
+        const mod = await import(SDK_URL);
+        const Anthropic = mod.default || mod.Anthropic;
+        const api = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true, maxRetries: 0, timeout: 15000 });
+        await api.models.retrieve(C.model);
+        return true;
+    }
+    // Loads the SDK ahead of the first question so the first answer isn't slower than the rest.
+    function warm() { getClient().catch(() => {}); }
+    window.JarvisAI = { config: C, save, models: MODELS, ask, reset, verify, warm, available: () => !!C.apiKey };
 })();

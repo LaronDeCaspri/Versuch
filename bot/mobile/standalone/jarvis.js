@@ -325,6 +325,7 @@
         const item = { say, level, kind, prio: PRIORITY[level] ?? 0, chime: opts.chime ?? (level === "alert" || kind === "news") };
         // Keep it calm: low-priority chatter is dropped when Jarvis is already busy.
         if (item.prio === 0 && R.queue.length >= 2 && !opts.force) return;
+        prepare(item);
         const i = R.queue.findIndex((q) => q.prio < item.prio);
         if (i === -1) R.queue.push(item); else R.queue.splice(i, 0, item);
         if (R.queue.length > 6) R.queue.length = 6;
@@ -342,14 +343,36 @@
         setPhase("speaking", item.say);
         try {
             if (item.chime) await chime(item.level);
-            if (S.engine === "premium" && S.premiumKey) {
+            if (item.audio) {
+                try { await playPrepared(item); }
+                catch (e) { voiceFailed(S.engine === "premium" ? "Premium-Stimme" : "Neurale Stimme", e); if (!R.cancelled) await speakSystem(item.say, item.level); }
+            } else if (S.engine === "premium" && S.premiumKey) {
                 try { await speakPremium(item.say); }
                 catch (e) { voiceFailed("Premium-Stimme", e); await speakLocal(item); }
             } else {
                 await speakLocal(item);
             }
         } catch (e) { /* keep the queue alive */ }
-        setTimeout(drain, 220);
+        setTimeout(drain, item.kind === "dialog" ? 30 : 200);
+    }
+    // Audio is rendered the moment a sentence is queued, so the next sentence is ready when the
+    // current one ends — no pause between sentences of an answer.
+    function prepare(item) {
+        try {
+            if (S.engine === "premium" && S.premiumKey && audio()) {
+                item.audio = sentences(item.say).map((p) => synthPremium(p).then((buf) => ({ buf }), (err) => ({ err })));
+            } else if (S.engine !== "system" && S.neuralReady && R.workerReady) {
+                item.audio = sentences(item.say).map((p) => synthNeural(p).then((m) => ({ pcm: m.pcm, sr: m.sampleRate }), (err) => ({ err })));
+            }
+        } catch (e) { item.audio = null; }
+    }
+    async function playPrepared(item) {
+        for (const job of item.audio) {
+            const r = await job;
+            if (R.cancelled) return;
+            if (r.err) throw r.err;
+            if (r.pcm) await playPcm(r.pcm, r.sr); else await playBuffer(r.buf);
+        }
     }
     async function speakLocal(item) {
         if (S.engine !== "system" && S.neuralReady) {
@@ -368,6 +391,7 @@
     }
     function stopSpeaking() {
         R.queue = []; R.cancelled = true;
+        if (R.worker) R.worker.postMessage({ type: "cancel", seq: R.seq });
         try { if (R.current) R.current.stop(); } catch (e) { /* already stopped */ }
         try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
     }
@@ -386,7 +410,18 @@
                 if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript;
             }
             showTranscript(final || interim, !final);
-            if (final) { R.heard = true; onHeard(final.trim()); }
+            if (R.consumed) return;
+            clearTimeout(R.endT);
+            if (final) { R.heard = true; if (!R.wakeMode) R.consumed = true; onHeard(final.trim()); return; }
+            // Browsers wait ~1 s of silence before "final"; a transcript that hasn't changed for
+            // 700 ms is the end of the sentence in a conversation.
+            if (!R.wakeMode && interim.trim()) R.endT = setTimeout(() => {
+                if (R.consumed) return;
+                R.heard = true; R.consumed = true;
+                try { rec.abort(); } catch (e) { /* ignore */ }
+                showTranscript(interim, false);
+                onHeard(interim.trim());
+            }, 700);
         };
         rec.onerror = (e) => {
             if (e.error === "not-allowed" || e.error === "service-not-allowed") {
@@ -410,7 +445,7 @@
         if (R.recActive) return;
         audio();
         R.wakeMode = wakeMode;
-        R.heard = false; R.followUp = followUp;
+        R.heard = false; R.consumed = false; R.followUp = followUp; clearTimeout(R.endT);
         rec.continuous = wakeMode;
         try { rec.start(); R.recActive = true; setPhase("listening"); } catch (e) { /* already running */ }
     }
@@ -443,6 +478,7 @@
         if (/schneller/.test(t)) { setRate(S.rate + 0.1); speak("Ich spreche etwas schneller.", "info", { force: true }); return; }
         if (/langsamer/.test(t)) { setRate(S.rate - 0.1); speak("Ich spreche etwas langsamer.", "info", { force: true }); return; }
         R.convoOn = S.convo;
+        R.ackSaid = false;
         setPhase("thinking");
         const say = (x) => speak(x, "info", { force: true, chime: false, kind: "dialog" });
         // KI-Modus: echte Unterhaltung mit Werkzeugen; Sätze werden gesprochen, sobald sie fertig sind.
@@ -451,7 +487,7 @@
             try {
                 await window.JarvisAI.ask(text, {
                     onSentence: (x) => { spoke = true; say(x); },
-                    onStatus: (x) => { if (!R.busy) setSub(`Jarvis ${x}`); },
+                    onStatus: (x) => { setSub(`Jarvis ${x}`); if (!spoke && !R.ackSaid) { R.ackSaid = true; say("Einen Moment."); } },
                 });
                 if (!spoke) say("Erledigt.");
                 return;
@@ -464,7 +500,13 @@
         }
         let reply = null;
         try { reply = window.TBJarvisBrain ? await window.TBJarvisBrain.answer(text) : null; } catch (e) { reply = null; }
-        say(reply || "Das habe ich nicht verstanden. Sag zum Beispiel: Lagebericht, lies die letzten zwei News, suche nach Einstiegen oder Bot pausieren.");
+        if (reply) { say(reply); return; }
+        if (window.JarvisAI && !window.JarvisAI.available()) {
+            showAiSetup(true);
+            say("Frei unterhalten kann ich mich erst mit dem KI-Gespräch. Trag dafür einmal deinen Claude-Schlüssel in der Jarvis-Karte ein, dann reden wir ganz normal. Feste Befehle wie Lagebericht, News vorlesen, Einstiege suchen oder Bot pausieren gehen schon jetzt.");
+            return;
+        }
+        say("Das habe ich akustisch nicht verstanden. Sag es bitte noch einmal.");
     }
 
     // ------------------------------------------------------------------ UI
@@ -498,6 +540,31 @@
         b.classList.toggle("on", S.enabled);
         const label = !S.enabled ? "Jarvis öffnen" : R.phase === "speaking" ? "Jarvis unterbrechen" : R.phase === "listening" ? "Zuhören beenden" : "Mit Jarvis sprechen";
         b.setAttribute("aria-label", label); b.title = label;
+    }
+    function showAiSetup(highlight) {
+        const box = $("jv2-ai-setup");
+        if (!box) return;
+        const has = !!(window.JarvisAI && window.JarvisAI.available());
+        box.hidden = has;
+        if (highlight && !has) { box.classList.add("pulse"); box.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => box.classList.remove("pulse"), 2400); }
+    }
+    async function connectAi() {
+        const inp = $("jv2-ai-setup-key"), msg = $("jv2-ai-setup-msg"), AI = window.JarvisAI;
+        if (!inp || !AI) return;
+        const key = inp.value.trim();
+        if (!/^sk-ant-/.test(key)) { msg.textContent = "Das sieht nicht wie ein Claude-Schlüssel aus (beginnt mit sk-ant-)."; return; }
+        msg.textContent = "Prüfe Schlüssel …";
+        try {
+            await AI.verify(key);
+            AI.config.apiKey = key; AI.save(); AI.reset();
+            inp.value = ""; msg.textContent = "";
+            syncSettings(); showAiSetup(false);
+            if (!S.enabled) enable(); else speak("Verbunden. Ab jetzt können wir ganz normal miteinander reden. Was kann ich für Sie tun?", "info", { force: true, kind: "dialog" });
+            R.convoOn = S.convo;
+        } catch (e) {
+            const m = String((e && e.message) || e);
+            msg.textContent = /401|auth|invalid/i.test(m) ? "Schlüssel wird nicht akzeptiert." : `Verbindung fehlgeschlagen: ${m.slice(0, 120)}`;
+        }
     }
     function setSub(t) { const el = $("jv2-sub"); if (el) el.textContent = t; }
     function engineLabel() {
@@ -586,6 +653,7 @@
         const mic = $("jv2-mic"); if (mic) mic.disabled = !S.enabled || !SR;
         const card = $("jarvis-card"); if (card) card.classList.toggle("on", S.enabled);
         if (R.phase === "idle") setPhase("idle");
+        showAiSetup(false);
         syncFab();
     }
     function setVolume(v) { S.volume = Math.max(0.1, Math.min(1, v)); if (R.gain) R.gain.gain.value = S.volume; save(); syncSettings(); }
@@ -664,6 +732,7 @@
         try { if (window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch (e) { /* ignore */ }
         syncSettings();
         if (S.engine === "neural") ensureNeural();
+        if (window.JarvisAI && window.JarvisAI.available()) window.JarvisAI.warm();
         if (S.wake) { R.wakeArmed = true; startListening(true); }
         const brief = window.TBJarvisBrain && window.TBJarvisBrain.briefing();
         speak(brief ? `Jarvis online. ${brief}` : "Jarvis online. Ich melde mich bei Trades, Alarmen und wichtigen Nachrichten.", "info", { force: true });
@@ -693,8 +762,15 @@
             else if (b.id === "jv2-mic") { if (R.recActive && !R.wakeMode) stopListening(); else { stopSpeaking(); startListening(false); } }
             else if (b.id === "jv2-brief") { if (!S.enabled) enable(); else handleCommand("Lagebericht"); }
             else if (b.dataset.jv === "load") { audio(); S.engine = "neural"; save(); loadNeural().then(() => { syncSettings(); speak("Neurale Stimme bereit. So klinge ich ab jetzt.", "info", { force: true }); }).catch(() => {}); }
+            else if (b.dataset.jv === "ai-connect") connectAi();
+            else if (b.dataset.jv === "send") { const i = $("jv2-text"); const v = i && i.value.trim(); if (v) { i.value = ""; if (!S.enabled) enable(); stopSpeaking(); handleCommand(v); } }
             else if (b.dataset.jv === "test") { if (!S.enabled) enable(); else speak("Guten Tag. Bitcoin steht bei achtundsechzigtausend Dollar, plus eins Komma zwei Prozent. Alle Positionen sind abgesichert.", "info", { force: true }); }
             else if (b.dataset.jv === "purge") { if (R.worker) R.worker.postMessage({ type: "purge" }); else { try { caches.delete("jarvis-voice-v1"); } catch (err) { /* ignore */ } S.neuralReady = false; save(); setVoiceStatus("none"); } S.engine = "system"; save(); syncSettings(); }
+        });
+        card.addEventListener("keydown", (e) => {
+            if (e.key !== "Enter") return;
+            if (e.target.id === "jv2-text") { e.preventDefault(); card.querySelector('[data-jv="send"]').click(); }
+            if (e.target.id === "jv2-ai-setup-key") { e.preventDefault(); connectAi(); }
         });
         card.addEventListener("change", (e) => {
             const el = e.target;
