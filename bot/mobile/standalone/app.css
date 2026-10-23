@@ -3010,3 +3010,9 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 .v40-sent { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; color: var(--muted); border: 1px solid var(--border); white-space: nowrap; }
 .v40-sent.pos { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
 .v40-sent.neg { color: #fca5a5; border-color: rgba(239, 68, 68, 0.4); }
+.jv2-brain-diag { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(245, 158, 11, 0.07); border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.78rem; line-height: 1.45; color: var(--text-2); }
+.jv2-brain-diag[hidden] { display: none; }
+.jv2-brain-diag strong { display: block; color: #fcd34d; margin-bottom: 4px; }
+.jv2-brain-diag ol { margin: 6px 0 8px; padding-left: 18px; }
+.jv2-brain-diag li { margin: 2px 0; }
+.jv2-brain-diag button { width: auto; min-height: 30px; padding: 4px 12px; font-size: 0.74rem; }

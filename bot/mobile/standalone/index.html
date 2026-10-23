@@ -287,9 +287,10 @@
         </div>
         <div class="jv2-ai-setup" id="jv2-ai-setup" hidden>
             <div class="jv2-ai-setup-head"><strong>Normal mit Jarvis reden</strong><span class="jv2-pill on">kostenlos</span></div>
-            <p>Jarvis bekommt ein eigenes KI-Gehirn (Qwen 3.5), das komplett auf deinem Gerät läuft — kein Konto, kein Schlüssel, keine Kosten, nach dem Laden auch offline. Braucht Chrome oder Edge mit Grafikbeschleunigung (WebGPU).</p>
+            <p>Jarvis bekommt ein eigenes KI-Gehirn (Qwen 3.5), das komplett auf deinem Gerät läuft — kein Konto, kein Schlüssel, keine Kosten, nach dem Laden auch offline. Am schnellsten mit Grafikbeschleunigung (WebGPU) in Chrome oder Edge — ohne läuft es im CPU-Modus.</p>
             <div class="jv2-brain" id="jv2-brain" data-state="idle">
                 <div class="jv2-ai-setup-row"><select id="jv2-brain-size" aria-label="Größe des KI-Gehirns"></select><button class="primary" id="jv2-brain-load">Kostenlos laden</button></div>
+                <div class="jv2-brain-diag" id="jv2-brain-diag" hidden></div>
                 <div class="jv2-track"><div id="jv2-brain-bar" class="jv2-bar"></div></div>
                 <small id="jv2-brain-txt" aria-live="polite"></small>
                 <small class="jv2-brain-hint">Beim Laden fragt der Browser nach einem Speicherort — wähle oder erstelle z. B. <b>D:\Downloads\Jarvis</b>. Dort liegt dann eine Kopie, aus der Jarvis auch ohne Internet neu laden kann.</small>

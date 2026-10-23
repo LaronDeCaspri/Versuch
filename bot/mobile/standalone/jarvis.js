@@ -620,8 +620,21 @@
         const L = window.JarvisLocal, el = $("jv2-brain");
         if (!L || !el) return;
         const sel = $("jv2-brain-size");
-        if (sel && !sel.options.length) sel.innerHTML = Object.entries(L.MODELS).map(([k, m]) => `<option value="${k}">${esc(m.label)} · Speicher ${esc(m.mem)}</option>`).join("");
-        if (sel) sel.value = L.size();
+        const cpu = L.state.gpu === false;
+        if (sel && sel.dataset.mode !== (cpu ? "cpu" : "gpu")) {
+            sel.dataset.mode = cpu ? "cpu" : "gpu";
+            sel.innerHTML = Object.entries(cpu ? L.CPU_MODELS : L.MODELS).map(([k, m]) => `<option value="${k}">${esc(m.label)} · ${cpu ? "Download" : "Speicher"} ${esc(m.mem)}</option>`).join("");
+        }
+        if (sel) sel.value = cpu ? L.cpuSize() : L.size();
+        const dg = $("jv2-brain-diag");
+        if (dg) {
+            const d = L.state.diag;
+            dg.hidden = !(cpu && d);
+            if (cpu && d && dg.dataset.reason !== d.reason) {
+                dg.dataset.reason = d.reason;
+                dg.innerHTML = `<strong>Kein WebGPU: ${esc(d.reason)}</strong><span>Jarvis nutzt deshalb den <b>CPU-Modus</b> — funktioniert überall, antwortet aber langsamer. Für die schnelle Variante:</span><ol>${(d.steps || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ol><button class="ghost" data-jv="gpu-recheck">Erneut prüfen</button>`;
+            }
+        }
         const st = L.state;
         el.dataset.state = L.ready() ? "ready" : L.loading() ? "loading" : st.error ? "error" : "idle";
         const bar = $("jv2-brain-bar"); if (bar) bar.style.width = `${Math.round((st.progress || 0) * 100)}%`;
@@ -877,6 +890,7 @@
             else if (b.id === "jv2-brief") { if (!S.enabled) enable(); else handleCommand("Lagebericht"); }
             else if (b.dataset.jv === "load") { audio(); S.engine = "neural"; save(); loadNeural().then(() => { syncSettings(); speak("Neurale Stimme bereit. So klinge ich ab jetzt.", "info", { force: true }); }).catch(() => {}); }
             else if (b.dataset.jv === "ai-connect") connectAi();
+            else if (b.dataset.jv === "gpu-recheck" && window.JarvisLocal) { const L = window.JarvisLocal; L.state.gpu = null; L.supported().then(() => { const dg = $("jv2-brain-diag"); if (dg) dg.dataset.reason = ""; renderBrain(); if (L.state.gpu) writeLog("WebGPU ist jetzt verfügbar — das schnelle KI-Gehirn kann geladen werden.", "info"); }); }
             else if (b.id === "jv2-brain-load") pickFolderThenLoad();
             else if (b.dataset.jv === "send") { const i = $("jv2-text"); const v = i && i.value.trim(); if (v) { i.value = ""; if (!S.enabled) enable(); stopSpeaking(); handleCommand(v); } }
             else if (b.dataset.jv === "test") { if (!S.enabled) enable(); else speak("Guten Tag. Bitcoin steht bei achtundsechzigtausend Dollar, plus eins Komma zwei Prozent. Alle Positionen sind abgesichert.", "info", { force: true }); }
@@ -908,7 +922,11 @@
             else if (el.name === "jv2-listen") setListen(el.value); else if (el.id === "jv2-brief-auto") { S.briefing = el.checked; save(); }
             else if (el.id === "jv2-fx") { S.fx = el.checked; save(); applyFx(); syncSettings(); if (S.enabled) speak(S.fx ? "Jarvis-Klang aktiv." : "Natürlicher Klang.", "info", { force: true }); }
             else if (el.id === "jv2-convo") { S.convo = el.checked; save(); }
-            else if (el.id === "jv2-brain-size" && window.JarvisLocal) { window.JarvisLocal.config.size = el.value; window.JarvisLocal.save(); renderBrain(); }
+            else if (el.id === "jv2-brain-size" && window.JarvisLocal) {
+                const L = window.JarvisLocal;
+                if (L.state.gpu === false) L.config.cpuSize = el.value; else L.config.size = el.value;
+                L.save(); renderBrain();
+            }
             else if (el.id === "jv2-el-key") { S.premiumKey = el.value.trim(); if (S.premiumKey) S.engine = "premium"; save(); syncSettings(); }
             else if (el.id === "jv2-el-voice") { S.premiumVoice = el.value.trim() || DEFAULTS.premiumVoice; save(); }
             else if (el.id && el.id.startsWith("jv2-ai-") && window.JarvisAI) {
@@ -946,6 +964,7 @@
 
     function boot() {
         bind();
+        if (window.JarvisLocal) window.JarvisLocal.supported().then(() => renderBrain()).catch(() => {});
         setVoiceStatus(S.neuralReady ? "ready" : "none");
         syncSettings();
         setPhase("idle");

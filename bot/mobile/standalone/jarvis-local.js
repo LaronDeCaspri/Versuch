@@ -8,6 +8,13 @@
     "use strict";
 
     const WEBLLM = "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.85/+esm";
+    // CPU fallback when the browser offers no WebGPU (llama.cpp compiled to WebAssembly).
+    const WLLAMA = "https://cdn.jsdelivr.net/npm/@wllama/wllama@3.8.1/esm/index.js";
+    const WLLAMA_WASM = "https://cdn.jsdelivr.net/npm/@wllama/wllama@3.8.1/esm/wasm/wllama.wasm";
+    const CPU_MODELS = {
+        fast: { url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf", label: "CPU schnell — Qwen 2.5 0,5B", mem: "ca. 0,5 GB" },
+        better: { url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf", label: "CPU besser — Qwen 2.5 1,5B (langsamer)", mem: "ca. 1,1 GB" },
+    };
     const MODELS = {
         small: { id: "Qwen3.5-0.8B-q4f16_1-MLC", label: "Klein — fürs Handy", mem: "ca. 1,6 GB" },
         medium: { id: "Qwen3.5-2B-q4f16_1-MLC", label: "Mittel — empfohlen", mem: "ca. 2,2 GB" },
@@ -21,8 +28,22 @@
 
     async function supported() {
         if (S.gpu !== null) return S.gpu;
-        try { S.gpu = !!(navigator.gpu && await navigator.gpu.requestAdapter()); } catch (e) { S.gpu = false; }
+        S.diag = await diagnose();
+        S.gpu = S.diag.webgpu;
         return S.gpu;
+    }
+    // Why there is no WebGPU, and what the user can do about it (Chrome/Edge).
+    async function diagnose() {
+        if (!window.isSecureContext) return { webgpu: false, reason: "Die Seite läuft nicht über https.", steps: ["Die App über den https-Link öffnen, nicht als Datei."] };
+        if (!navigator.gpu) return { webgpu: false, reason: "Dieser Browser stellt kein WebGPU bereit.", steps: ["Chrome bzw. Edge aktualisieren (Menü → Hilfe → Über Google Chrome).", "chrome://flags öffnen, nach „WebGPU“ suchen und „Unsafe WebGPU Support“ aktivieren, dann neu starten."] };
+        for (const opt of [{ powerPreference: "high-performance" }, {}, { powerPreference: "low-power" }]) {
+            try { if (await navigator.gpu.requestAdapter(opt)) return { webgpu: true }; } catch (e) { /* try the next option */ }
+        }
+        return { webgpu: false, reason: "Chrome hat WebGPU, bekommt aber keinen Zugriff auf die Grafikkarte.",
+            steps: ["chrome://settings/system öffnen → „Grafikbeschleunigung verwenden, wenn verfügbar“ einschalten → Chrome neu starten.",
+                "chrome://gpu öffnen: Bei „WebGPU“ sollte „Hardware accelerated“ stehen.",
+                "Grafiktreiber aktualisieren (Intel, AMD oder NVIDIA).",
+                "Steht die Grafikkarte auf Chromes Sperrliste: chrome://flags → „Unsafe WebGPU Support“ und „Override software rendering list“ aktivieren, neu starten."] };
     }
     // Phones and small machines get the small model; desktops with plenty of memory the large one.
     function autoSize() {
@@ -142,12 +163,100 @@
         return { dir: !!dir };
     }
 
+    function cpuSize() { return CPU_MODELS[C.cpuSize] ? C.cpuSize : "fast"; }
+    // Big single file (GGUF): streamed straight to disk — into the picked folder (resumable via
+    // Range requests) or into Cache Storage — never held completely in memory.
+    async function getGguf(url, onProgress, askFolder) {
+        const name = url.split("/").pop();
+        const cache = await caches.open("jarvis-cpu-model");
+        const hit = await cache.match(url);
+        let dir = null;
+        if (fsSupported()) {
+            dir = await ensureDirPermission(S.dir || await savedDir());
+            if (!dir && askFolder) { try { dir = await pickDir(); } catch (e) { dir = null; } }
+            if (dir) S.dirName = dir.name;
+        }
+        if (dir) {
+            // 64-MB Range segments, each committed to disk right away: an interruption (or a page
+            // reload) only loses the current segment, and the next attempt resumes where it stopped.
+            const fh = await dir.getFileHandle(name, { create: true });
+            const SEG = S.segBytes || 64 * 1024 * 1024;   // tests use smaller segments
+            let total = 0;
+            for (let i = 0; i < 5 && !total; i++) {
+                try {
+                    const r = await fetch(url, { headers: { Range: "bytes=0-0" }, cache: "no-store" });
+                    const cr = r.headers.get("Content-Range");
+                    total = cr ? Number(cr.split("/")[1]) : Number(r.headers.get("Content-Length")) || 0;
+                    try { await r.body.cancel(); } catch (e) { /* ignore */ }
+                } catch (e) { await new Promise((res) => setTimeout(res, 1500 * 2 ** i)); }
+            }
+            if (!total) throw new Error(`Größe von ${name} nicht ermittelbar (keine Verbindung)`);
+            let have = (await fh.getFile()).size;
+            if (have > total) { const w0 = await fh.createWritable(); await w0.close(); have = 0; }
+            let fails = 0;
+            while (have < total) {
+                const end = Math.min(have + SEG, total) - 1;
+                try {
+                    const res = await fetch(url, { headers: { Range: `bytes=${have}-${end}` }, cache: "no-store" });
+                    if (res.status !== 206) throw new Error(res.ok ? "Server unterstützt kein Fortsetzen" : `HTTP ${res.status}`);
+                    const buf = await res.arrayBuffer();
+                    const w = await fh.createWritable({ keepExistingData: true });
+                    await w.seek(have); await w.write(buf); await w.close();
+                    have += buf.byteLength; fails = 0;
+                    onProgress(have / total, `Lade ${name} … ${(have / 1e6).toFixed(0)} von ${(total / 1e6).toFixed(0)} MB — gespeichert in „${S.dirName}“`);
+                } catch (e) {
+                    if (++fails > 6) throw new Error(`Download von ${name} abgebrochen (${(e && e.message) || e}) — beim nächsten Versuch geht es bei ${(have / 1e6).toFixed(0)} MB weiter`);
+                    onProgress(have / total, `Verbindung unterbrochen — setze bei ${(have / 1e6).toFixed(0)} MB fort (${fails}/6) …`);
+                    await new Promise((r) => setTimeout(r, 1500 * 2 ** (fails - 1)));
+                }
+            }
+            return await fh.getFile();
+        }
+        if (hit) return await hit.blob();
+        for (let attempt = 0; attempt < 5; attempt++) {
+            try {
+                const res = await fetch(url, { cache: "no-store" });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const total = Number(res.headers.get("Content-Length")) || 0;
+                let done = 0;
+                const body = res.body.pipeThrough(new TransformStream({ transform(chunk, ctl) { done += chunk.length; onProgress(total ? done / total : 0, `Lade ${name} … ${(done / 1e6).toFixed(0)} von ${(total / 1e6).toFixed(0)} MB`); ctl.enqueue(chunk); } }));
+                await cache.put(url, new Response(body, { headers: { "Content-Type": "application/octet-stream" } }));
+                return await (await cache.match(url)).blob();
+            } catch (e) {
+                onProgress(0, `Verbindung unterbrochen — neuer Versuch (${attempt + 1}/5) …`);
+                await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+            }
+        }
+        throw new Error(`Download von ${name} nach 5 Versuchen abgebrochen`);
+    }
+    async function loadCpu(onProgress, opts) {
+        const m = CPU_MODELS[cpuSize()];
+        const report = (p, t) => { S.progress = p; S.text = t; onProgress && onProgress(p, t); };
+        const blob = await getGguf(m.url, (p, t) => report(p * 0.9, t), opts.askFolder);
+        report(0.92, "Starte KI-Gehirn im CPU-Modus …");
+        const { Wllama } = await import(WLLAMA);
+        const w = new Wllama({ default: WLLAMA_WASM }, { suppressNativeLog: true });
+        await w.loadModel([blob], { n_ctx: 2048 });
+        report(1, "KI-Gehirn bereit (CPU-Modus)");
+        // Same surface as WebLLM, so the conversation code does not care which engine runs.
+        return {
+            kind: "cpu",
+            chat: { completions: { create: (req) => w.createChatCompletion({ messages: req.messages, stream: !!req.stream, temperature: req.temperature, max_tokens: req.max_tokens }) } },
+        };
+    }
+
     function load(onProgress, opts = {}) {
         if (S.engine) return Promise.resolve(S.engine);
         if (S.loading) return S.loading;
         S.error = null;
         S.loading = (async () => {
-            if (!(await supported())) throw new Error("Dieser Browser hat kein WebGPU — bitte Chrome oder Edge nutzen.");
+            if (!(await supported())) {
+                S.engine = await loadCpu(onProgress, opts);
+                S.engineKind = "cpu";
+                C.downloaded = true; C.loadedSize = "cpu:" + cpuSize(); save();
+                return S.engine;
+            }
+            S.engineKind = "webgpu";
             await downloadModel((p, t) => { S.progress = p * 0.9; S.text = t; onProgress && onProgress(S.progress, S.text); }, opts);
             const { CreateWebWorkerMLCEngine } = await import(WEBLLM);
             const worker = new Worker("jarvis-llm-worker.js", { type: "module" });
@@ -176,6 +285,12 @@ ${ctx}`;
         const A = window.TBJarvisActions;
         if (!A) return extra || "";
         const st = A.status();
+        // CPU mode: compact context, every prompt token costs time without a graphics card.
+        if (S.engineKind === "cpu") {
+            const L = window.TBNewsAI && window.TBNewsAI.last;
+            const nw = L && L.count ? `News: Stimmung ${L.label}; ${L.top.slice(0, 3).map((n) => `${n.trusted || n.source}: ${n.title}`).join(" | ")}` : "Keine News.";
+            return `Depot ${st.equity_usdt} USDT, heute ${st.today_usdt}, Positionen ${st.positions.length}, Automatik ${st.auto_mode ? "an" : "aus"}, BTC ${st.btc_usdt}.\n${nw}${extra ? `\n${extra}` : ""}`;
+        }
         const news = window.TBNewsAI && window.TBNewsAI.contextText ? window.TBNewsAI.contextText()
             : A.news(5, false).map((n, i) => `${i + 1}. ${n.source}, vor ${n.minutes_ago} Min.: ${n.title}`).join("\n");
         return `Bot-Status: ${JSON.stringify(st)}\n${news || "Keine Meldungen."}${extra ? `\n\nZUSATZINFOS ZUR FRAGE:\n${extra}` : ""}`;
@@ -260,7 +375,7 @@ ${ctx}`;
     }
 
     window.JarvisLocal = {
-        MODELS, config: C, save, state: S, supported, load, ask, summarize, reset, remove, webSearch, size,
+        MODELS, CPU_MODELS, cpuSize, diagnose, config: C, save, state: S, supported, load, ask, summarize, reset, remove, webSearch, size,
         fsSupported, pickDir, savedDir,
         ready: () => !!S.engine, loading: () => !!S.loading && !S.engine,
     };

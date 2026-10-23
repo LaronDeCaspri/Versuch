@@ -8069,7 +8069,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "48.0";
+const APP_VERSION = "49.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
