@@ -166,7 +166,7 @@ function renderSignalTile(pending, fallback) {
                 <div class="head">Warum dieser Trade? · ${pending.signals.length} Strategie${pending.signals.length !== 1 ? "n" : ""}</div>
                 ${pending.signals.map((s) => `<div class="rat-item"><span class="rat-strat">${s.strategy.replace(/_/g, " ")}</span>${s.reason}</div>`).join("")}
                 ${pending.highCorr.length ? `<div class="corr-warning">⚠ Hohe Korrelation mit offener Position: ${pending.highCorr.map((c) => `${c.sym} (ρ ${c.corr.toFixed(2)})`).join(", ")}. Diversifikations-Warnung.</div>` : ""}
-                ${pending.newsForSymbol.length ? `<div class="rat-news"><div class="head">Aktuelle News zu ${pending.symbol.replace("/USDT","")}</div>${pending.newsForSymbol.map((n) => `<a href="${n.url}" target="_blank" rel="noopener">• ${n.title} <small style="color:var(--muted)">(${n.source})</small></a>`).join("")}</div>` : ""}
+                ${pending.newsForSymbol.length ? `<div class="rat-news"><div class="head">Aktuelle News zu ${pending.symbol.replace("/USDT","")}</div>${pending.newsForSymbol.map((n) => `<a href="${_escHtml(n.url)}" target="_blank" rel="noopener noreferrer">• ${_escHtml(n.title)} <small style="color:var(--muted)">(${_escHtml(n.source)})</small></a>`).join("")}</div>` : ""}
             </div>
             <div class="btn-row" style="margin-top:16px;">
                 <button class="confirm" id="confirm-btn">✓ BESTÄTIGEN</button>
@@ -1111,92 +1111,165 @@ function checkWatchlist() {
     saveWatchlist();
 }
 
-// ============ NEW: news integration ============
+// ============ news integration (v37) ============
+// Keyless, browser-friendly sources, queried in parallel and merged. Every item is
+// normalised to plain text + http(s) link before it reaches the UI.
+const NEWS_FEEDS = [
+    { name: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/" },
+    { name: "Cointelegraph", url: "https://cointelegraph.com/rss" },
+    { name: "Decrypt", url: "https://decrypt.co/feed" },
+    { name: "Bitcoin Magazine", url: "https://bitcoinmagazine.com/.rss/full/" },
+    { name: "The Block", url: "https://www.theblock.co/rss.xml" },
+];
+const RSS_PROXIES = [
+    { name: "allorigins", wrap: (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u) },
+    { name: "codetabs", wrap: (u) => "https://api.codetabs.com/v1/proxy/?quest=" + encodeURIComponent(u) },
+];
+
+function _escHtml(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function _plainText(v) {
+    const raw = String(v == null ? "" : v);
+    if (typeof DOMParser === "undefined") return raw.replace(/<[^>]*>/g, "").trim();
+    return (new DOMParser().parseFromString(raw, "text/html").body.textContent || "").replace(/\s+/g, " ").trim();
+}
+function _safeUrl(v) {
+    try { const u = new URL(String(v)); return u.protocol === "https:" || u.protocol === "http:" ? u.href : null; } catch (e) { return null; }
+}
+function _newsItem(o) {
+    const title = _plainText(o.title).slice(0, 220);
+    const url = _safeUrl(o.url);
+    if (!title || !url) return null;
+    const d = new Date(o.ts);
+    return {
+        title, url,
+        source: _plainText(o.source).slice(0, 60) || "News",
+        ts: isNaN(d) ? new Date().toISOString() : d.toISOString(),
+        categories: (o.categories || []).map(_plainText).filter(Boolean).slice(0, 4),
+        body: _plainText(o.body).slice(0, 240),
+    };
+}
+async function _fetchTimeout(url, ms = 8000) {
+    const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const t = setTimeout(() => ctl && ctl.abort(), ms);
+    try { return await fetch(url, ctl ? { signal: ctl.signal } : undefined); }
+    finally { clearTimeout(t); }
+}
+
+async function _fetchCoinDeskData() {
+    const res = await _fetchTimeout("https://data-api.coindesk.com/news/v1/article/list?lang=EN&limit=30");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const raw = await res.json();
+    const list = raw && (raw.Data || raw.data);
+    if (!Array.isArray(list) || !list.length) throw new Error("keine Daten");
+    return list.map((n) => _newsItem({
+        title: n.TITLE || n.title, url: n.URL || n.url,
+        source: (n.SOURCE_DATA && (n.SOURCE_DATA.NAME || n.SOURCE_DATA.name)) || n.source || "CoinDesk",
+        ts: (n.PUBLISHED_ON || n.published_on) ? (n.PUBLISHED_ON || n.published_on) * 1000 : Date.now(),
+        categories: (n.CATEGORY_DATA || []).map((c) => c.CATEGORY || c.NAME),
+        body: n.BODY || n.body,
+    })).filter(Boolean);
+}
+
 async function _fetchCryptoCompare() {
-    const res = await fetch("https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest");
+    const res = await _fetchTimeout("https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest");
     if (!res.ok) throw new Error("HTTP " + res.status);
     const raw = await res.json();
-    if (!raw?.Data?.length) throw new Error("keine Daten");
-    return raw.Data.slice(0, 30).map((n) => ({
-        title: n.title, url: n.url, source: n.source_info?.name || n.source,
-        ts: new Date(n.published_on * 1000).toISOString(),
-        categories: (n.categories || "").split("|").filter(Boolean),
-        body: (n.body || "").slice(0, 240),
-    }));
+    if (!raw || !Array.isArray(raw.Data) || !raw.Data.length) throw new Error(raw && raw.Message ? raw.Message : "keine Daten");
+    return raw.Data.slice(0, 30).map((n) => _newsItem({
+        title: n.title, url: n.url, source: (n.source_info && n.source_info.name) || n.source,
+        ts: n.published_on * 1000, categories: (n.categories || "").split("|"), body: n.body,
+    })).filter(Boolean);
 }
 
-async function _fetchRss2Json(rssUrl, sourceName) {
-    const proxy = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(rssUrl);
-    const res = await fetch(proxy);
+async function _fetchRss2Json(feed) {
+    const res = await _fetchTimeout("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(feed.url));
     if (!res.ok) throw new Error("HTTP " + res.status);
     const raw = await res.json();
-    if (raw.status !== "ok" || !raw.items?.length) throw new Error(raw.message || "keine Items");
-    return raw.items.slice(0, 30).map((n) => ({
-        title: n.title, url: n.link, source: sourceName,
-        ts: n.pubDate || new Date().toISOString(),
-        categories: (n.categories || []).slice(0, 4),
-        body: (n.description || "").replace(/<[^>]+>/g, "").slice(0, 240),
-    }));
+    if (raw.status !== "ok" || !raw.items || !raw.items.length) throw new Error(raw.message || "keine Items");
+    return raw.items.slice(0, 30).map((n) => _newsItem({
+        title: n.title, url: n.link, source: feed.name, ts: n.pubDate, categories: n.categories, body: n.description,
+    })).filter(Boolean);
 }
 
-const _fetchCoinDesk = () => _fetchRss2Json("https://www.coindesk.com/arc/outboundfeeds/rss/", "CoinDesk");
-const _fetchCointelegraph = () => _fetchRss2Json("https://cointelegraph.com/rss", "Cointelegraph");
-const _fetchDecrypt = () => _fetchRss2Json("https://decrypt.co/feed", "Decrypt");
+function _parseRss(xmlText, sourceName) {
+    const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+    if (doc.getElementsByTagName("parsererror").length) throw new Error("kein gültiger Feed");
+    const nodes = [...doc.getElementsByTagName("item"), ...doc.getElementsByTagName("entry")];
+    const text = (el, tag) => { const x = el.getElementsByTagName(tag)[0]; return x ? x.textContent : ""; };
+    return nodes.slice(0, 30).map((it) => {
+        const linkEl = it.getElementsByTagName("link")[0];
+        const link = (linkEl && (linkEl.textContent.trim() || linkEl.getAttribute("href"))) || "";
+        return _newsItem({
+            title: text(it, "title"), url: link, source: sourceName,
+            ts: text(it, "pubDate") || text(it, "published") || text(it, "updated") || text(it, "dc:date"),
+            categories: [...it.getElementsByTagName("category")].map((c) => c.textContent || c.getAttribute("term")),
+            body: text(it, "description") || text(it, "summary"),
+        });
+    }).filter(Boolean);
+}
+
+async function _fetchRssViaProxy(feed) {
+    let last = null;
+    for (const proxy of RSS_PROXIES) {
+        try {
+            const res = await _fetchTimeout(proxy.wrap(feed.url));
+            if (!res.ok) throw new Error(`${proxy.name} HTTP ${res.status}`);
+            const items = _parseRss(await res.text(), feed.name);
+            if (items.length) return items;
+            throw new Error(`${proxy.name}: leer`);
+        } catch (e) { last = e; }
+    }
+    throw last || new Error("kein Proxy erreichbar");
+}
 
 async function _fetchReddit() {
-    const raw = await fetch("https://www.reddit.com/r/CryptoCurrency/hot.json?limit=25").then((r) => r.json());
-    const kids = raw?.data?.children || [];
-    return kids.filter((k) => !k.data.stickied).map((k) => {
-        const d = k.data;
-        return {
-            title: d.title,
-            url: "https://reddit.com" + d.permalink,
-            source: "r/CryptoCurrency",
-            ts: new Date(d.created_utc * 1000).toISOString(),
-            categories: [d.link_flair_text].filter(Boolean),
-            body: (d.selftext || "").slice(0, 240),
-        };
-    });
+    const res = await _fetchTimeout("https://www.reddit.com/r/CryptoCurrency/hot.json?limit=25");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const raw = await res.json();
+    const kids = (raw && raw.data && raw.data.children) || [];
+    return kids.filter((k) => !k.data.stickied).map((k) => _newsItem({
+        title: k.data.title, url: "https://www.reddit.com" + k.data.permalink, source: "r/CryptoCurrency",
+        ts: k.data.created_utc * 1000, categories: [k.data.link_flair_text], body: k.data.selftext,
+    })).filter(Boolean);
 }
 
-async function _fetchCryptoPanic() {
-    const raw = await fetch("https://cryptopanic.com/api/free/v1/posts/?public=true").then((r) => r.json());
-    const results = raw?.results || [];
-    return results.map((p) => ({
-        title: p.title, url: p.url, source: p.source?.title || "CryptoPanic",
-        ts: p.published_at || new Date().toISOString(),
-        categories: (p.currencies || []).map((c) => c.code),
-        body: "",
-    }));
-}
+function _newsKey(n) { return n.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80); }
 
 async function fetchNews(force = false) {
     if (!force && Date.now() - state.lastNewsFetch < 5 * 60 * 1000 && state.news.length) return;
-    state.newsError = null;
-    // try sources in order, keep whichever gets first non-empty result
-    const attempts = [
-        { name: "CoinDesk", fn: _fetchCoinDesk },
-        { name: "Cointelegraph", fn: _fetchCointelegraph },
-        { name: "Decrypt", fn: _fetchDecrypt },
-        { name: "CryptoCompare", fn: _fetchCryptoCompare },
-        { name: "Reddit", fn: _fetchReddit },
-        { name: "CryptoPanic", fn: _fetchCryptoPanic },
+    // Stage 1: direct APIs + rss2json in parallel; stage 2 (only if thin): RSS via CORS proxies; stage 3: Reddit.
+    const stages = [
+        [{ name: "CoinDesk Data", fn: _fetchCoinDeskData }, { name: "CryptoCompare", fn: _fetchCryptoCompare },
+         ...NEWS_FEEDS.slice(0, 3).map((f) => ({ name: `${f.name} (rss2json)`, fn: () => _fetchRss2Json(f) }))],
+        NEWS_FEEDS.map((f) => ({ name: f.name, fn: () => _fetchRssViaProxy(f) })),
+        [{ name: "Reddit", fn: _fetchReddit }],
     ];
-    const errors = [];
-    for (const src of attempts) {
-        try {
-            const items = await src.fn();
-            if (items && items.length) {
-                state.news = items;
-                state.lastNewsFetch = Date.now();
-                state.newsSource = src.name;
-                return;
+    const merged = new Map();
+    const ok = [], errors = [];
+    for (const stage of stages) {
+        const results = await Promise.allSettled(stage.map((src) => src.fn()));
+        results.forEach((r, i) => {
+            const name = stage[i].name;
+            if (r.status === "fulfilled" && r.value.length) {
+                ok.push(name);
+                for (const n of r.value) { const k = _newsKey(n); if (!merged.has(k)) merged.set(k, n); }
+            } else {
+                errors.push(`${name}: ${r.status === "rejected" ? ((r.reason && r.reason.name === "AbortError") ? "Zeitüberschreitung" : (r.reason && r.reason.message) || "Fehler") : "leer"}`);
             }
-        } catch (e) {
-            errors.push(`${src.name}: ${e.message || "fehler"}`);
-        }
+        });
+        if (merged.size >= 10) break;
     }
-    state.newsError = errors.join(" · ") || "keine Quelle erreichbar";
+    state.newsSourcesTried = ok.length + errors.length;
+    if (merged.size) {
+        state.news = [...merged.values()].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 40);
+        state.lastNewsFetch = Date.now();
+        state.newsSource = ok.slice(0, 3).join(", ") + (ok.length > 3 ? ` +${ok.length - 3}` : "");
+        state.newsError = null;
+    } else {
+        state.newsError = errors.join(" · ") || "keine Quelle erreichbar";
+    }
 }
 
 function filterNewsForSymbol(symbol) {
@@ -1218,7 +1291,7 @@ function renderNewsList() {
     </div>`;
     if (!state.news.length) {
         el.innerHTML = state.newsError
-            ? `<div style="color:var(--amber); font-size:0.82rem;">⚠ ${state.newsError}<br><small>Wahrscheinlich CORS-Blockade durch Browser oder Rate-Limit. Klicke auf Aktualisieren.</small></div>${refreshBtn}`
+            ? `<div style="color:var(--amber); font-size:0.82rem;">⚠ Keine News-Quelle erreichbar (${state.newsSourcesTried || 0} geprüft). Der Bot handelt trotzdem normal — News fließen nicht in die Entscheidungen ein.<br><small style="color:var(--muted);">${_escHtml(state.newsError)}</small></div>${refreshBtn}`
             : `<div style="color:var(--muted); font-size:0.82rem;">News werden geladen …</div>${refreshBtn}`;
         const btn = $("#news-refresh");
         if (btn) btn.onclick = async () => {
@@ -1228,12 +1301,12 @@ function renderNewsList() {
         };
         return;
     }
-    el.innerHTML = state.news.slice(0, 10).map((n) => {
+    el.innerHTML = state.news.slice(0, 12).map((n) => {
         const t = new Date(n.ts).toLocaleString("de-DE", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
-        const tags = (n.categories || []).slice(0, 4).map((c) => `<span class="tag">${c}</span>`).join("");
+        const tags = (n.categories || []).slice(0, 4).map((c) => `<span class="tag">${_escHtml(c)}</span>`).join("");
         return `<div class="news-item">
-            <div class="meta">${n.source} · ${t}</div>
-            <a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>
+            <div class="meta">${_escHtml(n.source)} · ${_escHtml(t)}</div>
+            <a href="${_escHtml(n.url)}" target="_blank" rel="noopener noreferrer">${_escHtml(n.title)}</a>
             <div class="tags">${tags}</div>
         </div>`;
     }).join("") + refreshBtn;
@@ -5435,7 +5508,7 @@ function collectSourceStatus() {
 
     // News
     sources.push({
-        name: "Live-News", url: "rss2json / cryptocompare / reddit",
+        name: "Live-News", url: "CoinDesk · CryptoCompare · RSS (CoinDesk, Cointelegraph, Decrypt, Bitcoin Magazine, The Block) · Reddit",
         lastOk: state.lastNewsFetch,
         age: state.lastNewsFetch ? now - state.lastNewsFetch : null,
         status: (state.news?.length > 0) ? _statusFromAge(state.lastNewsFetch ? now - state.lastNewsFetch : null, 10 * 60 * 1000, 30 * 60 * 1000) : "err",
