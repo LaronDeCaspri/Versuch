@@ -1120,8 +1120,34 @@ const NEWS_FEEDS = [
     { name: "Decrypt", url: "https://decrypt.co/feed" },
     { name: "Bitcoin Magazine", url: "https://bitcoinmagazine.com/.rss/full/" },
     { name: "The Block", url: "https://www.theblock.co/rss.xml" },
+    { name: "Blockworks", url: "https://blockworks.co/feed" },
+    { name: "Reuters/Bloomberg", url: "https://news.google.com/rss/search?q=(bitcoin+OR+ethereum+OR+crypto)+(site:reuters.com+OR+site:bloomberg.com)+when:1d&hl=en-US&gl=US&ceid=US:en" },
     { name: "Google News", url: "https://news.google.com/rss/search?q=bitcoin+OR+ethereum+OR+crypto+when:1d&hl=en-US&gl=US&ceid=US:en" },
 ];
+// v40: editorially accountable newsrooms (named editors, corrections policy). Only these
+// trigger pop-ups; community/aggregator items (Reddit, unknown blogs) stay in the list only.
+const TRUSTED_NEWS = [
+    ["coindesk", "CoinDesk"], ["theblock", "The Block"], ["the block", "The Block"],
+    ["blockworks", "Blockworks"], ["decrypt", "Decrypt"], ["cointelegraph", "Cointelegraph"], ["bitcoin magazine", "Bitcoin Magazine"],
+    ["bitcoinmagazine", "Bitcoin Magazine"], ["reuters", "Reuters"], ["bloomberg", "Bloomberg"], ["ft.com", "Financial Times"],
+    ["financial times", "Financial Times"], ["wsj", "Wall Street Journal"], ["wall street journal", "Wall Street Journal"],
+    ["cnbc", "CNBC"], ["apnews", "AP"], ["associated press", "AP"], ["dlnews", "DL News"], ["dl news", "DL News"],
+    ["coinmarketcap", "CoinMarketCap"],   // last: the original newsroom wins when CMC relays it
+];
+function _newsTrusted(n) {
+    let host = "";
+    try { host = new URL(n.url).hostname; } catch (e) { /* no host */ }
+    const src = `${n.source} ${host}`.toLowerCase();
+    // Google News titles end with " - Reuters"; accept the publisher suffix only there.
+    const suffix = /news\.google\./.test(host) || /google news|reuters\/bloomberg/.test(src) ? ((n.title.toLowerCase().match(/ - ([^-]+)$/) || [])[1] || "") : "";
+    const hit = TRUSTED_NEWS.find(([k]) => (!suffix && src.includes(k)) || (suffix && suffix.includes(k)));
+    if (!hit) return null;
+    if (hit[1] === "CoinMarketCap") {
+        const orig = String(n.source).split(" · ")[0];
+        return orig && orig !== "CoinMarketCap" ? `${orig} · via CMC` : "CoinMarketCap";
+    }
+    return hit[1];
+}
 const RSS_PROXIES = [
     { name: "allorigins", wrap: (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u) },
     { name: "codetabs", wrap: (u) => "https://api.codetabs.com/v1/proxy/?quest=" + encodeURIComponent(u) },
@@ -1237,6 +1263,37 @@ async function _fetchRssViaProxy(feed) {
     throw last || new Error("kein Proxy erreichbar");
 }
 
+// CoinMarketCap headlines (the feed behind coinmarketcap.com/headlines/news). Keyless;
+// tried directly first, then through the same CORS proxies as the RSS feeds.
+function _parseCmc(raw) {
+    const list = raw && (Array.isArray(raw.data) ? raw.data : raw.data && Array.isArray(raw.data.list) ? raw.data.list : null);
+    if (!list || !list.length) throw new Error("keine Daten");
+    return list.slice(0, 30).map((n) => {
+        const m = n.meta || n;
+        const url = m.sourceUrl || m.url || (n.slug ? `https://coinmarketcap.com/community/articles/${encodeURIComponent(n.slug)}/` : null);
+        return _newsItem({
+            title: m.title, url, source: m.sourceName ? `${m.sourceName} · CoinMarketCap` : "CoinMarketCap",
+            ts: m.releasedAt || n.releasedAt || m.createdAt || n.createdAt,
+            categories: (n.assets || []).map((a) => a.coinSymbol || a.symbol || a.name).filter(Boolean),
+            body: m.subtitle || m.description || "",
+        });
+    }).filter(Boolean);
+}
+async function _fetchCoinMarketCap() {
+    const url = "https://api.coinmarketcap.com/content/v3/news?page=1&size=30";
+    const tries = [url, ...RSS_PROXIES.map((p) => p.wrap(url))];
+    let last = null;
+    for (const u of tries) {
+        try {
+            const res = await _fetchTimeout(u);
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            const items = _parseCmc(JSON.parse(await res.text()));
+            if (items.length) return items;
+        } catch (e) { last = e; }
+    }
+    throw last || new Error("nicht erreichbar");
+}
+
 async function _fetchReddit() {
     const res = await _fetchTimeout("https://www.reddit.com/r/CryptoCurrency/hot.json?limit=25");
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1251,10 +1308,10 @@ async function _fetchReddit() {
 function _newsKey(n) { return n.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80); }
 
 async function fetchNews(force = false) {
-    if (!force && Date.now() - state.lastNewsFetch < 5 * 60 * 1000 && state.news.length) return;
+    if (!force && Date.now() - state.lastNewsFetch < 2 * 60 * 1000 && state.news.length) return;
     // Stage 1: direct APIs + rss2json in parallel; stage 2 (only if thin): RSS via CORS proxies; stage 3: Reddit.
     const stages = [
-        [{ name: "GDELT", fn: _fetchGdelt }, { name: "CoinDesk Data", fn: _fetchCoinDeskData }, { name: "CryptoCompare", fn: _fetchCryptoCompare },
+        [{ name: "CoinMarketCap", fn: _fetchCoinMarketCap }, { name: "GDELT", fn: _fetchGdelt }, { name: "CoinDesk Data", fn: _fetchCoinDeskData }, { name: "CryptoCompare", fn: _fetchCryptoCompare },
          ...NEWS_FEEDS.slice(0, 3).map((f) => ({ name: `${f.name} (rss2json)`, fn: () => _fetchRss2Json(f) }))],
         NEWS_FEEDS.map((f) => ({ name: f.name, fn: () => _fetchRssViaProxy(f) })),
         [{ name: "Reddit", fn: _fetchReddit }],
@@ -1280,6 +1337,7 @@ async function fetchNews(force = false) {
         state.lastNewsFetch = Date.now();
         state.newsSource = ok.slice(0, 3).join(", ") + (ok.length > 3 ? ` +${ok.length - 3}` : "");
         state.newsError = null;
+        try { if (typeof _npCheck === "function") _npCheck(); } catch (e) { /* popups are optional */ }
     } else {
         state.newsError = errors.join(" · ") || "keine Quelle erreichbar";
     }
@@ -7975,8 +8033,8 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "39.0";
-const APP_BUILD = "2026-09-25";
+const APP_VERSION = "40.0";
+const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
 function showSplashIfFirstLaunch() {
@@ -10660,12 +10718,16 @@ function _rdHue(sym) { let h = 0; for (const ch of String(sym)) h = (h * 31 + ch
 function _rdLogo(c, size) {
     const hue = _rdHue(c.symbol);
     const initials = _escHtml(String(c.symbol).slice(0, 4));
-    const img = c.image ? `<img class="v39-img" src="${_escHtml(c.image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="${size}" height="${size}">` : "";
+    const src = RD.safeImage(c.image), alt = RD.safeImage(c.imageAlt);
+    const img = src ? `<img class="v39-img" src="${_escHtml(src)}"${alt ? ` data-alt="${_escHtml(alt)}"` : ""} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="${size}" height="${size}">` : "";
     return `<span class="v39-logo" style="--s:${size}px; --h:${hue};"><span class="v39-initials">${initials}</span>${img}</span>`;
 }
 document.addEventListener("error", (e) => {
     const t = e.target;
-    if (t && t.classList && t.classList.contains("v39-img")) t.remove();
+    if (!t || !t.classList || !t.classList.contains("v39-img")) return;
+    // CoinGecko down → try the pinned static logo once, then fall back to initials.
+    const alt = t.dataset.alt;
+    if (alt) { delete t.dataset.alt; t.src = alt; } else t.remove();
 }, true);
 document.addEventListener("load", (e) => {
     const t = e.target;
@@ -10721,7 +10783,7 @@ async function _rdRefresh() {
     RADAR.loading = false;
     _rdRender();
 }
-setTimeout(() => { _rdRefresh().catch(() => { RADAR.loading = false; }); }, 8000);
+setTimeout(() => { _rdRefresh().catch(() => { RADAR.loading = false; }); }, 2500);
 setInterval(() => { _rdRefresh().catch(() => { RADAR.loading = false; }); }, 5 * 60e3);
 
 function _rdSparkSvg(prices) {
@@ -10833,16 +10895,25 @@ function _rdLayout(coins, widthPx) {
     return out;
 }
 
+// Other modules insert cards after the signal later on; keep the radar pinned right below it.
+function _rdPin(el = document.getElementById("v39-radar-card"), home = document.querySelector('[data-pane="dashboard"]')) {
+    if (!el || !home) return;
+    const anchor = document.getElementById("signal-tile");
+    if (anchor && anchor.parentElement === home) { if (anchor.nextElementSibling !== el) anchor.after(el); }
+    else if (!el.parentElement) home.prepend(el);
+}
+setInterval(() => _rdPin(), 1500);
 function _rdRender() {
-    const markt = document.querySelector('[data-pane="markt"]');
-    if (!markt) return;
+    // v40: lives on the Start tab directly below the live signal — the first thing you see.
+    const home = document.querySelector('[data-pane="dashboard"]');
+    if (!home) return;
     let el = document.getElementById("v39-radar-card");
     if (!el) {
         el = document.createElement("div");
         el.id = "v39-radar-card";
         el.className = "card v31-card v39-radar-card";
-        markt.insertBefore(el, markt.firstChild);
     }
+    _rdPin(el, home);
     const coins = RADAR.coins;
     const shown = coins.slice(0, 14);
     const hype = coins.filter((c) => c.level === "HYPE").length;
@@ -10925,10 +10996,10 @@ document.addEventListener("click", (e) => {
     const ref = e.target.closest && e.target.closest("[data-v39-refresh]");
     if (ref) _rdRefresh().catch(() => { RADAR.loading = false; });
 });
-setTimeout(_rdRender, 1200);
+setTimeout(_rdRender, 400);
 let _rdResizeT = null;
 window.addEventListener("resize", () => { clearTimeout(_rdResizeT); _rdResizeT = setTimeout(_rdRelayout, 200); });
-document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-tab="markt"]')) setTimeout(_rdRelayout, 60); });
+document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-tab="dashboard"]')) setTimeout(_rdRelayout, 60); });
 
 if (typeof INFO_DB === "object") {
     INFO_DB["radar"] = {
@@ -10942,6 +11013,134 @@ if (typeof INFO_DB === "object") {
                <p>Fehlt eine Quelle, wird der Wert aus den übrigen gebildet. Ab 70 gilt „HYPE", ab 45 „ERHÖHT".</p>
                <p>Wichtig: Das Radar ist ein Hinweis. Es verändert keine Entscheidung des Bots, weil es für Suchtrends keine Historie gibt, mit der man es ehrlich testen könnte. Hype ist oft das Gegenteil einer guten Einstiegsgelegenheit.</p>`,
     };
+}
+
+// ============================================================================
+// v40 — News-Popups: neue Meldungen aus geprüften Redaktionen erscheinen sofort
+// als Karte oben rechts; schließen per ✕. Nur Information, kein Handelssignal.
+// ============================================================================
+const NP = { queue: [], shown: [], max: 3 };
+const NP_SEEN_KEY = "tb_news_seen";
+const NP_MUTE_KEY = "tb_news_popups";   // "off" = aus, Zahl = stumm bis Zeitstempel
+NP.seen = (() => { try { return JSON.parse(localStorage.getItem(NP_SEEN_KEY) || "null"); } catch (e) { return null; } })();
+
+function _npSaveSeen() {
+    try { localStorage.setItem(NP_SEEN_KEY, JSON.stringify(NP.seen.slice(-400))); } catch (e) { /* storage full */ }
+}
+function _npMuted() {
+    let v = null;
+    try { v = localStorage.getItem(NP_MUTE_KEY); } catch (e) { /* no storage */ }
+    if (v === "off") return true;
+    const until = Number(v);
+    return Number.isFinite(until) && until > Date.now();
+}
+function _npAgo(ts) {
+    const m = Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 60e3));
+    return m < 1 ? "gerade eben" : m < 60 ? `vor ${m} Min.` : `vor ${Math.round(m / 60)} Std.`;
+}
+function _npCoins(n) {
+    const known = Object.keys(RD.NAMES || {});
+    return known.filter((sym) => RD.countMentions([n], sym, RD.NAMES[sym], 0) > 0).slice(0, 3);
+}
+
+// Called after every successful news fetch.
+function _npCheck() {
+    const items = state.news || [];
+    if (!items.length) return;
+    const first = !Array.isArray(NP.seen);
+    if (first) NP.seen = [];
+    const seen = new Set(NP.seen);
+    const fresh = items.filter((n) => !seen.has(_newsKey(n)));
+    for (const n of fresh) NP.seen.push(_newsKey(n));
+    _npSaveSeen();
+    const now = Date.now();
+    // First start: no flood of old headlines — at most the newest one from the last 45 minutes.
+    const maxAge = first ? 45 * 60e3 : 6 * 3600e3;
+    let cand = fresh
+        .map((n) => ({ ...n, trusted: _newsTrusted(n) }))
+        .filter((n) => n.trusted && now - new Date(n.ts).getTime() < maxAge)
+        .sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    if (first) cand = cand.slice(0, 1);
+    if (!cand.length || _npMuted()) return;
+    // Newest on top; whatever no longer fits waits in the queue.
+    NP.shown = [...cand, ...NP.shown];
+    NP.queue = [...NP.shown.splice(NP.max), ...NP.queue].slice(0, 12);
+    _npRender();
+}
+
+function _npRender() {
+    let host = document.getElementById("v40-news-stack");
+    if (!host) {
+        host = document.createElement("div");
+        host.id = "v40-news-stack";
+        host.setAttribute("role", "region");
+        host.setAttribute("aria-label", "Neue Nachrichten");
+        document.body.appendChild(host);
+    }
+    // Phones: two cards at most so the app stays usable underneath.
+    const max = window.innerWidth <= 600 ? 2 : NP.max;
+    if (NP.shown.length > max) NP.queue = [...NP.shown.splice(max), ...NP.queue].slice(0, 12);
+    while (NP.shown.length < max && NP.queue.length) NP.shown.push(NP.queue.shift());
+    host.innerHTML = NP.shown.map((n, i) => {
+        const coins = _npCoins(n).map((sym) => `<span class="v40-coin">${_rdLogo({ symbol: sym, image: RD.fallbackImage(sym) }, 18)}${_escHtml(sym)}</span>`).join("");
+        return `<article class="v40-pop" data-np="${i}" role="status" aria-live="polite">
+            <div class="v40-pop-top">
+                <span class="v40-src"><span class="v40-shield" aria-hidden="true">✓</span>${_escHtml(n.trusted)}</span>
+                <span class="v40-time">${_escHtml(_npAgo(n.ts))}</span>
+                <button class="v40-x" data-np-close="${i}" aria-label="Meldung schließen" title="Schließen">✕</button>
+            </div>
+            <a class="v40-title" href="${_escHtml(n.url)}" target="_blank" rel="noopener noreferrer">${_escHtml(n.title)}</a>
+            ${n.body ? `<p class="v40-body">${_escHtml(n.body)}</p>` : ""}
+            ${coins ? `<div class="v40-coins">${coins}</div>` : ""}
+        </article>`;
+    }).join("") + (NP.shown.length ? `<div class="v40-bar">
+            ${NP.queue.length ? `<span>+${NP.queue.length} weitere</span>` : "<span></span>"}
+            <span class="v40-actions"><button data-np-mute>1 Std. stumm</button>${NP.shown.length > 1 || NP.queue.length ? `<button data-np-all>Alle schließen</button>` : ""}</span>
+        </div>` : "");
+    host.classList.toggle("has", NP.shown.length > 0);
+}
+
+document.addEventListener("click", (e) => {
+    if (!e.target.closest) return;
+    const x = e.target.closest("[data-np-close]");
+    if (x) { NP.shown.splice(Number(x.dataset.npClose), 1); _npRender(); return; }
+    if (e.target.closest("[data-np-all]")) { NP.shown = []; NP.queue = []; _npRender(); return; }
+    if (e.target.closest("[data-np-mute]")) {
+        try { localStorage.setItem(NP_MUTE_KEY, String(Date.now() + 3600e3)); } catch (err) { /* no storage */ }
+        NP.shown = []; NP.queue = []; _npRender();
+        if (typeof feedEvent === "function") feedEvent("info", "News-Popups für 1 Stunde stummgeschaltet.");
+    }
+});
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && NP.shown.length) { NP.shown.shift(); _npRender(); }
+});
+
+// On/off switch inside the Live-News card.
+(function _npToggle() {
+    const list = document.getElementById("news-list");
+    if (!list || document.getElementById("v40-np-toggle")) return;
+    const row = document.createElement("div");
+    row.className = "toggle-row v40-np-row";
+    row.innerHTML = `<div class="lbl"><strong>News-Popups</strong> · neue Meldungen geprüfter Redaktionen sofort anzeigen</div><div id="v40-np-toggle" class="toggle" role="switch" tabindex="0"></div>`;
+    list.before(row);
+    const t = row.querySelector("#v40-np-toggle");
+    const sync = () => { const on = !_npMuted(); t.classList.toggle("on", on); t.setAttribute("aria-checked", String(on)); };
+    const flip = () => {
+        try { localStorage.setItem(NP_MUTE_KEY, _npMuted() ? "on" : "off"); } catch (e) { /* no storage */ }
+        sync();
+    };
+    t.addEventListener("click", flip);
+    t.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+    sync();
+})();
+
+if (typeof INFO_DB === "object") {
+    INFO_DB["news"] = Object.assign({}, INFO_DB["news"] || {}, {
+        title: "Live-News & Popups",
+        body: `<p>News kommen parallel aus CoinMarketCap, CoinDesk, The Block, Blockworks, Decrypt, Cointelegraph, Bitcoin Magazine, Reuters/Bloomberg (über Google News), GDELT, CryptoCompare und Reddit.</p>
+               <p><b>Popups</b> erscheinen nur für Meldungen aus Redaktionen mit verantwortlicher Chefredaktion (✓). Reddit und unbekannte Seiten stehen nur in der Liste. Schließen mit ✕ oder Esc, „1 Std. stumm“ pausiert.</p>
+               <p>Sicherheit: Titel werden als reiner Text angezeigt, Links nur mit http(s) und öffnen in einem neuen Tab ohne Zugriff auf die App. News beeinflussen keine Trades.</p>`,
+    });
 }
 
 (function showVersion() {

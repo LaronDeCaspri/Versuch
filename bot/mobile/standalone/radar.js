@@ -31,11 +31,20 @@ const WEIGHTS = { search: 0.30, news: 0.20, volume: 0.25, move: 0.15, crowd: 0.1
 const COMPONENT_LABELS = { search: "Suchtrend", news: "News", volume: "Volumen", move: "Kursbewegung", crowd: "Positionierung" };
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
+// Logos only from two pinned, well-known image hosts (https). Anything else is dropped.
 function safeImage(url) {
     try {
         const u = new URL(String(url));
-        return u.protocol === "https:" && /(^|\.)coingecko\.com$/.test(u.hostname) ? u.href : null;
+        if (u.protocol !== "https:") return null;
+        if (/(^|\.)coingecko\.com$/.test(u.hostname)) return u.href;
+        if (u.hostname === "cdn.jsdelivr.net" && u.pathname.startsWith("/npm/cryptocurrency-icons@0.18.1/")) return u.href;
+        return null;
     } catch (e) { return null; }
+}
+// Static fallback logo (version-pinned npm package via jsDelivr) for when CoinGecko is unreachable.
+function fallbackImage(symbol) {
+    const s = String(symbol || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return s ? `https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/${s}.svg` : null;
 }
 
 function countMentions(news, symbol, name, sinceMs) {
@@ -111,7 +120,8 @@ function computeAttention(input, now = Date.now()) {
         for (const k of Object.keys(WEIGHTS)) if (k in comp) { wsum += WEIGHTS[k]; ssum += WEIGHTS[k] * comp[k]; }
         const score = wsum > 0 ? Math.round((ssum / wsum) * 100) : 0;
         const level = score >= 70 ? "HYPE" : score >= 45 ? "ERHÖHT" : "RUHIG";
-        out.push({ ...c, score, level, components: comp, raw, advice: adviceFor(level, c, comp, raw) });
+        const alt = fallbackImage(c.symbol);
+        out.push({ ...c, image: c.image || alt, imageAlt: c.image && c.image !== alt ? alt : null, score, level, components: comp, raw, advice: adviceFor(level, c, comp, raw) });
     }
     out.sort((a, b) => b.score - a.score || (a.tracked === b.tracked ? 0 : a.tracked ? -1 : 1));
     return out;
@@ -205,7 +215,7 @@ async function fetchVolumeRatios(symbols) {
 
 TB.radar = {
     version: "39.0", GECKO_IDS, NAMES, WEIGHTS, COMPONENT_LABELS,
-    computeAttention, countMentions, trendFor, safeImage,
+    computeAttention, countMentions, trendFor, safeImage, fallbackImage,
     fetchTrending, fetchMarkets, fetchVolumeRatios,
 };
 })(typeof window !== "undefined" ? window : globalThis);

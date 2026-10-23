@@ -188,7 +188,11 @@ test("attention radar: mentions, scoring, levels and safe logos", () => {
     assert.match(sol.advice, /Rückschlag/);
     assert.equal(btc.level, "RUHIG");
     assert.ok(btc.tracked && !pepe.tracked);
-    assert.equal(pepe.image, null, "only https CoinGecko images are allowed");
+    assert.equal(pepe.image, "https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/pepe.svg", "unsafe logo replaced by the pinned static icon");
+    assert.equal(R.safeImage("http://coin-images.coingecko.com/x.png"), null, "https only");
+    assert.equal(R.safeImage("https://evil.example/x.png"), null, "unknown hosts rejected");
+    assert.equal(R.safeImage("https://cdn.jsdelivr.net/npm/other-pkg/x.svg"), null, "only the pinned icon package on jsDelivr");
+    assert.equal(sol.imageAlt, "https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/sol.svg", "CoinGecko logo keeps a static fallback");
     assert.ok(sol.image.startsWith("https://coin-images.coingecko.com/"));
     assert.ok(pepe.score > 0 && pepe.score <= 100, "missing components are re-weighted, not zeroed");
 

@@ -1,4 +1,4 @@
-const CACHE = "trading-bot-standalone-v7";
+const CACHE = "trading-bot-standalone-v8";
 const ASSETS = ["./", "./app.css", "./app.js", "./lib.js", "./pro.js", "./radar.js", "./pro-worker.js", "./jarvis.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
