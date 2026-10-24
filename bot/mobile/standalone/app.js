@@ -8069,7 +8069,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "53.0";
+const APP_VERSION = "54.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -12343,6 +12343,107 @@ _tbEvery("btcbrain", 60 * 60e3, _bbUpdate);
 _CD_MOUNTS.push(["#v50-brain", "btcbrain", "BTC-Gedächtnis"]);
 window.TBBtcBrain.refresh = _bbUpdate;
 
+
+// ============================================================================
+// v54 — Risiko-Pflicht: keine Position ohne kalkulierten Verlust und Gewinn.
+// Jede Order (egal aus welchem Modul: Signal, Buffett-HODL, DCA, Rebalancing, Grid,
+// News-Idee, manuell) läuft durch diesen Wächter: Stop vorhanden und nicht weiter als
+// 4 ATR entfernt, Take-Profits vorhanden, Verlust am Stop höchstens maxRiskPct des Depots.
+// Bereits offene Positionen ohne diese Absicherung werden nachträglich repariert.
+// ============================================================================
+const _RG_MAX_ATR = 4;
+function _rgAtr(sym, price) {
+    const c = state.candles[sym];
+    if (c && c.length >= 20) {
+        const a = window.TB.atr(window.TB.highs(c), window.TB.lows(c), window.TB.closes(c), 14);
+        const v = a[a.length - 1];
+        if (v > 0) return v;
+    }
+    return price * 0.01;   // no candles yet: conservative 1 % estimate
+}
+const _rgMaxLoss = () => broker.equity(state.prices) * (CFG.maxRiskPct || 2.5) / 100;
+function _rgTps(side, entry, stopDist) {
+    const m = CFG.tpMultiples && CFG.tpMultiples.length ? CFG.tpMultiples : [1.5, 2.5, 4.0];
+    return m.map((k, i) => ({ price: side === "long" ? entry + k * stopDist : entry - k * stopDist, fraction: i === m.length - 1 ? 1 - (m.length - 1) / m.length : 1 / m.length }));
+}
+// A stop counts as missing when it is absent, on the wrong side, or further than 4 ATR away.
+function _rgStopOk(side, ref, stop, atr) {
+    if (!(stop > 0)) return false;
+    if (side === "long" ? stop >= ref : stop <= ref) return false;
+    return Math.abs(ref - stop) <= _RG_MAX_ATR * atr;
+}
+
+function _rgGuard(symbol, side, qty, price, meta = {}) {
+    const m = { ...meta }, notes = [];
+    const atr = _rgAtr(symbol, price);
+    if (!_rgStopOk(side, price, m.stop, atr)) {
+        const d = (CFG.atrStopMult || 2) * atr;
+        notes.push(m.stop > 0 ? `Stop ${fmt(m.stop, 2)} zu weit — ATR-Stop gesetzt` : "Stop ergänzt");
+        m.stop = side === "long" ? price - d : price + d;
+    }
+    const stopDist = Math.abs(price - m.stop);
+    if (!Array.isArray(m.take_profits) || !m.take_profits.length) { m.take_profits = _rgTps(side, price, stopDist); notes.push("Take-Profits ergänzt"); }
+    const cap = _rgMaxLoss() / stopDist;
+    if (qty > cap) { qty = cap; notes.push(`Größe auf max. ${CFG.maxRiskPct || 2.5} % Depot-Risiko begrenzt`); }
+    if (notes.length) m.riskGuard = notes.join(", ");
+    return { qty, meta: m };
+}
+const _rgSubmit = broker.submit.bind(broker);
+broker.submit = function (symbol, side, qty, price, meta = {}) {
+    if (!(price > 0) || !(qty > 0)) return _rgSubmit(symbol, side, qty, price, meta);
+    const g = _rgGuard(symbol, side, qty, price, meta);
+    if (g.meta.riskGuard && typeof feedEvent === "function") feedEvent("info", `🛡 Risiko-Pflicht ${symbol}: ${g.meta.riskGuard}`);
+    return _rgSubmit(symbol, side, g.qty, price, g.meta);
+};
+
+// Repair open positions that were opened without a real stop or without take-profits.
+function _rgRepair() {
+    const maxLoss = _rgMaxLoss();
+    let changed = false;
+    for (const [sym, p] of Object.entries(broker.positions)) {
+        const live = state.prices[sym];
+        if (!(live > 0) || !p || !(p.qty > 0)) continue;
+        const long = p.side === "long", atr = _rgAtr(sym, live), notes = [];
+        const lossAtStop = (s) => (long ? p.entry - s : s - p.entry) * p.qty;
+        // A trailing stop in profit is fine; only a missing, absurdly wide or too costly stop is replaced.
+        const inProfit = p.stop > 0 && (long ? p.stop >= p.entry : p.stop <= p.entry);
+        if (!inProfit && (!_rgStopOk(p.side, live, p.stop, atr) || lossAtStop(p.stop) > maxLoss * 1.001)) {
+            let d = Math.min((CFG.atrStopMult || 2) * atr, maxLoss / p.qty);
+            let stop = long ? p.entry - d : p.entry + d;
+            // Price already beyond that stop: put it just behind the market and shrink the position
+            // so the loss at the stop stays within the limit.
+            const guard = 0.5 * atr;
+            if (long ? stop > live - guard : stop < live + guard) stop = long ? live - guard : live + guard;
+            const allowed = maxLoss / Math.max(1e-12, Math.abs(p.entry - stop));
+            if (p.qty > allowed * 1.001) {
+                const frac = 1 - allowed / p.qty;
+                broker.close(sym, live, frac);
+                notes.push(`Position um ${Math.round(frac * 100)} % verkleinert`);
+            }
+            const q = broker.positions[sym];
+            if (!q) { changed = true; continue; }
+            q.stop = stop; q.original_stop = stop;
+            notes.push(`Stop ${fmt(stop, 2)}`);
+        }
+        const q = broker.positions[sym];
+        if (q && (!q.take_profits || !q.take_profits.length) && q.qty >= (q.original_qty || q.qty) * 0.999) {
+            const d = Math.abs(q.entry - q.stop) || (CFG.atrStopMult || 2) * atr;
+            q.take_profits = _rgTps(q.side, q.entry, d).filter((t) => (long ? t.price > live : t.price < live)).map((t) => ({ price: t.price, qty: q.qty * t.fraction }));
+            if (q.take_profits.length) notes.push(`Take-Profits ${q.take_profits.map((t) => fmt(t.price, 0)).join(" / ")}`);
+        }
+        if (q && notes.length) {
+            q.meta = { ...(q.meta || {}), riskRepaired: new Date().toISOString(), riskGuard: notes.join(", ") };
+            changed = true;
+            const msg = `Risiko-Pflicht: ${sym} hatte keinen kalkulierten Verlust bzw. Gewinn — repariert (${notes.join(", ")}).`;
+            if (typeof feedEvent === "function") feedEvent("warn", `🛡 ${msg}`);
+            announce(msg, "warn");
+        }
+    }
+    if (changed) { broker.save(); try { if (typeof render === "function") render(); } catch (e) { /* next tick renders */ } }
+}
+setTimeout(_rgRepair, 5000);
+setInterval(_rgRepair, 60e3);
+window.TBRiskGuard = { repair: _rgRepair, maxLoss: _rgMaxLoss, check: _rgGuard };
 
 (function showVersion() {
     const f = document.querySelector("footer");
