@@ -436,8 +436,16 @@
                 // Background listening must not keep retrying against a blocked microphone.
                 R.wakeArmed = false;
                 if (S.listen !== "button") { S.listen = "button"; save(); syncSettings(); }
-                if (err === "not-allowed") micState().then((st) => showMicHelp(IN_APP ? "inapp" : st === "granted" ? "service" : "denied", err));
-                else showMicHelp(err === "service-not-allowed" ? "service" : err === "audio-capture" ? "busy" : "network", err);
+                const userTurn = !R.wakeMode;
+                R.recActive = false;
+                if (err === "audio-capture") { showMicHelp("busy", err); return; }
+                // Microphone allowed, recognizer refuses: record ourselves instead.
+                micState().then(async (st) => {
+                    if (IN_APP) { showMicHelp("inapp", err); return; }
+                    if (st === "denied") { showMicHelp("denied", err); return; }
+                    if (st !== "granted" && !(await ensureMic())) return;
+                    switchToRecording(userTurn);
+                });
             }
         };
         rec.onend = () => {
@@ -514,7 +522,148 @@
     }
     function hideMicHelp() { const b = $("jv2-mic-help"); if (b) b.hidden = true; }
 
+
+    // ---- own recording + transcription ---------------------------------------------------------
+    // Many Android phones allow the microphone but their browser speech service fails ("not-allowed",
+    // "service-not-allowed", "network"). Then Jarvis records himself (MediaRecorder + silence
+    // detection) and transcribes with Whisper on the device — or with Groq if a free key is set.
+    const sttMode = () => !SR || S.stt === "record";
+    function sttWorker() {
+        if (R.stt) return R.stt;
+        const w = new Worker("jarvis-stt-worker.js", { type: "module" });
+        const st = R.stt = { w, ready: false, jobs: new Map(), seq: 0, loaded: 0, total: 0, error: null };
+        w.onmessage = (e) => {
+            const m = e.data || {};
+            if (m.type === "progress") { st.loaded = m.loaded; st.total = m.total; if (!st.ready && (R.phase === "thinking" || R.phase === "idle") && st.total) setSub(`Lade Spracherkennung (einmalig) … ${Math.round((m.loaded / m.total) * 100)} %`); }
+            else if (m.type === "ready") { st.ready = true; st.error = null; }
+            else if (m.type === "text" || m.type === "error") {
+                if (m.type === "error" && !m.id) st.error = m.message;
+                const j = st.jobs.get(m.id); if (!j) return;
+                st.jobs.delete(m.id);
+                if (m.type === "text") { st.ready = true; j.resolve(m.text); } else j.reject(new Error(m.message));
+            }
+        };
+        w.onerror = (e) => { st.error = e.message || "Worker-Fehler"; for (const j of st.jobs.values()) j.reject(new Error(st.error)); st.jobs.clear(); R.stt = null; };
+        return st;
+    }
+    function preloadStt() { if (!(window.JarvisLocal && window.JarvisLocal.config.groqKey)) { try { sttWorker().w.postMessage({ type: "load" }); } catch (e) { /* no module workers */ } } }
+    async function toPcm16k(blob) {
+        const buf = await blob.arrayBuffer();
+        const ctx = audio() || new (window.AudioContext || window.webkitAudioContext)();
+        const dec = await new Promise((res, rej) => { const p = ctx.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); });
+        const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(dec.duration * 16000)), 16000);
+        const src = off.createBufferSource(); src.buffer = dec; src.connect(off.destination); src.start();
+        return (await off.startRendering()).getChannelData(0);
+    }
+    async function transcribe(blob) {
+        const key = window.JarvisLocal && window.JarvisLocal.config.groqKey;
+        if (key) {
+            try {
+                const fd = new FormData();
+                fd.append("file", blob, `jarvis.${/mp4/.test(blob.type) ? "m4a" : /ogg/.test(blob.type) ? "ogg" : "webm"}`);
+                fd.append("model", "whisper-large-v3-turbo"); fd.append("language", "de"); fd.append("response_format", "json");
+                const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: fd });
+                if (r.ok) return String((await r.json()).text || "");
+            } catch (e) { /* fall back to the on-device model */ }
+        }
+        const pcm = await toPcm16k(blob);
+        const st = sttWorker();
+        return new Promise((resolve, reject) => {
+            const id = ++st.seq;
+            st.jobs.set(id, { resolve, reject });
+            st.w.postMessage({ type: "transcribe", id, audio: pcm }, [pcm.buffer]);
+        });
+    }
+    // Whisper invents these on silence or noise.
+    const HALLU = /untertitel|amara\.org|zdf|swr|fürs zuschauen|für ihre aufmerksamkeit|copyright|^\W*(musik|applaus|stille)\W*$/i;
+    async function recordTurn(followUp) {
+        if (R.recording) return;
+        R.recording = true; R.heard = false; R.followUp = followUp;
+        setPhase("listening"); setSub("Ich höre zu … sprich einfach. (Tippen = fertig)");
+        let stream;
+        try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+        catch (e) {
+            R.recording = false;
+            const n = e && e.name;
+            showMicHelp(IN_APP ? "inapp" : n === "NotFoundError" ? "nomic" : n === "NotReadableError" || n === "AbortError" ? "busy" : "denied", n);
+            return;
+        }
+        R.micOk = true; hideMicHelp();
+        const ctx = audio();
+        const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
+        let mr;
+        try { mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); }
+        catch (e) { stream.getTracks().forEach((t) => t.stop()); R.recording = false; showMicHelp("unsupported", "MediaRecorder"); return; }
+        const chunks = [];
+        mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+        let an = null, srcNode = null, buf = null;
+        if (ctx) { try { if (ctx.state === "suspended") await ctx.resume(); srcNode = ctx.createMediaStreamSource(stream); an = ctx.createAnalyser(); an.fftSize = 1024; srcNode.connect(an); buf = new Float32Array(an.fftSize); } catch (e) { an = null; } }
+        const t0 = performance.now();
+        let floor = 0.006, spoke = false, lastVoice = 0, voiced = 0;
+        const stopped = new Promise((res) => { mr.onstop = res; });
+        R.stopRec = () => { try { if (mr.state !== "inactive") mr.stop(); } catch (e) { /* already stopped */ } };
+        mr.start(250);
+        const tick = setInterval(() => {
+            const now = performance.now();
+            if (an) {
+                an.getFloatTimeDomainData(buf);
+                let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+                const rms = Math.sqrt(sum / buf.length);
+                const thr = Math.max(0.012, floor * 3);
+                if (rms > thr) { voiced++; if (voiced >= 2) { spoke = true; lastVoice = now; } }
+                else { voiced = 0; if (!spoke) floor = floor * 0.92 + rms * 0.08; }
+            }
+            // End of the sentence: ~1 s of silence after speech. Nothing said: give up quietly.
+            if (spoke && now - lastVoice > 1000) R.stopRec();
+            else if (!spoke && an && now - t0 > (followUp ? 6000 : 8000)) R.stopRec();
+            else if (now - t0 > (an ? 20000 : 6000)) R.stopRec();
+        }, 60);
+        await stopped;
+        clearInterval(tick);
+        stream.getTracks().forEach((t) => t.stop());
+        try { if (srcNode) srcNode.disconnect(); } catch (e) { /* ignore */ }
+        R.recording = false; R.stopRec = null;
+        if (!an) spoke = true;
+        if (!spoke || !chunks.length) {
+            if (followUp) { R.convoOn = false; if (S.listen === "okjarvis") chime("end"); }
+            setPhase("idle");
+            return;
+        }
+        setPhase("thinking");
+        setSub(R.stt && !R.stt.ready && !(window.JarvisLocal && window.JarvisLocal.config.groqKey) ? "Lade Spracherkennung (einmalig) …" : "Verstehe …");
+        let text = "";
+        try { text = String(await transcribe(new Blob(chunks, { type: mr.mimeType || mime || "audio/webm" }))).trim(); }
+        catch (e) {
+            writeLog(`Spracherkennung: ${(e && e.message) || e}`, "warn");
+            setPhase("idle"); setSub("Das habe ich nicht verstanden — tippe auf „Sprechen“ oder schreib mir.");
+            return;
+        }
+        if (!text || /^[\s.,!?…-]*$/.test(text) || /^[([].*[)\]]$/.test(text) || HALLU.test(text)) { setPhase("idle"); setSub("Ich habe nichts verstanden — tippe auf „Sprechen“ und versuch es noch mal."); return; }
+        R.heard = true;
+        showTranscript(text, false);
+        handleCommand(text);
+    }
+    // The browser's recognizer fails although the microphone works: switch to own recording for good.
+    function switchToRecording(retry) {
+        if (S.stt !== "record") {
+            S.stt = "record";
+            if (S.listen !== "button") S.listen = "button";
+            save(); syncSettings();
+            writeLog("Die Spracherkennung des Browsers funktioniert auf diesem Gerät nicht — Jarvis nimmt jetzt selbst auf und erkennt die Sprache selbst.", "info");
+        }
+        hideMicHelp();
+        preloadStt();
+        if (retry) recordTurn(false);
+    }
+
     function startListening(wakeMode = false, followUp = false) {
+        // Own recording: button and conversation turns; the hotword needs the browser recognizer.
+        if (sttMode()) {
+            if (wakeMode) { R.wakeArmed = false; if (S.listen !== "button") { S.listen = "button"; save(); syncSettings(); } setPhase("idle"); return; }
+            if (!SR && S.stt !== "record") { S.stt = "record"; save(); preloadStt(); }
+            recordTurn(followUp);
+            return;
+        }
         const rec = recognizer();
         if (!rec) { showMicHelp("unsupported"); return; }
         if (R.recActive || R.micChecking) return;
@@ -551,6 +700,7 @@
     }
     // Tap to talk — also while the background hotword listener holds the microphone.
     function listenNow() {
+        if (R.recording) { if (R.stopRec) R.stopRec(); return; }
         if (R.recActive && !R.wakeMode) { R.suppressRestart = !wakeOn(); try { R.rec.stop(); } catch (e) { /* ignore */ } return; }
         stopSpeaking();
         R.convoOn = S.convo;
@@ -840,7 +990,7 @@
         const set = (id, v) => { const el = $(id); if (el) { if (el.type === "checkbox") el.checked = !!v; else el.value = v; } };
         set("jv2-rate", S.rate); set("jv2-vol", S.volume);
         document.querySelectorAll('input[name="jv2-listen"]').forEach((r) => { r.checked = r.value === S.listen; });
-        set("jv2-brief-auto", S.briefing); set("jv2-fx", S.fx); set("jv2-convo", S.convo);
+        set("jv2-brief-auto", S.briefing); set("jv2-fx", S.fx); set("jv2-convo", S.convo); set("jv2-stt", S.stt === "record");
         set("jv2-el-key", S.premiumKey); set("jv2-el-voice", S.premiumVoice);
         const AI = window.JarvisAI;
         if (AI) {
@@ -1021,6 +1171,7 @@
             else if (el.name === "jv2-listen") setListen(el.value); else if (el.id === "jv2-brief-auto") { S.briefing = el.checked; save(); }
             else if (el.id === "jv2-fx") { S.fx = el.checked; save(); applyFx(); syncSettings(); if (S.enabled) speak(S.fx ? "Jarvis-Klang aktiv." : "Natürlicher Klang.", "info", { force: true }); }
             else if (el.id === "jv2-convo") { S.convo = el.checked; save(); }
+            else if (el.id === "jv2-stt") { S.stt = el.checked ? "record" : "auto"; if (el.checked && S.listen !== "button") S.listen = "button"; save(); syncSettings(); if (el.checked) preloadStt(); }
             else if (el.id === "jv2-brain-size" && window.JarvisLocal) {
                 const L = window.JarvisLocal;
                 if (L.state.gpu === false) L.config.cpuSize = el.value; else L.config.size = el.value;
@@ -1075,7 +1226,8 @@
         setPhase("idle");
         startOrb();
         if ("speechSynthesis" in window) window.speechSynthesis.onvoiceschanged = syncSettings;
-        if (!SR) { const mic = $("jv2-mic"); if (mic) mic.title = "Spracheingabe: Chrome, Edge oder Safari"; }
+        // Own speech recognition in use: fetch the Whisper model in the background so the first answer is quick.
+        if (sttMode() && S.enabled) setTimeout(preloadStt, 4000);
         // Browsers only allow audio after a tap: if Jarvis was on, arm it with the first interaction.
         if (S.enabled) {
             const arm = () => {
