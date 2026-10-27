@@ -1,0 +1,23 @@
+{
+  "version": "55.0",
+  "algorithm": "SHA-256",
+  "files": {
+    "index.html": "ed6f59dfe0f47aad0700e01ac351cde119e6fff13cbbfeeea4361cb21cb30e01",
+    "app.css": "524ef3b3c50b6caf2d36aacbad6f6c849fffd4c6c567e70613333379d8bfd731",
+    "boot.js": "9cdac9226350004cea87951f04b6fec3c7bb2c2e19ec0462b0af0ef7e18ad889",
+    "app.js": "74963923f843cc915a1e76a62aeb9a9f1094539426ee4007dfc67fb0ec8e0036",
+    "lib.js": "16ea61dc59e73c3f2397c6c21d0fe7d577d670ed6504138326b91b74c07b7314",
+    "pro.js": "b8fe834296eb7f20005f56485205e813bf0b4d4f02b19bb6bbe7b6fac11de3e8",
+    "radar.js": "7bd492d6ffa09290bc01605d57157d4baaf4d2e1e63f852aacc0c445f858b23b",
+    "btc-brain.js": "15b351391da6e6f56505ff4baa36a01b853ce0005f51e448d7d708349690ebad",
+    "jarvis.js": "f7a549444939723ef18a8cb30974c4e6fe3d2035116c60a91ed9aca940d8743c",
+    "jarvis-local.js": "48668a75cb53337de856d2f892635045452553c93afc523c830a44714a145ce8",
+    "jarvis-ai.js": "8544934de4199b24704a5bd4ee0ab9bb3abc01ee3d8b3bb2f646d26fe155f54a",
+    "jarvis-llm-worker.js": "d519011655dc77d3dde546babf8ad0c729d37b5d5ad43ed8ff2d37f76ba9e49b",
+    "jarvis-tts-worker.js": "20afd798991c76a83258ab168f78e324636dd526e6d3f9d9078d4fc585dd7fe7",
+    "jarvis-stt-worker.js": "2038dba17d54bafd0c701d9b7a48fc61bf0867d33338bef59a960dbdf775431a",
+    "pro-worker.js": "f311897d7dc1c86f17eb8c86693e875049ad3f67882cad4dee8424abf98f70d1",
+    "sw.js": "fc4dde8ba4b189fddd91dc3a7fd50f5bcaa977b52452eb9a21e7dc1ef245b698",
+    "manifest.json": "00f49bff310efbc56525891a1bdb1b8f62ece0d34c5588c93613c61336de2ee0"
+  }
+}

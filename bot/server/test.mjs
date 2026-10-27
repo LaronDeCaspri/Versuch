@@ -250,3 +250,27 @@ test("BTC memory: merge, drawdowns, cycle, analogs and a risk context that only 
     assert.equal(I.byWeekday.length, 7);
     assert.equal(I.busiest.length, 3);
 });
+
+test("integrity manifest matches the shipped app files (run node bot/tools/integrity.mjs)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { buildManifest, APP_DIR } = await import("../tools/integrity.mjs");
+    const shipped = JSON.parse(fs.readFileSync(path.join(APP_DIR, "integrity.json"), "utf8"));
+    assert.deepEqual(shipped, buildManifest());
+});
+
+test("security: CSP present, no inline scripts or inline event handlers in the app", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { APP_DIR } = await import("../tools/integrity.mjs");
+    const html = fs.readFileSync(path.join(APP_DIR, "index.html"), "utf8");
+    assert.match(html, /http-equiv="Content-Security-Policy"/);
+    const scriptSrc = /script-src([^;"]*)/.exec(html)[1];
+    assert.doesNotMatch(scriptSrc, /'unsafe-inline'|'unsafe-eval'|\s\*/, "scripts must not allow inline code, eval or any host");
+    assert.equal((html.match(/<script>/g) || []).length, 0, "no inline <script> blocks");
+    for (const f of ["app.js", "jarvis.js", "radar.js", "lib.js", "pro.js", "btc-brain.js", "boot.js"]) {
+        const src = fs.readFileSync(path.join(APP_DIR, f), "utf8");
+        assert.doesNotMatch(src, /\son(click|error|load|change|input|submit|mouseover|keydown)="/, `${f}: inline event handler`);
+        assert.doesNotMatch(src, /\beval\(|new Function\(/, `${f}: eval`);
+    }
+});

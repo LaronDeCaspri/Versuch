@@ -3076,3 +3076,16 @@ input, select, textarea { min-width: 0; max-width: 100%; box-sizing: border-box;
 .jv2-mic-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .jv2-mic-actions > * { flex: 1 1 auto; min-height: 40px; }
 .jv2-btn-link { display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; font-size: 0.85rem; }
+/* v55 — Sicherheit */
+.v55-security h2 { display: flex; align-items: center; gap: 8px; }
+.v55-badge { font-size: 0.66rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+.v55-badge.ok { color: var(--green); background: var(--green-dim); }
+.v55-badge.warn { color: #fbbf24; background: rgba(245, 158, 11, 0.12); }
+.v55-rows { display: grid; gap: 8px; }
+.v55-row { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: start; font-size: 0.8rem; }
+.v55-row i { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; background: var(--muted); }
+.v55-row.ok i { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.v55-row.bad i { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.v55-row div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.v55-row span { color: var(--text-2); font-size: 0.74rem; overflow-wrap: anywhere; }
+.v55-row.bad span { color: #fca5a5; }

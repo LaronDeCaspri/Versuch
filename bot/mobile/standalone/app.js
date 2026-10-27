@@ -2540,12 +2540,15 @@ function renderQr(url) {
     if (!el) return;
     const enc = encodeURIComponent(url);
     // Use qrserver.com - free QR service, returns PNG. If unreachable fall back to plain text.
+    // v55: no inline handler and the URL escaped — a crafted link (…#';alert(1);') could otherwise run code.
     el.innerHTML = `
         <div class="qr-wrap">
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${enc}" alt="QR" style="max-width:180px; background:#fff; padding:6px; border-radius:6px;" onerror="this.parentElement.innerHTML='URL: ${url}';"/>
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${enc}" alt="QR" style="max-width:180px; background:#fff; padding:6px; border-radius:6px;"/>
             <div style="margin-top:8px; font-size:0.72rem; color:var(--muted);">Scanne mit dem Handy und speichere zum Startbildschirm.</div>
-            <div style="margin-top:4px; font-size:0.72rem; color:var(--text); word-break:break-all;">${url}</div>
+            <div style="margin-top:4px; font-size:0.72rem; color:var(--text); word-break:break-all;">${_escHtml(url)}</div>
         </div>`;
+    const img = el.querySelector("img");
+    if (img) img.addEventListener("error", () => { img.parentElement.textContent = `URL: ${url}`; }, { once: true });
 }
 
 // ============ v6: HTML TAX REPORT (print-friendly) ============
@@ -3132,8 +3135,8 @@ function renderEconCalendar() {
         else if (diff < 24 * 3600 * 1000) cd = `in ${Math.round(diff / 3600000)} h`;
         else cd = `in ${Math.round(diff / 86400000)} T`;
         return `<div class="econ-row ${imminent ? "imminent" : ""}">
-            <span class="econ-badge ${e.type}">${e.type}</span>
-            <div>${e.desc}<div style="color:var(--muted); font-size:0.7rem;">${new Date(e.ts).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div></div>
+            <span class="econ-badge ${_escHtml(e.type)}">${_escHtml(e.type)}</span>
+            <div>${_escHtml(e.desc)}<div style="color:var(--muted); font-size:0.7rem;">${new Date(e.ts).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div></div>
             <div class="econ-countdown">${cd}</div>
         </div>`;
     }).join("");
@@ -3152,8 +3155,8 @@ function renderWhaleList() {
     if (!w.length) { el.textContent = "aktuell keine grossen Bewegungen im Mempool"; return; }
     el.innerHTML = w.map((t) => `
         <div class="whale-row">
-            <div><strong>${t.btc.toFixed(2)} BTC</strong><div style="color:var(--muted); font-size:0.7rem;">Fee ${t.fee} sat</div></div>
-            <a href="${t.url}" target="_blank" rel="noopener">${t.txid.slice(0, 12)}…</a>
+            <div><strong>${fmt(t.btc, 2)} BTC</strong><div style="color:var(--muted); font-size:0.7rem;">Fee ${_escHtml(t.fee)} sat</div></div>
+            <a href="https://mempool.space/tx/${encodeURIComponent(String(t.txid))}" target="_blank" rel="noopener">${_escHtml(String(t.txid).slice(0, 12))}…</a>
         </div>`).join("");
 }
 
@@ -5781,8 +5784,8 @@ function renderErrorLog() {
     }
     el.innerHTML = recent.map((e) => `<div class="error-log-row">
         <span class="ts">${new Date(e.ts).toLocaleTimeString("de-DE")}</span>
-        · <span class="src">${e.source}</span>
-        · ${e.message}
+        · <span class="src">${_escHtml(e.source)}</span>
+        · ${_escHtml(e.message)}
     </div>`).join("");
 }
 
@@ -8069,7 +8072,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "54.0";
+const APP_VERSION = "55.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -12444,6 +12447,80 @@ function _rgRepair() {
 setTimeout(_rgRepair, 5000);
 setInterval(_rgRepair, 60e3);
 window.TBRiskGuard = { repair: _rgRepair, maxLoss: _rgMaxLoss, check: _rgGuard };
+
+// ============================================================================
+// v55 — Sicherheit & Integrität (das Web-Gegenstück zu App-Härtung wie Guardsquare):
+// Content-Security-Policy gegen eingeschleusten Code, Schutz vor Einbettung (boot.js),
+// Selbstprüfung der App-Dateien gegen integrity.json, Herkunftsprüfung gegen nachgebaute
+// Kopien und ein sichtbarer Sicherheitsstatus. Echtgeld bleibt unabhängig davon gesperrt.
+// ============================================================================
+const SEC = (window.TBSecurity = window.TBSecurity || { violations: [], integrity: null, checkedAt: 0 });
+// Official homes of this app; anything else is a copy someone else hosts.
+const SEC_ORIGINS = [
+    (h, p) => /^(raw|rawcdn)\.githack\.com$/.test(h) && /^\/larondecaspri\/versuch\//i.test(p),
+    (h) => /^larondecaspri\.github\.io$/i.test(h),
+    (h) => h === "localhost" || h === "127.0.0.1",
+];
+SEC.official = SEC_ORIGINS.some((f) => f(location.hostname, location.pathname));
+SEC.csp = !!document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+SEC.framed = window.top !== window.self;
+document.addEventListener("securitypolicyviolation", (e) => {
+    SEC.violations.push({ at: Date.now(), directive: e.effectiveDirective || e.violatedDirective, blocked: String(e.blockedURI || "inline").slice(0, 120) });
+    if (SEC.violations.length > 50) SEC.violations.shift();
+    if (state.errorLog) state.errorLog.push({ ts: Date.now(), source: "Sicherheit", message: `blockiert (${e.effectiveDirective}): ${String(e.blockedURI || "inline").slice(0, 80)}` });
+    _secRender();
+});
+
+async function _secSha256(buf) {
+    const d = await crypto.subtle.digest("SHA-256", buf);
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+// Compares every app file with the hashes written at release time (bot/tools/integrity.mjs).
+async function _secIntegrity() {
+    if (!(window.crypto && crypto.subtle)) { SEC.integrity = { state: "na" }; return _secRender(); }
+    try {
+        const man = await (await fetch("integrity.json", { cache: "no-cache" })).json();
+        const bad = [];
+        for (const [file, hash] of Object.entries(man.files || {})) {
+            try {
+                const r = await fetch(file, { cache: "no-cache" });
+                if (!r.ok || (await _secSha256(await r.arrayBuffer())) !== hash) bad.push(file);
+            } catch (e) { bad.push(file); }
+        }
+        SEC.integrity = { state: bad.length ? "bad" : "ok", bad, version: man.version, files: Object.keys(man.files || {}).length };
+        if (bad.length) announce(`Sicherheits-Selbstprüfung: ${bad.length} App-Datei${bad.length > 1 ? "en weichen" : " weicht"} vom geprüften Stand ab (${bad.join(", ")}). Seite neu laden — bleibt es so, ist diese Kopie verändert.`, "warn");
+    } catch (e) { SEC.integrity = { state: "na" }; }
+    SEC.checkedAt = Date.now();
+    _secRender();
+}
+
+function _secRender() {
+    const pane = document.querySelector('[data-pane="status"]');
+    if (!pane) return;
+    let el = document.getElementById("v55-security");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "v55-security"; el.className = "card v31-card v55-security";
+        pane.insertBefore(el, pane.firstChild);
+    }
+    const I = SEC.integrity;
+    const rows = [
+        ["Echtgeld-Sperre", window.TB_DEMO_ONLY === true, "aktiv — Orders an Börsen werden blockiert", "NICHT aktiv"],
+        ["Schutz vor fremdem Code (CSP)", SEC.csp && !SEC.violations.some((v) => /script/.test(v.directive)), SEC.violations.length ? `aktiv — ${SEC.violations.length} Versuch${SEC.violations.length > 1 ? "e" : ""} blockiert` : "aktiv — nur geprüfte Skript-Quellen", SEC.csp ? `aktiv — ${SEC.violations.length} Skript-Versuche blockiert` : "fehlt"],
+        ["Selbstprüfung der Dateien", I && I.state === "ok", I ? (I.state === "ok" ? `unverändert — ${I.files} Dateien, Version ${_escHtml(I.version)}` : I.state === "na" ? "nicht möglich (offline)" : `${I.bad.length} abweichend: ${_escHtml(I.bad.join(", "))}`) : "läuft …", null, !I || I.state === "na"],
+        ["Herkunft", SEC.official, "offizielle Adresse", `inoffizielle Kopie (${_escHtml(location.hostname)}) — nicht vom Original`],
+        ["Einbettung", !SEC.framed, "eigenes Fenster — kein Clickjacking", "in fremder Seite eingebettet"],
+        ["Schlüssel & Daten", true, "bleiben auf diesem Gerät (kein eigener Server)"],
+    ];
+    const html = `<h2>Sicherheit <span class="v55-badge ${rows.every((r) => r[1] || r[4]) ? "ok" : "warn"}">${rows.every((r) => r[1] || r[4]) ? "geschützt" : "prüfen"}</span></h2>
+        <div class="v55-rows">${rows.map(([k, ok, good, bad, pending]) => `<div class="v55-row ${pending ? "pending" : ok ? "ok" : "bad"}"><i></i><div><b>${k}</b><span>${ok ? good : pending ? good : (bad || good)}</span></div></div>`).join("")}</div>`;
+    if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+}
+
+if (!SEC.official) setTimeout(() => announce(`Achtung: Diese Seite läuft unter ${location.hostname} — das ist nicht die offizielle Adresse des Trading-Bots. Gib hier keine Schlüssel ein.`, "warn"), 6000);
+setTimeout(_secRender, 1500);
+setTimeout(_secIntegrity, 15000);
+window.TBSecurity.check = _secIntegrity;
 
 (function showVersion() {
     const f = document.querySelector("footer");
