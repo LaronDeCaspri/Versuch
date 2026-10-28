@@ -320,6 +320,7 @@ const layer = new AircraftLayer(map, store, {
   settings,
   selected: () => state.selected,
   follow: () => state.follow,
+  offsetY: () => viewOffsetY(),
   route: (hex) => panel.routeFor(hex),
 });
 
@@ -340,9 +341,25 @@ function select(hex, { pan = false } = {}) {
     document.body.classList.add('has-panel');
     panel.open(hex);
     const ac = store.get(hex);
-    if (pan && ac) map.setView([ac.lat, ac.lon], Math.max(map.getZoom(), 8));
+    if (pan && ac) centerOn([ac.lat, ac.lon], Math.max(map.getZoom(), 8));
+    else if (ac && viewOffsetY()) centerOn([ac.pos?.lat ?? ac.lat, ac.pos?.lon ?? ac.lon], map.getZoom());
   }
   updateHash();
+}
+
+// Auf dem Handy liegt das Panel unten über der Karte. Der sichtbare Kartenbereich ist dann
+// der Streifen zwischen Schnellfilter-Leiste und Panel; dessen Mitte ist der Zielpunkt.
+function viewOffsetY() {
+  if (innerWidth > 760 || $('#panel').hidden) return 0;
+  const top = $('#quickbar').getBoundingClientRect().bottom;
+  const bottom = $('#panel').getBoundingClientRect().top;
+  if (bottom <= top) return 0;
+  return (top + bottom) / 2 - map.getSize().y / 2;
+}
+
+function centerOn(latlng, zoom) {
+  const p = map.project(latlng, zoom).subtract([0, viewOffsetY()]);
+  map.setView(map.unproject(p, zoom), zoom);
 }
 
 function panelAction(act, hex) {
@@ -352,7 +369,7 @@ function panelAction(act, hex) {
     state.follow = !state.follow;
     panel.update(state);
   } else if (act === 'zoom') {
-    map.setView([ac.pos?.lat ?? ac.lat, ac.pos?.lon ?? ac.lon], 11);
+    centerOn([ac.pos?.lat ?? ac.lat, ac.pos?.lon ?? ac.lon], 11);
   } else if (act === 'watch') {
     const [kind, value] = ac.reg ? ['reg', ac.reg] : ['hex', ac.hex];
     if (alerts.addWatch(kind, value, ac.cs || '')) {

@@ -114,7 +114,10 @@ export class AircraftLayer {
     }
     if (selected && this.ctx.follow()) {
       const c = map.latLngToContainerPoint([selected.pos.lat, selected.pos.lon]);
-      if (Math.hypot(c.x - this.w / 2, c.y - this.h / 2) > 2) map.panTo([selected.pos.lat, selected.pos.lon], { animate: false });
+      const dy = this.ctx.offsetY?.() || 0;
+      const dx = c.x - this.w / 2;
+      const dyErr = c.y - (this.h / 2 + dy);
+      if (Math.hypot(dx, dyErr) > 2) map.panBy([dx, dyErr], { animate: false });
     }
   }
 

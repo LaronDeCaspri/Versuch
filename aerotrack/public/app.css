@@ -161,7 +161,6 @@ body.is-demo .topbar { border-color: rgba(251, 191, 36, 0.45); }
 .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); }
 .photo { position: relative; margin: 12px -14px; aspect-ratio: 16 / 9; background: linear-gradient(135deg, #0f172a, #1e293b); overflow: hidden; }
 .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.photo-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
 .photo-credit { position: absolute; right: 6px; bottom: 6px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.6); color: #e2e8f0; text-decoration: none; }
 .route { margin-bottom: 12px; }
 .route-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; }
@@ -291,7 +290,25 @@ body.has-drawer .toasts { right: 380px; }
   body.has-drawer .leaflet-right { right: 0; }
   body.has-drawer .toasts { right: 8px; }
   .leaflet-control-zoom { display: none; }
-  .quickbar { top: calc(var(--top) + 8px); left: 8px; right: 8px; }
+  .quickbar {
+    top: calc(var(--top) + 8px); left: 8px; right: 8px;
+    -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+    mask-image: linear-gradient(90deg, #000 85%, transparent);
+  }
+  .panel { max-height: 54vh; padding: 12px; }
+  .panel-title { font-size: 19px; }
+  .photo { aspect-ratio: 21 / 9; }
+  .grid { gap: 4px; }
+  .cell { padding: 6px 8px; }
+  .leaflet-control-attribution {
+    max-width: calc(100vw - 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 9px;
+  }
   body.has-panel .quickbar, body.has-drawer .quickbar { left: 8px; right: 8px; }
   .panel, .drawer { top: auto !important; }
+}
+
+/* Niedrige Bildschirme (Handy quer): Meldungen kompakter */
+@media (max-height: 500px) {
+  .toasts { width: min(280px, calc(100vw - 20px)); }
+  .toast { padding: 6px 10px; font-size: 12px; }
 }

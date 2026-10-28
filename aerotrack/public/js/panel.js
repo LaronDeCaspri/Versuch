@@ -71,7 +71,7 @@ export class Panel {
           <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </div>
-      <div class="photo" data-f="photo"><div class="photo-empty">Kein Foto</div></div>
+      <div class="photo" data-f="photo" hidden></div>
       <div class="route" data-f="route"><div class="muted small">Route wird gesucht …</div></div>
       <div class="emergency" data-f="emergency" hidden></div>
       <div class="grid">
@@ -255,6 +255,7 @@ export class Panel {
     box.innerHTML = `<img alt="Foto ${escapeHtml(ac.reg || hex)}" referrerpolicy="no-referrer">
       <a class="photo-credit" target="_blank" rel="noopener" href="${escapeHtml(photo.link)}">© ${escapeHtml(photo.by || 'Unbekannt')} · Planespotters.net</a>`;
     box.querySelector('img').src = photo.src;
+    box.hidden = false;
   }
 }
 
