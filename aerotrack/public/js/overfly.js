@@ -25,7 +25,7 @@ function inRing(x, y, ring) {
   return inside;
 }
 
-export function countryAt(lat, lon, world = globalThis.AEROTRACK_STATIC?.world) {
+export function countryAt(lat, lon, world = globalThis.AEROTRACK_STATIC?.world || globalThis.AEROTRACK_WORLD) {
   if (!world) return null;
   index ||= build(world);
   for (const c of index) {

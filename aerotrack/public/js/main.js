@@ -53,20 +53,27 @@ function persist() {
 
 // ---------- Karte ----------
 
+// Kartenstile ohne API-Schlüssel. labels = separate Beschriftungsebene darüber.
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
 const BASEMAPS = {
   dark: {
     label: 'Dunkel',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attr: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © <a href="https://carto.com/attributions">CARTO</a>',
+    url: `${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
+    labels: `${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
+    attr: 'Karte © Esri, HERE, Garmin, © OpenStreetMap-Mitwirkende',
+    maxNative: 16,
   },
   light: {
     label: 'Hell',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    attr: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © <a href="https://carto.com/attributions">CARTO</a>',
+    url: `${ESRI}/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
+    labels: `${ESRI}/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
+    attr: 'Karte © Esri, HERE, Garmin, © OpenStreetMap-Mitwirkende',
+    maxNative: 16,
   },
   satellite: {
     label: 'Satellit',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    url: `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`,
+    labels: `${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`,
     attr: 'Bilder © Esri, Maxar, Earthstar Geographics',
   },
   osm: {
@@ -99,13 +106,28 @@ L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
 map.attributionControl.setPrefix(false);
 
 let baseLayer = null;
+// Eigene Ebenen: Länderumrisse liegen UNTER den Kacheln (Ersatz, falls ein Kartendienst
+// ausfällt), Beschriftungs-Kacheln ÜBER den Kartenkacheln, aber unter den Flugzeugen.
+map.createPane('world').style.zIndex = 150;
+map.createPane('labels').style.zIndex = 350;
+map.getPane('labels').style.pointerEvents = 'none';
+
 // Eigenständige Variante (ohne Kachelserver): Länderumrisse als Vektorkarte.
 const STATIC = globalThis.AEROTRACK_STATIC || null;
 if (STATIC) document.body.classList.add('is-static');
 
 // Ländernamen; kleine Länder erst bei stärkerem Zoom, damit nichts überlappt.
-function addCountryLabels() {
-  const labels = STATIC.world.features
+function addWorld(world) {
+  return L.geoJSON(world, {
+    pane: 'world',
+    style: { color: '#4a6290', weight: 1.1, fillColor: '#13203d', fillOpacity: 1 },
+    interactive: false,
+    attribution: 'Grenzen: Natural Earth',
+  }).addTo(map);
+}
+
+function addCountryLabels(world, pane) {
+  const labels = world.features
     .map((f) => ({ name: f.properties?.name, pt: labelPoint(f) }))
     .filter((l) => l.name && l.pt)
     .map(({ name, pt }) => ({
@@ -113,6 +135,7 @@ function addCountryLabels() {
       marker: L.marker([pt[0], pt[1]], {
         interactive: false,
         keyboard: false,
+        pane,
         icon: L.divIcon({ className: 'country-label', html: `<span>${escapeHtml(name)}</span>`, iconSize: null }),
       }),
     }));
@@ -130,22 +153,45 @@ function addCountryLabels() {
 
 function setBasemap(key) {
   if (STATIC) {
-    baseLayer ||= L.geoJSON(STATIC.world, {
-      style: { color: '#4a6290', weight: 1.1, fillColor: '#13203d', fillOpacity: 1 },
-      interactive: false,
-      attribution: 'Grenzen: Natural Earth',
-    }).addTo(map);
-    addCountryLabels();
+    if (!baseLayer) {
+      baseLayer = addWorld(STATIC.world);
+      addCountryLabels(STATIC.world, 'markerPane');
+    }
     settings.basemap = 'dark';
     return;
   }
   settings.basemap = BASEMAPS[key] ? key : 'dark';
   const b = BASEMAPS[settings.basemap];
   if (baseLayer) map.removeLayer(baseLayer);
-  baseLayer = L.tileLayer(b.url, { attribution: b.attr, maxZoom: 19, subdomains: 'abcd', detectRetina: false }).addTo(map);
+  const opts = { maxZoom: 19, maxNativeZoom: b.maxNative || 19 };
+  baseLayer = L.layerGroup([L.tileLayer(b.url, { ...opts, attribution: b.attr })]);
+  if (b.labels) baseLayer.addLayer(L.tileLayer(b.labels, { ...opts, pane: 'labels' }));
+  baseLayer.addTo(map);
   document.body.dataset.basemap = settings.basemap;
 }
 setBasemap(settings.basemap);
+
+// Live-Variante: Länderdaten nachladen (Ersatzkarte und Anzeige des überflogenen Landes).
+async function loadWorld() {
+  if (STATIC) return;
+  try {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/vendor/topojson/topojson-client.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.append(s);
+    });
+    const topo = await fetch('/vendor/world/countries-50m.json').then((r) => r.json());
+    const world = topojson.feature(topo, topo.objects.countries);
+    globalThis.AEROTRACK_WORLD = world;
+    addWorld(world);
+    addCountryLabels(world, 'world');
+    panel.update(state);
+  } catch {
+    // ohne Länderdaten fehlt nur die Ersatzkarte und die Zeile „Überfliegt“
+  }
+}
 
 let nightLayer = null;
 function updateNight() {
@@ -915,6 +961,7 @@ api.meta().then((m) => {
   state.demo = !!m.demo;
   document.body.classList.toggle('is-demo', state.demo);
 }).catch(() => {});
+loadWorld();
 pollArea();
 pollMil();
 setTimeout(pollWatch, 2000);

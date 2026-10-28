@@ -1,7 +1,7 @@
 // Dünner Client für die Server-Endpunkte.
 
 async function getJSON(url, init = {}) {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(12000) });
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(30000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

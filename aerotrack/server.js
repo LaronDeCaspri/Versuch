@@ -13,6 +13,8 @@ import { Simulator } from './lib/sim.js';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STATIC = [
   ['/vendor/leaflet/', path.join(ROOT, 'node_modules/leaflet/dist/')],
+  ['/vendor/topojson/', path.join(ROOT, 'node_modules/topojson-client/dist/')],
+  ['/vendor/world/', path.join(ROOT, 'node_modules/world-atlas/')],
   ['/', path.join(ROOT, 'public/')],
 ];
 const PORT = Number(process.env.PORT) || 8080;
@@ -114,7 +116,7 @@ async function serveStatic(res, pathname) {
       const data = await readFile(file);
       res.writeHead(200, {
         'content-type': MIME[path.extname(file)] || 'application/octet-stream',
-        'cache-control': prefix === '/vendor/leaflet/' ? 'public, max-age=86400' : 'no-cache',
+        'cache-control': prefix.startsWith('/vendor/') ? 'public, max-age=86400' : 'no-cache',
         ...(rel === 'sw.js' ? { 'service-worker-allowed': '/' } : {}),
         'x-content-type-options': 'nosniff',
       });

@@ -37,14 +37,20 @@ export function normalize(a) {
 
 const cache = new Map();
 
+// Eine laufende Anfrage wird geteilt, bis sie fertig ist; die TTL zählt ab Antwort.
+// So entstehen bei langsamer Datenquelle keine parallelen Doppelanfragen.
 async function cached(key, ttlMs, fn) {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.t < ttlMs) return hit.p;
+  if (hit && (hit.t === null || Date.now() - hit.t < ttlMs)) return hit.p;
   const p = fn();
-  cache.set(key, { t: Date.now(), p });
-  p.catch(() => cache.delete(key));
+  const entry = { t: null, p };
+  cache.set(key, entry);
+  p.then(
+    () => (entry.t = Date.now()),
+    () => cache.get(key) === entry && cache.delete(key),
+  );
   if (cache.size > 2000) {
-    for (const [k, v] of cache) if (Date.now() - v.t > 600_000) cache.delete(k);
+    for (const [k, v] of cache) if (v.t !== null && Date.now() - v.t > 600_000) cache.delete(k);
   }
   return p;
 }
@@ -53,7 +59,7 @@ async function upstream(path, init = {}) {
   const res = await fetch(UPSTREAM + path, {
     ...init,
     headers: { 'user-agent': UA, accept: 'application/json', ...(init.headers || {}) },
-    signal: AbortSignal.timeout(9000),
+    signal: AbortSignal.timeout(25000),
   });
   if (!res.ok) throw new Error(`Upstream ${path} -> HTTP ${res.status}`);
   return res.json();

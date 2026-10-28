@@ -72,7 +72,7 @@ Per Push gemeldet werden Watchlist-Treffer, Einflüge in die Zone und Notfall-Sq
 
 - Flugdaten: [adsb.lol](https://adsb.lol), Open Database License (ODbL) – Namensnennung in der App vorhanden.
 - Fotos: [Planespotters.net](https://www.planespotters.net) Public API – Fotograf und Link werden angezeigt.
-- Kartenkacheln: OpenStreetMap, CARTO, Esri.
+- Kartenkacheln: Esri (Dunkel, Hell, Satellit), OpenStreetMap. Ländergrenzen: Natural Earth (world-atlas) als Ersatzkarte unter den Kacheln.
 - Niederschlagsradar: [RainViewer](https://www.rainviewer.com).
 
 Vor einer öffentlichen oder kommerziellen Nutzung die Nutzungsbedingungen dieser Dienste prüfen.
