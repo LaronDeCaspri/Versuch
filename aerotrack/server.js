@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import * as adsb from './lib/adsb.js';
 import { AirportDb } from './lib/airports.js';
 import * as opensky from './lib/opensky.js';
+import { metar } from './lib/metar.js';
+import { searchAirports } from './lib/airports.js';
 import { PushService } from './lib/push.js';
 import { Simulator } from './lib/sim.js';
 
@@ -95,6 +97,14 @@ async function api(req, res, url) {
     const wn = ((w + 540) % 360) - 180, en = ((e + 540) % 360) - 180;
     const inLon = (lon) => span || (wn <= en ? lon >= wn && lon <= en : lon >= wn || lon <= en);
     return send(res, 200, { ...data, ac: data.ac.filter((a) => a.lat >= s && a.lat <= n && inLon(a.lon)) });
+  }
+  if (p === '/api/airports/search') {
+    const s = q.get('q') || '';
+    return send(res, 200, { airports: DEMO ? searchAirports(sim.airports(), s) : airports.search(s) });
+  }
+  if (p.startsWith('/api/metar/')) {
+    const id = decodeURIComponent(p.slice('/api/metar/'.length)).toUpperCase();
+    return send(res, 200, { metar: DEMO ? sim.metar(id) : await metar(id) });
   }
   if (p === '/api/airports') {
     const s = num(q.get('s'), -90, 90), w = num(q.get('w'), -540, 540), n = num(q.get('n'), -90, 90), e = num(q.get('e'), -540, 540);

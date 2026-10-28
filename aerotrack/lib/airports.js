@@ -3,6 +3,9 @@
 
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { searchAirports } from '../public/js/airportsearch.js';
+
+export { searchAirports };
 
 const SOURCE_URL = 'https://davidmegginson.github.io/ourairports-data/airports.csv';
 const MAX_AGE_MS = 7 * 86_400_000;
@@ -100,6 +103,11 @@ export class AirportDb {
     }
   }
 
+  // Suche nach IATA, ICAO, Name oder Ort; exakte Codes zuerst, große Plätze bevorzugt.
+  search(q) {
+    return searchAirports(this.list, q);
+  }
+
   // Ausschnitt nach Kartengrenzen; je weiter herausgezoomt, desto nur größere Plätze.
   query(s, w, n, e, zoom) {
     const minSize = zoom < 6 ? 3 : zoom < 8 ? 2 : zoom < 10 ? 1 : 0;
@@ -115,3 +123,4 @@ export class AirportDb {
     return out;
   }
 }
+

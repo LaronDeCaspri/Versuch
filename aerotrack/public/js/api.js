@@ -12,6 +12,8 @@ export const api = {
   mil: () => getJSON('/api/mil'),
   world: (b) => getJSON(`/api/world?s=${b.s}&w=${b.w}&n=${b.n}&e=${b.e}`),
   airports: (b, z) => getJSON(`/api/airports?s=${b.s}&w=${b.w}&n=${b.n}&e=${b.e}&z=${z}`),
+  airportSearch: (q) => getJSON(`/api/airports/search?q=${encodeURIComponent(q)}`),
+  metar: (icao) => getJSON(`/api/metar/${encodeURIComponent(icao)}`),
   search: (q) => getJSON(`/api/search?q=${encodeURIComponent(q)}`),
   routes: (planes) =>
     getJSON('/api/routes', {

@@ -28,7 +28,11 @@ export class AircraftLayer {
     this.drawn = [];
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'ac-canvas';
-    map.getContainer().appendChild(this.canvas);
+    // Eigene Ebene innerhalb der Karte: Popups und Beschriftungen von Leaflet liegen darüber.
+    const pane = map.getPane('aircraft') || map.createPane('aircraft');
+    pane.style.zIndex = 450;
+    pane.style.pointerEvents = 'none';
+    pane.appendChild(this.canvas);
     this.g = this.canvas.getContext('2d');
     this.lastFrame = 0;
     this.resize();
@@ -68,6 +72,9 @@ export class AircraftLayer {
     const now = Date.now();
     const zoom = map.getZoom();
     const scale = zoom < 5 ? 0.7 : zoom < 7 ? 0.85 : zoom > 10 ? 1.2 : 1;
+    // Die Ebene verschiebt sich beim Ziehen mit der Karte; Canvas an die Bildschirmecke zurücksetzen,
+    // damit weiter in Bildschirmkoordinaten gezeichnet werden kann.
+    L.DomUtil.setPosition(this.canvas, map.containerPointToLayerPoint([0, 0]));
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, this.w, this.h);
 

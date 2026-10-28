@@ -28,11 +28,15 @@
       <kbd>/</kbd>
       <div id="search-results" class="search-results" role="listbox" hidden></div>
     </div>
+    <span class="utc" id="utc" title="Koordinierte Weltzeit (UTC)">--:-- UTC</span>
     <div class="top-stats">
       <span class="chip" id="count-chip" title="Sichtbar / geladen">–</span>
       <span class="chip filter-chip" id="filter-chip" hidden>Filter aktiv</span>
     </div>
     <nav class="top-actions" aria-label="Werkzeuge">
+      <button class="icon-btn" data-drawer="list" title="Listen: Auffällig, Ausschnitt, Flotte" aria-label="Listen">
+        <svg viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+      </button>
       <button class="icon-btn" data-drawer="filters" title="Filter" aria-label="Filter">
         <svg viewBox="0 0 24 24"><path d="M4 5h16l-6 8v5l-4 2v-7z"/></svg>
       </button>
@@ -56,6 +60,7 @@
   <aside id="drawer" class="drawer" hidden>
     <div class="drawer-head">
       <div class="tabs" role="tablist">
+        <button role="tab" data-tab="list">Liste</button>
         <button role="tab" data-tab="filters">Filter</button>
         <button role="tab" data-tab="layers">Karte</button>
         <button role="tab" data-tab="alerts">Alarme</button>
@@ -63,6 +68,25 @@
       </div>
       <button class="icon-btn" id="drawer-close" aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
+
+    <section data-pane="list">
+      <div class="seg" id="list-mode">
+        <button data-v="notable">Auffällig</button><button data-v="view">Im Ausschnitt</button><button data-v="fleet">Flotte</button>
+      </div>
+      <form class="fleet-form" id="fleet-form" hidden>
+        <input id="fleet-input" class="input" placeholder="Airline-Code, z. B. DLH, RYR, EZY" maxlength="3" autocomplete="off" aria-label="Airline-Code">
+        <div class="fleet-top" id="fleet-top"></div>
+      </form>
+      <p class="muted small" id="list-note"></p>
+      <div class="table-wrap">
+        <table class="ac-table" id="ac-table">
+          <thead><tr>
+            <th data-sort="cs">Flug</th><th data-sort="type">Typ</th><th data-sort="alt" class="num">Höhe</th><th data-sort="gs" class="num">Geschw.</th><th data-sort="info">Info</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
 
     <section data-pane="filters">
       <h3>Kategorien</h3>

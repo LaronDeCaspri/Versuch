@@ -2,6 +2,7 @@
 // Daten kommen aus der Verkehrssimulation im Browser, ohne Server.
 
 import { Simulator } from '../lib/sim.js';
+import { searchAirports } from '../public/js/airportsearch.js';
 
 const sim = new Simulator();
 const later = (v) => new Promise((r) => setTimeout(() => r(v), 60));
@@ -15,4 +16,6 @@ export const api = {
   search: (q) => later(sim.search(q)),
   routes: (planes) => later(sim.routes(planes)),
   photo: () => later(null),
+  airportSearch: (q) => later({ airports: searchAirports(sim.airports(), q) }),
+  metar: (icao) => later({ metar: sim.metar(icao) }),
 };

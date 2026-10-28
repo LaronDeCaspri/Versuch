@@ -10,6 +10,7 @@ import { Panel } from './panel.js';
 import * as prefs from './prefs.js';
 import { PushClient } from './push.js';
 import { labelPoint } from './overfly.js';
+import { airlineOf, topNotable } from './notable.js';
 import { Store } from './store.js';
 
 const AREA_INTERVAL = 3000;
@@ -104,7 +105,71 @@ const map = L.map('map', {
   worldCopyJump: true,
   preferCanvas: true,
 });
+// Eigene Kartenknöpfe: Mein Standort, Vollbild
+const MapButtons = L.Control.extend({
+  onAdd() {
+    const box = L.DomUtil.create('div', 'leaflet-bar map-btns');
+    const btn = (title, svg, fn) => {
+      const a = L.DomUtil.create('a', '', box);
+      a.href = '#';
+      a.title = title;
+      a.setAttribute('role', 'button');
+      a.setAttribute('aria-label', title);
+      a.innerHTML = svg;
+      L.DomEvent.on(a, 'click', (e) => {
+        L.DomEvent.stop(e);
+        fn();
+      });
+      return a;
+    };
+    btn('Mein Standort', '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>', locateMe);
+    const canFs = document.fullscreenEnabled || document.webkitFullscreenEnabled;
+    if (canFs) btn('Vollbild', '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>', toggleFullscreen);
+    L.DomEvent.disableClickPropagation(box);
+    return box;
+  },
+});
+new MapButtons({ position: 'bottomright' }).addTo(map);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+let meMarker = null;
+function locateMe() {
+  if (!navigator.geolocation) return toast({ level: 'warn', title: 'Standort nicht verfügbar', body: 'Dieser Browser kann den Standort nicht bestimmen.' });
+  navigator.geolocation.getCurrentPosition(
+    (p) => {
+      const ll = [p.coords.latitude, p.coords.longitude];
+      meMarker ||= L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [14, 14] }), interactive: false, keyboard: false });
+      meMarker.setLatLng(ll).addTo(map);
+      map.setView(ll, Math.max(map.getZoom(), 9));
+    },
+    (err) => toast({
+      level: 'warn',
+      title: 'Standort nicht ermittelt',
+      body: window.isSecureContext ? err.message : 'Der Browser erlaubt die Ortung nur über HTTPS oder auf dem Gerät selbst (localhost).',
+    }),
+    { enableHighAccuracy: false, timeout: 10000 },
+  );
+}
+
+function toggleFullscreen() {
+  const el = document.documentElement;
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  try {
+    if (fsEl) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+  } catch {
+    toast({ level: 'warn', title: 'Vollbild nicht möglich', body: 'Der Browser hat es abgelehnt.' });
+  }
+}
+
+// UTC-Uhr
+function tickClock() {
+  const d = new Date();
+  $('#utc').textContent = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
+}
+tickClock();
+setInterval(tickClock, 10_000);
+
 L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
 map.attributionControl.setPrefix(false);
 
@@ -113,6 +178,7 @@ let baseLayer = null;
 // ausfällt), Beschriftungs-Kacheln ÜBER den Kartenkacheln, aber unter den Flugzeugen.
 map.createPane('world').style.zIndex = 150;
 map.createPane('labels').style.zIndex = 350;
+map.createPane('worldLabels').style.zIndex = 420;
 map.getPane('labels').style.pointerEvents = 'none';
 
 // Eigenständige Variante (ohne Kachelserver): Länderumrisse als Vektorkarte.
@@ -158,7 +224,7 @@ function setBasemap(key) {
   if (STATIC) {
     if (!baseLayer) {
       baseLayer = addWorld(STATIC.world);
-      addCountryLabels(STATIC.world, 'markerPane');
+      addCountryLabels(STATIC.world, 'worldLabels');
     }
     settings.basemap = 'dark';
     return;
@@ -281,6 +347,36 @@ function airportPopup(a) {
     <span>Am Boden: ${ground} Luftfahrzeug(e), ${vehicles} Fahrzeug(e)</span></div>`;
 }
 
+function openAirport(a) {
+  const popup = L.popup({ className: 'ap-popup', maxWidth: 300 }).setLatLng([a.lat, a.lon]).setContent(airportPopup(a)).openOn(map);
+  const icao = a.icao && /^[A-Z0-9]{4}$/.test(a.icao) ? a.icao : null;
+  if (!icao) return;
+  api.metar(icao).then(({ metar }) => {
+    if (!metar || !map.hasLayer(popup)) return;
+    popup.setContent(airportPopup(a) + weatherHtml(metar));
+  }, () => {});
+}
+
+function weatherHtml(m) {
+  const u = settings.units;
+  const temp = m.temp != null ? `${Math.round(m.temp)} °C` : '–';
+  const speed = (kt) => (u === 'metric' ? `${Math.round(kt * 1.852)} km/h` : `${kt} kt`);
+  const dir = typeof m.wdir === 'number' ? m.wdir : null;
+  // Pfeil zeigt, wohin der Wind weht (Windrichtung + 180°)
+  const arrow = dir != null
+    ? `<svg viewBox="0 0 24 24" style="transform:rotate(${dir + 180}deg)"><path d="M12 3v18M6 9l6-6 6 6"/></svg>`
+    : '';
+  const wind = m.wspd == null ? '–' : m.wspd === 0 ? 'Windstill'
+    : `${dir != null ? `${dir}°` : 'umlaufend'} ${speed(m.wspd)}${m.wgst ? `, Böen ${speed(m.wgst)}` : ''}`;
+  const vis = m.visSm == null ? null : m.visSm >= 6 && m.visPlus ? 'Sicht über 10 km' : `Sicht ${(m.visSm * 1.609).toFixed(m.visSm < 3 ? 1 : 0)} km`;
+  const age = m.time ? Math.round((Date.now() - m.time) / 60000) : null;
+  return `<div class="wx">
+    <div class="wx-row"><b>${temp}</b><span class="wx-wind">${arrow}${escapeHtml(wind)}</span>${m.cat ? `<span class="wx-cat ${escapeHtml(m.cat)}">${escapeHtml(m.cat)}</span>` : ''}</div>
+    <div class="wx-row muted small">${[vis, m.wx, age != null ? `Meldung vor ${age} min` : null].filter(Boolean).map(escapeHtml).join(' · ')}</div>
+    ${m.raw ? `<div class="wx-raw">${escapeHtml(m.raw)}</div>` : ''}
+  </div>`;
+}
+
 async function loadAirports() {
   if (!settings.airports) {
     airportLayer.clearLayers();
@@ -299,7 +395,7 @@ async function loadAirports() {
         // Steht ein Flugzeug auf dem Platz, hat es beim Klick Vorrang
         const ac = layer.hitTest(e.containerPoint.x, e.containerPoint.y, 14);
         if (ac) return select(ac.hex);
-        L.popup({ className: 'ap-popup' }).setLatLng([a.lat, a.lon]).setContent(airportPopup(a)).openOn(map);
+        openAirport(a);
       });
       const code = a.iata || a.icao;
       if (code && (a.size === 3 ? z >= 6 : a.size === 2 ? z >= 8 : z >= 11)) {
@@ -532,6 +628,7 @@ function afterTick() {
     }
   }
   if (!$('#drawer').hidden && activeTab === 'stats') renderStats();
+  if (!$('#drawer').hidden && activeTab === 'list') renderList();
 }
 
 function renderCoverage() {
@@ -614,14 +711,41 @@ function showResults(html) {
   searchBox.hidden = !html;
 }
 
+let airportHits = [];
+let airportTimer = null;
+
+function renderSearch(q) {
+  const local = localMatches(q);
+  const aps = airportHits.length
+    ? `<div class="result-head">Flughäfen</div>${airportHits
+        .map((a, i) => `<button class="result airport" data-ap="${i}"><i class="swatch" style="background:#e2e8f0"></i><b>${escapeHtml(a.iata || a.icao || '')}</b><span>${escapeHtml(a.name)}${a.city ? ` · ${escapeHtml(a.city)}` : ''}</span><em>${escapeHtml(a.country || '')}</em></button>`)
+        .join('')}`
+    : '';
+  showResults(
+    aps +
+      (local.length ? `<div class="result-head">Im geladenen Bereich</div>${local.map(resultRow).join('')}` : '') +
+      `<button class="result global" data-global="1">Flüge weltweit suchen nach „${escapeHtml(q)}“ <kbd>Enter</kbd></button>`,
+  );
+}
+
 searchInput.addEventListener('input', () => {
   const q = searchInput.value.trim();
-  if (q.length < 2) return showResults('');
-  const local = localMatches(q);
-  showResults(
-    (local.length ? `<div class="result-head">Im geladenen Bereich</div>${local.map(resultRow).join('')}` : '') +
-      `<button class="result global" data-global="1">Weltweit suchen nach „${escapeHtml(q)}“ <kbd>Enter</kbd></button>`,
-  );
+  if (q.length < 2) {
+    airportHits = [];
+    return showResults('');
+  }
+  renderSearch(q);
+  clearTimeout(airportTimer);
+  airportTimer = setTimeout(async () => {
+    try {
+      const { airports } = await api.airportSearch(q);
+      if (searchInput.value.trim() !== q) return;
+      airportHits = airports;
+      renderSearch(q);
+    } catch {
+      // Flughafensuche ist optional
+    }
+  }, 250);
 });
 
 async function globalSearch(q) {
@@ -658,6 +782,13 @@ searchBox.addEventListener('click', (e) => {
   const row = e.target.closest('.result');
   if (!row) return;
   if (row.dataset.global) return globalSearch(searchInput.value.trim());
+  if (row.dataset.ap) {
+    const a = airportHits[+row.dataset.ap];
+    showResults('');
+    searchInput.blur();
+    map.setView([a.lat, a.lon], Math.max(map.getZoom(), a.size >= 2 ? 12 : 13));
+    return setTimeout(() => openAirport(a), 350);
+  }
   showResults('');
   select(row.dataset.hex, { pan: true });
 });
@@ -756,6 +887,100 @@ for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) quickbar.addEve
 const drawer = $('#drawer');
 let activeTab = 'filters';
 
+// ---------- Listen: Auffällig / Im Ausschnitt / Flotte ----------
+
+const list = { mode: 'notable', sort: 'alt', dir: -1, fleet: '' };
+
+function listRows() {
+  if (list.mode === 'notable') {
+    return topNotable([...store.values()].filter((a) => filters.match(a)), 30).map(({ ac, reasons, score }) => ({ ac, info: reasons, danger: score >= 100 }));
+  }
+  if (list.mode === 'fleet') {
+    if (!list.fleet) return [];
+    return [...store.values()].filter((a) => airlineOf(a.cs) === list.fleet).map((ac) => ({ ac, info: [ac.reg || ''].filter(Boolean) }));
+  }
+  return (layer.drawn || []).map((ac) => ({ ac, info: [CLASSES[ac.cls].label] }));
+}
+
+function renderList() {
+  if (drawer.hidden || activeTab !== 'list') return;
+  syncSeg('list-mode', list.mode);
+  $('#fleet-form').hidden = list.mode !== 'fleet';
+  let rows = listRows();
+  if (list.mode !== 'notable') {
+    const key = list.sort;
+    const val = (r) => (key === 'info' ? r.info.join(' ') : key === 'cs' ? r.ac.cs || r.ac.reg || r.ac.hex : r.ac[key]);
+    rows.sort((a, b) => {
+      const x = val(a);
+      const y = val(b);
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * list.dir;
+    });
+  }
+  const total = rows.length;
+  rows = rows.slice(0, 300);
+  if (list.mode === 'fleet') {
+    const counts = {};
+    for (const a of store.values()) {
+      const al = airlineOf(a.cs);
+      if (al) counts[al] = (counts[al] || 0) + 1;
+    }
+    $('#fleet-top').innerHTML = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 12)
+      .map(([al, n]) => `<button type="button" data-al="${al}">${al} · ${n}</button>`).join('');
+  }
+  $('#list-note').textContent =
+    list.mode === 'notable' ? `${total} auffällige Flüge unter den geladenen (Notfall, Drohne, Militär, staatlich, seltene Muster …)`
+    : list.mode === 'fleet' ? (list.fleet ? `${total} Flüge von ${list.fleet} geladen. Weltweit vollständig nur mit Weltübersicht.` : 'Airline wählen oder Code eingeben.')
+    : `${total} Flüge im Kartenausschnitt${total > 300 ? ' (erste 300)' : ''}`;
+  for (const th of $('#ac-table').querySelectorAll('th')) {
+    th.setAttribute('aria-sort', list.mode !== 'notable' && th.dataset.sort === list.sort ? (list.dir > 0 ? 'ascending' : 'descending') : 'none');
+  }
+  $('#ac-table tbody').innerHTML = rows
+    .map(({ ac, info, danger }) => `<tr tabindex="0" data-hex="${escapeHtml(ac.hex)}">
+      <td><i class="dot" style="background:${CLASSES[ac.cls].color}"></i>${escapeHtml(ac.cs || ac.reg || ac.hex.toUpperCase())}</td>
+      <td>${escapeHtml(ac.type || '–')}</td>
+      <td class="num">${fmtAlt(ac.alt, settings.units, ac.gnd)}</td>
+      <td class="num">${fmtSpeed(ac.gs, settings.units)}</td>
+      <td class="info">${info.map((t) => `<span class="tag${danger ? ' danger' : ''}">${escapeHtml(t)}</span>`).join('')}</td>
+    </tr>`)
+    .join('') || '<tr><td colspan="5" class="muted">Keine Einträge</td></tr>';
+}
+
+$('#list-mode').addEventListener('click', (e) => {
+  const v = e.target.closest('button')?.dataset.v;
+  if (!v) return;
+  list.mode = v;
+  renderList();
+});
+$('#ac-table thead').addEventListener('click', (e) => {
+  const key = e.target.closest('th')?.dataset.sort;
+  if (!key || list.mode === 'notable') return;
+  list.dir = list.sort === key ? -list.dir : key === 'cs' || key === 'type' ? 1 : -1;
+  list.sort = key;
+  renderList();
+});
+$('#ac-table tbody').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-hex]');
+  if (tr) select(tr.dataset.hex, { pan: true });
+});
+$('#ac-table tbody').addEventListener('keydown', (e) => {
+  const tr = e.target.closest('tr[data-hex]');
+  if (tr && e.key === 'Enter') select(tr.dataset.hex, { pan: true });
+});
+$('#fleet-form').addEventListener('submit', (e) => e.preventDefault());
+$('#fleet-input').addEventListener('input', (e) => {
+  list.fleet = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+  if (list.fleet.length === 3 || !list.fleet) renderList();
+});
+$('#fleet-top').addEventListener('click', (e) => {
+  const al = e.target.closest('[data-al]')?.dataset.al;
+  if (!al) return;
+  list.fleet = al;
+  $('#fleet-input').value = al;
+  renderList();
+});
+
 function openDrawer(tab) {
   if (!drawer.hidden && activeTab === tab) return closeDrawer();
   activeTab = tab;
@@ -765,6 +990,7 @@ function openDrawer(tab) {
   drawer.querySelectorAll('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== tab));
   document.querySelectorAll('[data-drawer]').forEach((b) => b.classList.toggle('on', b.dataset.drawer === tab));
   if (tab === 'stats') renderStats();
+  if (tab === 'list') renderList();
   if (tab === 'alerts') {
     $('#alert-badge').hidden = true;
     renderNotifState();

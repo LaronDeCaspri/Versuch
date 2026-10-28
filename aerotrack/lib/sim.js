@@ -144,6 +144,17 @@ export class Simulator {
     }));
   }
 
+  metar(icao) {
+    const ap = AIRPORTS.find((a) => a[3] === icao);
+    if (!ap) return null;
+    const n = icao.charCodeAt(2) + icao.charCodeAt(3);
+    return {
+      icao, time: Date.now() - 600_000, temp: 5 + (n % 20), dewp: 2 + (n % 9), wdir: (n * 37) % 360, wspd: 4 + (n % 15),
+      wgst: n % 3 ? null : 22, visSm: 10, visPlus: true, wx: n % 4 ? null : '-RA', clouds: [{ cover: 'BKN', base: 2500 + (n % 5) * 500 }],
+      cat: 'VFR', raw: `${icao} SIMULIERT`,
+    };
+  }
+
   military() {
     return { now: Date.now(), ac: this.snapshot().filter((a) => a.flags & 1) };
   }

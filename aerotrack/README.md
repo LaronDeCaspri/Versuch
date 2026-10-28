@@ -32,6 +32,9 @@ adsb.lol liefert pro Abfrage nur 250 NM (ca. 460 km) um die Kartenmitte. Ist der
 - **Flugplätze** aus [OurAirports](https://ourairports.com/data/) (gemeinfrei), beim ersten Start heruntergeladen und in `data/airports.json` gespeichert. Je nach Zoom große → kleine Plätze; Klick zeigt Codes, Ort und Anzahl Luftfahrzeuge/Fahrzeuge am Boden.
 - **Schnellfilter-Leiste** unter der Suche: Klick schaltet eine Gruppe an/aus, **Doppelklick** (Handy: **lange drücken**) zeigt **nur** diese Gruppe, „Alle“ setzt zurück.
 - **Routenlinie**: Beim ausgewählten Flug Start → Position (durchgezogen) → Ziel (gestrichelt) auf dem Großkreis.
+- **Listen** (Listen-Symbol oben): *Auffällig* (Notfall, Drohne, Militär, staatlich, seltene Muster wie A380/Beluga – Ersatz für „Most tracked“), *Im Ausschnitt* (sortierbare Tabelle), *Flotte* (alle geladenen Flüge einer Airline per Rufzeichen-Präfix, z. B. DLH).
+- **Flughafensuche** in der Suchleiste (IATA, ICAO, Name, Ort) und **Flughafen-Wetter** (METAR des [Aviation Weather Center](https://aviationweather.gov)) im Flughafen-Popup: Temperatur, Wind/Böen, Sicht, Flugwetterkategorie.
+- **UTC-Uhr**, Knöpfe **Mein Standort** und **Vollbild** (Vollbild nur, wo der Browser es erlaubt; nicht auf dem iPhone).
 - **Drohnen / Flughafenfahrzeuge** werden erkannt (ADS-B-Kategorie UAV bzw. C1/C2), sind aber selten: Kleine Drohnen senden kein ADS-B, und nur wenige Flughäfen lassen Fahrzeuge öffentlich senden.
 
 ## Push-Benachrichtigungen (auch bei geschlossenem Tab)
@@ -90,6 +93,7 @@ Per Push gemeldet werden Watchlist-Treffer, Einflüge in die Zone und Notfall-Sq
 - Fotos: [Planespotters.net](https://www.planespotters.net) Public API – Fotograf und Link werden angezeigt.
 - Weltübersicht: OpenSky Network (nicht-kommerzielle Nutzung).
 - Flugplätze: OurAirports (Public Domain).
+- Flughafenwetter: NOAA Aviation Weather Center (METAR).
 - Kartenkacheln: Esri (Dunkel, Hell, Satellit), OpenStreetMap. Ländergrenzen: Natural Earth (world-atlas) als Ersatzkarte unter den Kacheln.
 - Niederschlagsradar: [RainViewer](https://www.rainviewer.com).
 
