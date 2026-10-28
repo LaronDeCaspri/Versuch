@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 export const APP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "mobile", "standalone");
-export const FILES = ["index.html", "app.css", "boot.js", "app.js", "lib.js", "pro.js", "radar.js", "btc-brain.js", "jarvis.js", "jarvis-local.js",
+export const FILES = ["index.html", "app.css", "boot.js", "vault.js", "app.js", "lib.js", "pro.js", "radar.js", "btc-brain.js", "jarvis.js", "jarvis-local.js",
     "jarvis-ai.js", "jarvis-llm-worker.js", "jarvis-tts-worker.js", "jarvis-stt-worker.js", "pro-worker.js", "sw.js", "manifest.json"];
 
 export function buildManifest() {

@@ -268,7 +268,7 @@ test("security: CSP present, no inline scripts or inline event handlers in the a
     const scriptSrc = /script-src([^;"]*)/.exec(html)[1];
     assert.doesNotMatch(scriptSrc, /'unsafe-inline'|'unsafe-eval'|\s\*/, "scripts must not allow inline code, eval or any host");
     assert.equal((html.match(/<script>/g) || []).length, 0, "no inline <script> blocks");
-    for (const f of ["app.js", "jarvis.js", "radar.js", "lib.js", "pro.js", "btc-brain.js", "boot.js"]) {
+    for (const f of ["app.js", "jarvis.js", "radar.js", "lib.js", "pro.js", "btc-brain.js", "boot.js", "vault.js"]) {
         const src = fs.readFileSync(path.join(APP_DIR, f), "utf8");
         assert.doesNotMatch(src, /\son(click|error|load|change|input|submit|mouseover|keydown)="/, `${f}: inline event handler`);
         assert.doesNotMatch(src, /\beval\(|new Function\(/, `${f}: eval`);

@@ -1178,7 +1178,7 @@
                 L.save(); renderBrain();
             }
             else if (el.id === "jv2-cloud" && window.JarvisLocal) { window.JarvisLocal.config.cloud = el.checked; window.JarvisLocal.save(); renderBrain(); syncSettings(); }
-            else if (el.id === "jv2-groq-key" && window.JarvisLocal) { const L = window.JarvisLocal; L.config.groqKey = el.value.trim(); L.save(); L.state.cloudOk = null; el.value = ""; el.placeholder = L.config.groqKey ? "gespeichert ✓" : "gsk_…"; renderBrain(); }
+            else if (el.id === "jv2-groq-key" && window.JarvisLocal) { const L = window.JarvisLocal; L.config.groqKey = el.value.trim(); L.save(); L.state.cloudOk = null; el.value = ""; el.placeholder = L.config.groqKey ? (window.TBVault && window.TBVault.active ? "gespeichert ✓ (verschlüsselt)" : "gespeichert ✓") : "gsk_…"; renderBrain(); }
             else if (el.id === "jv2-el-key") { S.premiumKey = el.value.trim(); if (S.premiumKey) S.engine = "premium"; save(); syncSettings(); }
             else if (el.id === "jv2-el-voice") { S.premiumVoice = el.value.trim() || DEFAULTS.premiumVoice; save(); }
             else if (el.id && el.id.startsWith("jv2-ai-") && window.JarvisAI) {
@@ -1226,6 +1226,9 @@
         setPhase("idle");
         startOrb();
         if ("speechSynthesis" in window) window.speechSynthesis.onvoiceschanged = syncSettings;
+        // Keys come out of the encrypted vault slightly after start: refresh what depends on them.
+        const onVault = () => { try { syncSettings(); renderBrain(); const gk = $("jv2-groq-key"); if (gk && window.JarvisLocal && window.JarvisLocal.config.groqKey) gk.placeholder = window.TBVault && window.TBVault.active ? "gespeichert ✓ (verschlüsselt)" : "gespeichert ✓"; } catch (e) { /* card not built yet */ } };
+        if (window.TBVault && window.TBVault.ready) onVault(); else window.addEventListener("tb-vault-ready", onVault);
         // Own speech recognition in use: fetch the Whisper model in the background so the first answer is quick.
         if (sttMode() && S.enabled) setTimeout(preloadStt, 4000);
         // Browsers only allow audio after a tap: if Jarvis was on, arm it with the first interaction.

@@ -3384,8 +3384,8 @@ function renderTestnetPanel() {
             <div style="color:var(--muted); font-size:0.72rem;">
                 Keys nur in Session-Speicher (Reload = verwerfen). Werden nie weitergegeben.
             </div>
-            <input type="text" id="tn-key" placeholder="API-Key" value="${state.testnet.apiKey}"/>
-            <input type="password" id="tn-secret" placeholder="API-Secret" value="${state.testnet.apiSecret}"/>
+            <input type="text" id="tn-key" placeholder="API-Key" value="${_escHtml(state.testnet.apiKey)}"/>
+            <input type="password" id="tn-secret" placeholder="API-Secret" value="${_escHtml(state.testnet.apiSecret)}"/>
             <div class="toggle-row" style="margin-top:8px;">
                 <div class="lbl"><strong>Live-Orders an Testnet spiegeln</strong></div>
                 <div id="tn-toggle" class="toggle ${state.testnet.enabled ? "on" : ""}"></div>
@@ -8072,7 +8072,7 @@ setTimeout(() => {
 // v26: PRODUCT POLISH — sellable-quality onboarding + achievements + trust
 // =====================================================================
 
-const APP_VERSION = "55.0";
+const APP_VERSION = "56.0";
 const APP_BUILD = "2026-10-23";
 
 // ---- 1. First-launch splash screen ----
@@ -12510,7 +12510,7 @@ function _secRender() {
         ["Selbstprüfung der Dateien", I && I.state === "ok", I ? (I.state === "ok" ? `unverändert — ${I.files} Dateien, Version ${_escHtml(I.version)}` : I.state === "na" ? "nicht möglich (offline)" : `${I.bad.length} abweichend: ${_escHtml(I.bad.join(", "))}`) : "läuft …", null, !I || I.state === "na"],
         ["Herkunft", SEC.official, "offizielle Adresse", `inoffizielle Kopie (${_escHtml(location.hostname)}) — nicht vom Original`],
         ["Einbettung", !SEC.framed, "eigenes Fenster — kein Clickjacking", "in fremder Seite eingebettet"],
-        ["Schlüssel & Daten", true, "bleiben auf diesem Gerät (kein eigener Server)"],
+        ["Schlüssel & Daten", !window.TBVault || window.TBVault.active || !window.TBVault.ready, window.TBVault && window.TBVault.active ? "verschlüsselt (AES-256) und nur auf diesem Gerät — kein eigener Server" : window.TBVault && !window.TBVault.ready ? "Tresor wird geöffnet …" : "nur auf diesem Gerät", `nur auf diesem Gerät, aber unverschlüsselt (${_escHtml((window.TBVault && window.TBVault.error) || "Tresor nicht verfügbar")})`],
     ];
     const html = `<h2>Sicherheit <span class="v55-badge ${rows.every((r) => r[1] || r[4]) ? "ok" : "warn"}">${rows.every((r) => r[1] || r[4]) ? "geschützt" : "prüfen"}</span></h2>
         <div class="v55-rows">${rows.map(([k, ok, good, bad, pending]) => `<div class="v55-row ${pending ? "pending" : ok ? "ok" : "bad"}"><i></i><div><b>${k}</b><span>${ok ? good : pending ? good : (bad || good)}</span></div></div>`).join("")}</div>`;
@@ -12519,6 +12519,7 @@ function _secRender() {
 
 if (!SEC.official) setTimeout(() => announce(`Achtung: Diese Seite läuft unter ${location.hostname} — das ist nicht die offizielle Adresse des Trading-Bots. Gib hier keine Schlüssel ein.`, "warn"), 6000);
 setTimeout(_secRender, 1500);
+window.addEventListener("tb-vault-ready", () => _secRender());
 setTimeout(_secIntegrity, 15000);
 window.TBSecurity.check = _secIntegrity;
 
