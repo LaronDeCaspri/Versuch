@@ -1,0 +1,16 @@
+{
+  "name": "aerotrack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Live-Flugtracker auf Basis offener ADS-B-Daten",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "DEMO=1 node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "leaflet": "1.9.4"
+  }
+}

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AeroTrack</title>
+  <meta name="description" content="Live-Flugtracker auf Basis offener ADS-B-Daten">
+  <meta name="theme-color" content="#070b16">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-1.2 -1.2 2.4 2.4'%3E%3Cpath fill='%2338bdf8' d='M0,-1 C0.08,-1 0.1,-0.86 0.1,-0.7 L0.1,-0.22 L0.96,0.24 L0.96,0.38 L0.1,0.14 L0.08,0.64 L0.36,0.84 L0.36,0.95 L0,0.88 L-0.36,0.95 L-0.36,0.84 L-0.08,0.64 L-0.1,0.14 L-0.96,0.38 L-0.96,0.24 L-0.1,-0.22 L-0.1,-0.7 C-0.1,-0.86 -0.08,-1 0,-1 Z'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div id="map" aria-label="Karte mit Luftfahrzeugen"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="-1.2 -1.2 2.4 2.4" aria-hidden="true"><path d="M0,-1 C0.08,-1 0.1,-0.86 0.1,-0.7 L0.1,-0.22 L0.96,0.24 L0.96,0.38 L0.1,0.14 L0.08,0.64 L0.36,0.84 L0.36,0.95 L0,0.88 L-0.36,0.95 L-0.36,0.84 L-0.08,0.64 L-0.1,0.14 L-0.96,0.38 L-0.96,0.24 L-0.1,-0.22 L-0.1,-0.7 C-0.1,-0.86 -0.08,-1 0,-1 Z"/></svg>
+      <span>AeroTrack</span>
+    </div>
+    <div class="search">
+      <svg class="search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input id="search" type="search" placeholder="Flug, Kennzeichen, Typ oder Hex suchen" autocomplete="off" spellcheck="false" aria-label="Suche">
+      <kbd>/</kbd>
+      <div id="search-results" class="search-results" role="listbox" hidden></div>
+    </div>
+    <div class="top-stats">
+      <span class="chip" id="count-chip" title="Sichtbar / geladen">–</span>
+      <span class="chip filter-chip" id="filter-chip" hidden>Filter aktiv</span>
+    </div>
+    <nav class="top-actions" aria-label="Werkzeuge">
+      <button class="icon-btn" data-drawer="filters" title="Filter" aria-label="Filter">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16l-6 8v5l-4 2v-7z"/></svg>
+      </button>
+      <button class="icon-btn" data-drawer="layers" title="Karte &amp; Ebenen" aria-label="Karte und Ebenen">
+        <svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>
+      </button>
+      <button class="icon-btn" data-drawer="alerts" title="Alarme" aria-label="Alarme">
+        <svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1112 0v5l2 2H4z"/><path d="M10 20a2 2 0 004 0"/></svg>
+        <span class="dot-badge" id="alert-badge" hidden></span>
+      </button>
+      <button class="icon-btn" data-drawer="stats" title="Analyse" aria-label="Analyse">
+        <svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>
+      </button>
+    </nav>
+  </header>
+
+  <aside id="panel" class="panel" hidden aria-label="Details zum Luftfahrzeug"></aside>
+
+  <aside id="drawer" class="drawer" hidden>
+    <div class="drawer-head">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="filters">Filter</button>
+        <button role="tab" data-tab="layers">Karte</button>
+        <button role="tab" data-tab="alerts">Alarme</button>
+        <button role="tab" data-tab="stats">Analyse</button>
+      </div>
+      <button class="icon-btn" id="drawer-close" aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+
+    <section data-pane="filters">
+      <h3>Kategorien</h3>
+      <div class="class-grid" id="class-filter"></div>
+      <h3>Höhe <span class="muted small" id="alt-label"></span></h3>
+      <div class="range-pair">
+        <input type="range" id="alt-min" min="0" max="50000" step="500" aria-label="Minimale Höhe">
+        <input type="range" id="alt-max" min="0" max="50000" step="500" aria-label="Maximale Höhe">
+      </div>
+      <h3>Mindestgeschwindigkeit <span class="muted small" id="spd-label"></span></h3>
+      <input type="range" id="spd-min" min="0" max="600" step="10" aria-label="Mindestgeschwindigkeit">
+      <h3>Textfilter</h3>
+      <input type="text" id="text-filter" class="input" placeholder="z. B. DLH, A388, GLF6 (mehrere mit Komma)">
+      <label class="check"><input type="checkbox" id="hide-ground"> Bodenverkehr ausblenden</label>
+      <label class="check"><input type="checkbox" id="only-emergency"> Nur Notfälle (7500/7600/7700)</label>
+      <button class="btn ghost" id="filter-reset">Filter zurücksetzen</button>
+    </section>
+
+    <section data-pane="layers">
+      <h3>Kartenstil</h3>
+      <div class="seg" id="basemap"></div>
+      <h3>Ebenen</h3>
+      <label class="check"><input type="checkbox" id="opt-labels"> Beschriftungen (Rufzeichen, Flugfläche)</label>
+      <label class="check"><input type="checkbox" id="opt-trails"> Spuren für alle Luftfahrzeuge</label>
+      <label class="check"><input type="checkbox" id="opt-night"> Tag/Nacht-Grenze</label>
+      <label class="check"><input type="checkbox" id="opt-weather"> Niederschlagsradar (RainViewer)</label>
+      <label class="check"><input type="checkbox" id="opt-mil"> Militär weltweit nachladen</label>
+      <label class="check"><input type="checkbox" id="opt-rings"> Entfernungsringe um Zonen-Mittelpunkt</label>
+      <h3>Einfärbung</h3>
+      <div class="seg" id="color-mode">
+        <button data-v="alt">Nach Höhe</button><button data-v="class">Nach Kategorie</button>
+      </div>
+      <h3>Einheiten</h3>
+      <div class="seg" id="units">
+        <button data-v="aviation">Luftfahrt (ft, kt)</button><button data-v="metric">Metrisch (m, km/h)</button>
+      </div>
+      <h3>Tastenkürzel</h3>
+      <dl class="keys">
+        <dt><kbd>/</kbd></dt><dd>Suche</dd>
+        <dt><kbd>Esc</kbd></dt><dd>Auswahl / Panel schließen</dd>
+        <dt><kbd>L</kbd></dt><dd>Beschriftungen</dd>
+        <dt><kbd>T</kbd></dt><dd>Alle Spuren</dd>
+        <dt><kbd>F</kbd></dt><dd>Ausgewähltem Flug folgen</dd>
+      </dl>
+    </section>
+
+    <section data-pane="alerts">
+      <div class="notice" id="notif-state"></div>
+      <h3>Watchlist <span class="muted small">weltweit, alle 20 s geprüft</span></h3>
+      <form class="watch-form" id="watch-form">
+        <select id="watch-kind" class="input" aria-label="Art"></select>
+        <input id="watch-value" class="input" placeholder="z. B. D-AIMA" aria-label="Wert" required>
+        <input id="watch-label" class="input" placeholder="Notiz (optional)" aria-label="Notiz">
+        <button class="btn" type="submit">Hinzufügen</button>
+      </form>
+      <ul class="list" id="watch-list"></ul>
+      <h3>Überwachungszone</h3>
+      <label class="check"><input type="checkbox" id="zone-on"> Alarm, wenn ein Luftfahrzeug die Zone betritt</label>
+      <div class="row">
+        <button class="btn ghost" id="zone-geo">Mein Standort</button>
+        <button class="btn ghost" id="zone-center">Kartenmitte</button>
+      </div>
+      <div class="muted small" id="zone-pos"></div>
+      <h4>Radius <span class="muted small" id="zone-km-label"></span></h4>
+      <input type="range" id="zone-km" min="2" max="200" step="1">
+      <h4>Nur melden für</h4>
+      <select id="zone-cls" class="input"></select>
+      <label class="check"><input type="checkbox" id="squawk-on"> Notfall-Squawks im Kartenbereich melden</label>
+      <h3>Ereignisse</h3>
+      <ul class="list log" id="alert-log"><li class="muted small">Noch keine Ereignisse.</li></ul>
+    </section>
+
+    <section data-pane="stats">
+      <div class="stat-row">
+        <div class="stat"><label>Sichtbar</label><b id="st-visible">–</b></div>
+        <div class="stat"><label>Geladen</label><b id="st-total">–</b></div>
+        <div class="stat"><label>Ø Höhe</label><b id="st-avgalt">–</b></div>
+      </div>
+      <h3>Nach Kategorie</h3>
+      <div id="st-classes" class="bars"></div>
+      <h3>Häufigste Typen</h3>
+      <div id="st-types" class="bars"></div>
+      <h3>Am höchsten</h3>
+      <ul class="list" id="st-high"></ul>
+      <h3>Am schnellsten (Grundgeschwindigkeit)</h3>
+      <ul class="list" id="st-fast"></ul>
+    </section>
+  </aside>
+
+  <footer class="statusbar">
+    <span class="status"><span id="status-dot" class="dot"></span><span id="status-text">Verbinde …</span></span>
+    <span class="chip warn" id="coverage" hidden title="Die Datenquelle erlaubt maximal 250 NM Radius pro Abfrage">Abdeckung: 250 NM um Kartenmitte</span>
+    <div class="legend" aria-label="Höhenlegende">
+      <span>0</span><i class="legend-bar"></i><span>45.000 ft</span>
+    </div>
+    <span class="attrib">Daten: <a href="https://adsb.lol" target="_blank" rel="noopener">adsb.lol</a> (ODbL)</span>
+  </footer>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
