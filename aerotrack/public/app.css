@@ -100,6 +100,34 @@ body.has-drawer .leaflet-right { right: min(380px, 100vw); }
 .icon-btn.sm svg { width: 14px; height: 14px; }
 .dot-badge { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--surface-solid); }
 
+/* Schnellfilter */
+.quickbar {
+  position: fixed; top: calc(var(--top) + 14px); left: 10px; right: 10px; z-index: 890;
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px; pointer-events: none;
+}
+.quickbar::-webkit-scrollbar { display: none; }
+.qchip {
+  pointer-events: auto; flex: none; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--surface); backdrop-filter: blur(12px);
+  color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; -webkit-user-select: none;
+  touch-action: manipulation;
+}
+.qchip i { width: 9px; height: 9px; border-radius: 50%; opacity: 0.35; }
+.qchip.on { color: var(--text-strong); border-color: rgba(148, 163, 184, 0.4); }
+.qchip.on i { opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 0%, transparent); }
+.qchip.all.on, .qchip.layer.on { color: var(--accent); border-color: rgba(56, 189, 248, 0.45); }
+.qchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qsep { flex: none; width: 1px; margin: 4px 2px; background: var(--border); }
+body.has-panel .quickbar { left: 380px; }
+body.has-drawer .quickbar { right: 380px; }
+.panel, .drawer { top: calc(var(--top) + 54px) !important; }
+.ap-label { background: rgba(2, 6, 23, 0.75); border: 0; box-shadow: none; color: #e2e8f0; font: 700 10px var(--mono); padding: 1px 5px; }
+.ap-label::before { display: none; }
+.ap-popup .leaflet-popup-content-wrapper, .ap-popup .leaflet-popup-tip { background: var(--surface-solid); color: var(--text); border: 1px solid var(--border); }
+.ap-pop { display: grid; gap: 2px; font-size: 12px; }
+.ap-pop b { font-size: 14px; color: var(--text-strong); }
+.ap-pop span { color: var(--muted); }
+
 /* Statusleiste */
 .statusbar {
   position: fixed; left: 10px; right: 10px; bottom: 10px; height: 32px; z-index: 1000;
@@ -263,4 +291,7 @@ body.has-drawer .toasts { right: 380px; }
   body.has-drawer .leaflet-right { right: 0; }
   body.has-drawer .toasts { right: 8px; }
   .leaflet-control-zoom { display: none; }
+  .quickbar { top: calc(var(--top) + 8px); left: 8px; right: 8px; }
+  body.has-panel .quickbar, body.has-drawer .quickbar { left: 8px; right: 8px; }
+  .panel, .drawer { top: auto !important; }
 }

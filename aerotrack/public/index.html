@@ -49,6 +49,8 @@
     </nav>
   </header>
 
+  <div class="quickbar" id="quickbar" role="toolbar" aria-label="Schnellfilter"></div>
+
   <aside id="panel" class="panel" hidden aria-label="Details zum Luftfahrzeug"></aside>
 
   <aside id="drawer" class="drawer" hidden>
@@ -87,6 +89,8 @@
       <label class="check"><input type="checkbox" id="opt-trails"> Spuren für alle Luftfahrzeuge</label>
       <label class="check"><input type="checkbox" id="opt-night"> Tag/Nacht-Grenze</label>
       <label class="check static-hide"><input type="checkbox" id="opt-weather"> Niederschlagsradar (RainViewer)</label>
+      <label class="check"><input type="checkbox" id="opt-airports"> Flugplätze</label>
+      <label class="check"><input type="checkbox" id="opt-world"> Weltübersicht beim Herauszoomen (OpenSky)</label>
       <label class="check"><input type="checkbox" id="opt-mil"> Militär weltweit nachladen</label>
       <label class="check"><input type="checkbox" id="opt-rings"> Entfernungsringe um Zonen-Mittelpunkt</label>
       <h3>Einfärbung</h3>
@@ -152,7 +156,7 @@
 
   <footer class="statusbar">
     <span class="status"><span id="status-dot" class="dot"></span><span id="status-text">Verbinde …</span></span>
-    <span class="chip warn" id="coverage" hidden title="Die Datenquelle erlaubt maximal 250 NM Radius pro Abfrage">Abdeckung: 250 NM um Kartenmitte</span>
+    <span class="chip" id="coverage" hidden></span>
     <div class="legend" aria-label="Höhenlegende">
       <span>0</span><i class="legend-bar"></i><span>45.000 ft</span>
     </div>

@@ -11,7 +11,8 @@ const routeCache = new Map();
 const photoCache = new Map();
 
 export class Panel {
-  constructor(el, { store, settings, onClose, onAction }) {
+  constructor(el, { store, settings, onClose, onAction, onRoute }) {
+    this.onRoute = onRoute;
     this.el = el;
     this.store = store;
     this.settings = settings;
@@ -36,6 +37,11 @@ export class Panel {
     this.update();
     this.loadRoute(ac);
     this.loadPhoto(ac);
+  }
+
+  // Start/Ziel des ausgewählten Flugs (für die Routenlinie), sonst null.
+  routeFor(hex) {
+    return this.route && this.route.hex === hex && this.route.from.lat != null && this.route.to.lat != null ? this.route : null;
   }
 
   close() {
@@ -214,6 +220,7 @@ export class Panel {
       <div class="route-row">${ap(from)}<div class="route-line"><div class="route-bar"><i data-f="progress"></i></div><div class="route-eta muted small" data-f="eta"></div></div>${ap(to)}</div>
       ${route.plausible ? '' : '<div class="muted small warn-text">Route laut Datenbank unsicher</div>'}`;
     this.route = { hex, from, to };
+    this.onRoute?.();
     this.updateRouteProgress(ac);
   }
 

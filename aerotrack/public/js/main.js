@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { Alerts, WATCH_KINDS } from './alerts.js';
-import { CLASSES } from './classify.js';
+import { CLASSES, GROUPS } from './classify.js';
 import { Filters } from './filters.js';
 import { distanceNm, escapeHtml, fmtAlt, fmtSpeed, nightPolygon } from './geo.js';
 import { AircraftLayer } from './layer.js';
@@ -16,6 +16,7 @@ const AREA_INTERVAL = 3000;
 const MIL_INTERVAL = 10000;
 const WATCH_INTERVAL = 20000;
 const MAX_RADIUS_NM = 250;
+const WORLD_INTERVAL = 20000;
 
 const $ = (sel) => document.querySelector(sel);
 const saved = prefs.load();
@@ -27,13 +28,15 @@ const settings = {
   night: true,
   weather: false,
   milGlobal: false,
+  airports: true,
+  world: true,
   rings: true,
   colorMode: 'alt',
   units: 'aviation',
   ...saved.settings,
 };
 
-const state = { selected: null, follow: false, demo: false, lastOk: 0, error: null, capped: false };
+const state = { selected: null, follow: false, demo: false, lastOk: 0, error: null, capped: false, world: null, worldPolled: 0 };
 const store = new Store();
 const filters = new Filters(saved.filters);
 const alerts = new Alerts(saved.alerts, { notify });
@@ -250,6 +253,66 @@ function updateZone() {
   }
 }
 
+// ---------- Flugplätze ----------
+
+const airportLayer = L.layerGroup();
+const AP_STYLE = {
+  3: { radius: 6, color: '#e2e8f0', weight: 2, fillColor: '#0b1222', fillOpacity: 1 },
+  2: { radius: 4.5, color: '#94a3b8', weight: 1.5, fillColor: '#0b1222', fillOpacity: 1 },
+  1: { radius: 3, color: '#64748b', weight: 1, fillColor: '#0b1222', fillOpacity: 1 },
+  0: { radius: 2.5, color: '#64748b', weight: 1, fillColor: '#334155', fillOpacity: 1 },
+};
+const AP_TYPE = { 3: 'Großflughafen', 2: 'Regionalflughafen', 1: 'Flugplatz', 0: 'Hubschrauberlandeplatz' };
+let airportSeq = 0;
+
+function airportPopup(a) {
+  let ground = 0;
+  let vehicles = 0;
+  for (const ac of store.values()) {
+    if (!ac.gnd || distanceNm(a.lat, a.lon, ac.lat, ac.lon) > 2) continue;
+    if (ac.cls === 'ground') vehicles++;
+    else ground++;
+  }
+  const codes = [a.iata, a.icao].filter(Boolean).join(' · ');
+  return `<div class="ap-pop"><b>${escapeHtml(a.name)}</b>
+    <span>${escapeHtml(codes)}</span>
+    <span>${escapeHtml([a.city, a.country].filter(Boolean).join(', '))}</span>
+    <span>${AP_TYPE[a.size]}${a.elev != null ? ` · ${fmtAlt(a.elev, settings.units)} Höhe` : ''}</span>
+    <span>Am Boden: ${ground} Luftfahrzeug(e), ${vehicles} Fahrzeug(e)</span></div>`;
+}
+
+async function loadAirports() {
+  if (!settings.airports) {
+    airportLayer.clearLayers();
+    map.removeLayer(airportLayer);
+    return;
+  }
+  const seq = ++airportSeq;
+  try {
+    const { airports } = await api.airports(boundsQuery(), map.getZoom());
+    if (seq !== airportSeq) return;
+    airportLayer.clearLayers();
+    const z = map.getZoom();
+    for (const a of airports) {
+      const m = L.circleMarker([a.lat, a.lon], { ...AP_STYLE[a.size], bubblingMouseEvents: false });
+      m.on('click', (e) => {
+        // Steht ein Flugzeug auf dem Platz, hat es beim Klick Vorrang
+        const ac = layer.hitTest(e.containerPoint.x, e.containerPoint.y, 14);
+        if (ac) return select(ac.hex);
+        L.popup({ className: 'ap-popup' }).setLatLng([a.lat, a.lon]).setContent(airportPopup(a)).openOn(map);
+      });
+      const code = a.iata || a.icao;
+      if (code && (a.size === 3 ? z >= 6 : a.size === 2 ? z >= 8 : z >= 11)) {
+        m.bindTooltip(code, { permanent: true, direction: 'right', className: 'ap-label', offset: [6, 0] });
+      }
+      airportLayer.addLayer(m);
+    }
+    airportLayer.addTo(map);
+  } catch {
+    // Flugplätze sind optional
+  }
+}
+
 // ---------- Kernkomponenten ----------
 
 const layer = new AircraftLayer(map, store, {
@@ -257,6 +320,7 @@ const layer = new AircraftLayer(map, store, {
   settings,
   selected: () => state.selected,
   follow: () => state.follow,
+  route: (hex) => panel.routeFor(hex),
 });
 
 const panel = new Panel($('#panel'), {
@@ -329,6 +393,7 @@ async function pollArea() {
     const data = await api.area(c.lat, ((c.lng + 540) % 360) - 180, Math.min(r, 5000));
     const fresh = store.ingest(data.ac);
     state.capped = data.capped || r > MAX_RADIUS_NM;
+    if (state.capped && settings.world && Date.now() - state.worldPolled > WORLD_INTERVAL) pollWorld();
     state.lastOk = Date.now();
     state.error = null;
     alerts.check(data.ac.map((a) => store.get(a.hex)).filter(Boolean));
@@ -338,9 +403,28 @@ async function pollArea() {
   } finally {
     areaBusy = false;
     const keep = new Set([state.selected, ...watchHits].filter(Boolean));
-    store.prune(keep);
+    store.prune(keep, 60_000, (state.world?.interval || 900_000) + 180_000);
     afterTick();
     areaTimer = setTimeout(pollArea, AREA_INTERVAL);
+  }
+}
+
+// Weltübersicht: nur wenn der Kartenausschnitt größer ist als eine Bereichsabfrage.
+function boundsQuery() {
+  const b = map.getBounds();
+  const r = (v) => Math.round(v * 100) / 100;
+  return { s: r(Math.max(-90, b.getSouth())), n: r(Math.min(90, b.getNorth())), w: r(b.getWest()), e: r(b.getEast()) };
+}
+
+async function pollWorld() {
+  state.worldPolled = Date.now();
+  try {
+    const data = await api.world(boundsQuery());
+    store.ingest(data.ac);
+    state.world = data;
+    afterTick();
+  } catch (err) {
+    state.world = { error: err.message, ac: [] };
   }
 }
 
@@ -392,6 +476,8 @@ async function trySelectPending() {
 }
 
 map.on('moveend', () => {
+  loadAirports();
+  if (state.capped && settings.world && Date.now() - state.worldPolled > 3000) pollWorld();
   updateHash();
   persist();
   clearTimeout(areaTimer);
@@ -411,7 +497,7 @@ function afterTick() {
   const visible = layer.visibleCount ?? 0;
   $('#count-chip').textContent = `${visible.toLocaleString('de-DE')} sichtbar · ${total.toLocaleString('de-DE')} geladen`;
   $('#filter-chip').hidden = !filters.active;
-  $('#coverage').hidden = !state.capped;
+  renderCoverage();
   const dot = $('#status-dot');
   const text = $('#status-text');
   if (state.error && Date.now() - state.lastOk > 10000) {
@@ -429,6 +515,23 @@ function afterTick() {
     }
   }
   if (!$('#drawer').hidden && activeTab === 'stats') renderStats();
+}
+
+function renderCoverage() {
+  const el = $('#coverage');
+  el.hidden = !state.capped;
+  if (!state.capped) return;
+  const w = state.world;
+  el.classList.toggle('warn', !settings.world || !w?.asOf);
+  if (!settings.world) {
+    el.textContent = 'Live nur 460 km um die Kartenmitte · Weltübersicht aus';
+  } else if (w?.asOf) {
+    const min = Math.max(0, Math.round((Date.now() - w.asOf) / 60000));
+    el.textContent = `Weltübersicht (${w.source}) · Stand ${min ? `vor ${min} min` : 'gerade eben'} · live nur 460 km um die Mitte`;
+    el.title = w.error || 'Hineinzoomen für Live-Daten im Sekundentakt';
+  } else {
+    el.textContent = w?.error ? `Weltübersicht nicht verfügbar: ${w.error}` : 'Weltübersicht wird geladen …';
+  }
 }
 
 function updateHash() {
@@ -545,6 +648,92 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.search')) showResults('');
 });
 
+// ---------- Schnellfilter ----------
+// Klick schaltet eine Gruppe an/aus, Doppelklick (oder langes Drücken) zeigt NUR diese Gruppe.
+
+const quickbar = $('#quickbar');
+quickbar.innerHTML =
+  `<button class="qchip all" data-q="all">Alle</button>` +
+  GROUPS.map((g) => `<button class="qchip" data-q="${g.key}" title="Klick: an/aus · Doppelklick: nur diese"><i style="background:${g.color}"></i>${g.label}</button>`).join('') +
+  `<span class="qsep"></span>
+   <button class="qchip layer" data-q="ground-on" title="Rollende und geparkte Luftfahrzeuge">Am Boden</button>
+   <button class="qchip layer" data-q="airports" title="Flugplätze anzeigen">Flugplätze</button>`;
+
+function groupOn(g) {
+  return g.classes.every((c) => filters.classes.includes(c));
+}
+
+function syncQuickbar() {
+  for (const b of quickbar.querySelectorAll('[data-q]')) {
+    const g = GROUPS.find((x) => x.key === b.dataset.q);
+    let on;
+    if (g) on = groupOn(g);
+    else if (b.dataset.q === 'all') on = GROUPS.every(groupOn);
+    else if (b.dataset.q === 'ground-on') on = !filters.hideGround;
+    else if (b.dataset.q === 'airports') on = settings.airports;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on);
+  }
+}
+
+function setClasses(classes) {
+  filters.set({ classes });
+  syncFilterUi();
+  syncQuickbar();
+  afterTick();
+  persist();
+}
+
+function quickAction(key, solo) {
+  const g = GROUPS.find((x) => x.key === key);
+  if (g) {
+    if (solo) return setClasses([...g.classes]);
+    const on = groupOn(g);
+    const set = new Set(filters.classes);
+    for (const c of g.classes) on ? set.delete(c) : set.add(c);
+    return setClasses([...set]);
+  }
+  if (key === 'all') return setClasses(Object.keys(CLASSES));
+  if (key === 'ground-on') {
+    filters.set({ hideGround: !filters.hideGround });
+    syncFilterUi();
+  } else if (key === 'airports') {
+    settings.airports = !settings.airports;
+    syncLayerUi();
+    loadAirports();
+  }
+  syncQuickbar();
+  afterTick();
+  persist();
+}
+
+let clickTimer = null;
+let pressTimer = null;
+let longPressed = false;
+quickbar.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-q]');
+  if (!b || longPressed) return;
+  // kurz warten, ob ein Doppelklick folgt
+  clearTimeout(clickTimer);
+  clickTimer = setTimeout(() => quickAction(b.dataset.q, false), 220);
+});
+quickbar.addEventListener('dblclick', (e) => {
+  const b = e.target.closest('[data-q]');
+  if (!b) return;
+  clearTimeout(clickTimer);
+  quickAction(b.dataset.q, true);
+});
+quickbar.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('[data-q]');
+  longPressed = false;
+  if (!b || e.pointerType === 'mouse') return;
+  pressTimer = setTimeout(() => {
+    longPressed = true;
+    quickAction(b.dataset.q, true);
+  }, 550);
+});
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) quickbar.addEventListener(ev, () => clearTimeout(pressTimer));
+
 // ---------- Drawer ----------
 
 const drawer = $('#drawer');
@@ -607,6 +796,7 @@ function onFilterChange() {
     onlyEmergency: $('#only-emergency').checked,
   });
   syncFilterUi();
+  syncQuickbar();
   afterTick();
   persist();
 }
@@ -615,6 +805,7 @@ $('[data-pane="filters"]').addEventListener('input', onFilterChange);
 $('#filter-reset').addEventListener('click', () => {
   filters.reset();
   syncFilterUi();
+  syncQuickbar();
   afterTick();
   persist();
 });
@@ -636,6 +827,8 @@ function syncLayerUi() {
   $('#opt-weather').checked = settings.weather;
   $('#opt-mil').checked = settings.milGlobal;
   $('#opt-rings').checked = settings.rings;
+  $('#opt-airports').checked = settings.airports;
+  $('#opt-world').checked = settings.world;
   document.body.classList.toggle('color-class', settings.colorMode === 'class');
 }
 
@@ -672,6 +865,8 @@ const toggles = {
   'opt-weather': ['weather', updateWeather],
   'opt-mil': ['milGlobal'],
   'opt-rings': ['rings', updateZone],
+  'opt-airports': ['airports', () => (loadAirports(), syncQuickbar())],
+  'opt-world': ['world', () => (settings.world ? pollWorld() : renderCoverage())],
 };
 for (const [id, [key, fn]] of Object.entries(toggles)) {
   $(`#${id}`).addEventListener('change', (e) => {
@@ -942,6 +1137,8 @@ document.addEventListener('visibilitychange', () => {
 
 syncFilterUi();
 syncLayerUi();
+syncQuickbar();
+loadAirports();
 syncAlertUi();
 renderWatch();
 updateNight();

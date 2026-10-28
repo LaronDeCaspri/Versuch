@@ -21,7 +21,7 @@ export class Store {
       const fixT = now - (a.seen || 0) * 1000;
       let ac = this.ac.get(a.hex);
       if (!ac) {
-        ac = { ...a, fixT, updated: now, firstSeen: now, trail: [], smooth: null };
+        ac = { ...a, world: !!a.world, fixT, updated: now, firstSeen: now, trail: [], smooth: null };
         ac.cls = classify(ac);
         this.ac.set(a.hex, ac);
         fresh.push(ac);
@@ -29,7 +29,14 @@ export class Store {
         // Nur neuere Positionen übernehmen (Bereichs- und Militärabfrage überlappen sich).
         if (fixT < ac.fixT - 500) continue;
         const before = this.position(ac, now);
+        // Die Weltübersicht kennt weder Typ noch Kennzeichen noch Militär-Flag: vorhandene Werte behalten
+        const keepMeta = a.world ? { reg: ac.reg, type: ac.type, desc: ac.desc, op: ac.op, year: ac.year, flags: ac.flags } : null;
         Object.assign(ac, a);
+        if (keepMeta) {
+          for (const k of ['reg', 'type', 'desc', 'op', 'year']) ac[k] ??= keepMeta[k];
+          ac.flags |= keepMeta.flags;
+        }
+        ac.world = !!a.world;
         ac.fixT = fixT;
         ac.updated = now;
         ac.cls = classify(ac);
@@ -69,10 +76,11 @@ export class Store {
     return { lat, lon };
   }
 
-  prune(keep = new Set(), maxAgeMs = 60_000) {
+  // worldAgeMs: Daten der Weltübersicht kommen selten und bleiben entsprechend länger.
+  prune(keep = new Set(), maxAgeMs = 60_000, worldAgeMs = maxAgeMs) {
     const now = Date.now();
     for (const [hex, ac] of this.ac) {
-      const limit = keep.has(hex) ? 600_000 : maxAgeMs;
+      const limit = keep.has(hex) ? 600_000 : ac.world ? worldAgeMs : maxAgeMs;
       if (now - ac.updated > limit) this.ac.delete(hex);
     }
   }

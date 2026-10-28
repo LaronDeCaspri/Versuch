@@ -15,6 +15,9 @@ const HELI = new Set([
   'H60', 'H47', 'H64', 'UH1', 'NH90', 'TIGR', 'MI8', 'BK17', 'EH10', 'H53', 'V22',
 ]);
 
+// Unbemannte Luftfahrzeuge mit Transponder (meist militärisch). Kleine Drohnen senden kein ADS-B.
+const DRONE = new Set(['Q1', 'Q4', 'Q9', 'Q25', 'GLHK', 'RQ4', 'MQ4C', 'MQ9', 'HRON', 'HERN', 'TB2', 'TRIT']);
+
 const HEAVY = new Set([
   'A306', 'A30B', 'A310', 'A332', 'A333', 'A338', 'A339', 'A342', 'A343', 'A345', 'A346', 'A359', 'A35K', 'A388',
   'B741', 'B742', 'B743', 'B744', 'B748', 'B74S', 'B762', 'B763', 'B764', 'B772', 'B773', 'B77L', 'B77W', 'B778',
@@ -28,8 +31,9 @@ export const CLASSES = {
   light: { label: 'Kleinflugzeug', color: '#a3e635', shape: 'prop', size: 0.75 },
   heli: { label: 'Hubschrauber', color: '#fb923c', shape: 'heli', size: 0.85 },
   mil: { label: 'Militär', color: '#ef4444', shape: 'delta', size: 1.05 },
+  drone: { label: 'Drohne (UAV)', color: '#facc15', shape: 'drone', size: 1 },
   glider: { label: 'Segelflug', color: '#e2e8f0', shape: 'glider', size: 0.8 },
-  ground: { label: 'Bodenfahrzeug', color: '#94a3b8', shape: 'ground', size: 0.6 },
+  ground: { label: 'Flughafenfahrzeug', color: '#94a3b8', shape: 'ground', size: 0.8 },
   other: { label: 'Sonstige', color: '#cbd5e1', shape: 'jet', size: 0.85 },
 };
 
@@ -38,6 +42,7 @@ export const isAirlineCallsign = (cs) => /^[A-Z]{3}\d[0-9A-Z]{0,4}$/.test(cs || 
 export function classify(ac) {
   const t = ac.type || '';
   const cat = ac.cat || '';
+  if (cat === 'B6' || DRONE.has(t)) return 'drone';
   if (ac.flags & 1) return 'mil';
   if (cat === 'A7' || HELI.has(t)) return 'heli';
   if (cat.startsWith('C')) return 'ground';
@@ -61,3 +66,15 @@ export const SQUAWK_TEXT = {
 
 // Bitfelder von dbFlags (readsb / adsb.lol)
 export const FLAG = { MIL: 1, INTERESTING: 2, PIA: 4, LADD: 8 };
+
+// Gruppen für die Schnellfilter-Leiste (eine Gruppe kann mehrere Klassen umfassen).
+export const GROUPS = [
+  { key: 'pax', label: 'Passagier', classes: ['airliner', 'heavy'], color: '#38bdf8' },
+  { key: 'bizjet', label: 'Business-Jet', classes: ['bizjet'], color: '#f472b6' },
+  { key: 'light', label: 'Kleinflugzeug', classes: ['light', 'glider'], color: '#a3e635' },
+  { key: 'heli', label: 'Hubschrauber', classes: ['heli'], color: '#fb923c' },
+  { key: 'mil', label: 'Militär', classes: ['mil'], color: '#ef4444' },
+  { key: 'drone', label: 'Drohne', classes: ['drone'], color: '#facc15' },
+  { key: 'ground', label: 'Flughafenfahrzeug', classes: ['ground'], color: '#94a3b8' },
+  { key: 'other', label: 'Sonstige', classes: ['other'], color: '#cbd5e1' },
+];

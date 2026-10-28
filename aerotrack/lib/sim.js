@@ -26,6 +26,7 @@ const PROFILES = {
   bizjet: { n: 30, cat: 'A2', types: ['GLF6', 'GL7T', 'FA7X', 'C68A', 'CL35', 'PC24', 'E55P'], gs: [430, 500], alt: [39000, 45000] },
   light: { n: 30, cat: 'A1', types: ['C172', 'P28A', 'DA40', 'SR22'], gs: [95, 140], alt: [2500, 6500] },
   heli: { n: 14, cat: 'A7', types: ['EC35', 'H145', 'EC45', 'R44'], gs: [90, 125], alt: [800, 2200] },
+  drone: { n: 3, cat: 'B6', types: ['Q9', 'GLHK'], gs: [150, 300], alt: [20000, 50000] },
   mil: { n: 16, cat: 'A5', types: ['A400', 'C130', 'K35R', 'E3TF', 'EUFI', 'F35', 'A332'], gs: [300, 470], alt: [18000, 32000] },
 };
 const AIRLINES = ['DLH', 'EWG', 'RYR', 'EZY', 'KLM', 'AFR', 'SWR', 'AUA', 'CFG', 'BAW', 'SAS', 'WZZ'];
@@ -58,6 +59,7 @@ export class Simulator {
         const reg = cls === 'light' ? `D-E${letters(3)}` : cls === 'heli' ? `D-H${letters(3)}` : cls === 'bizjet' ? (r() < 0.5 ? `D-C${letters(3)}` : `N${100 + Math.floor(r() * 899)}${letters(2)}`) : `D-A${letters(3)}`;
         const cs =
           cls === 'mil' ? `${pick(MIL_CS)}${Math.floor(r() * 90 + 10)}` :
+          cls === 'drone' ? `FORTE${Math.floor(r() * 9 + 10)}` :
           cls === 'light' || cls === 'bizjet' ? reg.replace('-', '') :
           cls === 'heli' ? `CHX${Math.floor(r() * 90 + 10)}` :
           `${pick(AIRLINES)}${Math.floor(r() * 9000 + 100)}`;
@@ -68,15 +70,25 @@ export class Simulator {
           reg,
           type: pick(p.types),
           cat: p.cat,
-          flags: cls === 'mil' ? 1 : 0,
+          flags: cls === 'mil' || cls === 'drone' ? 1 : 0,
           gs: between(p.gs),
           cruise: Math.round(between(p.alt) / 100) * 100,
           from: a,
           to: b,
           phase: r(),
-          orbit: cls === 'light' || cls === 'heli' || (cls === 'mil' && r() < 0.4),
+          orbit: cls === 'light' || cls === 'heli' || cls === 'drone' || (cls === 'mil' && r() < 0.4),
           orbitR: 6 + r() * 20,
           sq: String(Math.floor(r() * 7000 + 1000)).replace(/[89]/g, '1'),
+        });
+      }
+    }
+    // Vorfeldfahrzeuge an den beiden größten Flughäfen (Kategorie C1/C2, am Boden)
+    for (const ap of AIRPORTS.slice(0, 3)) {
+      for (let i = 0; i < 6; i++) {
+        this.ac.push({
+          cls: 'ground', hex: `~${(hexN++).toString(16)}`, cs: i % 3 ? `FOLLOW${i}` : `FIRE${i}`, reg: null, type: null,
+          cat: i % 3 ? 'C2' : 'C1', flags: 0, gs: 12 + r() * 15, cruise: 0, from: ap, to: ap, phase: r(),
+          orbit: true, orbitR: 0.4 + r() * 0.8, sq: null, gnd: true,
         });
       }
     }
@@ -110,7 +122,7 @@ export class Simulator {
       const s = this.state(a, t);
       return {
         hex: a.hex, cs: a.cs, reg: a.reg, type: a.type, desc: null, op: null, year: null,
-        lat: s.lat, lon: s.lon, alt: s.alt, galt: s.alt + 150, gnd: false,
+        lat: s.lat, lon: s.lon, alt: a.gnd ? 0 : s.alt, galt: a.gnd ? null : s.alt + 150, gnd: !!a.gnd,
         gs: Math.round(a.gs), trk: Math.round(s.trk * 10) / 10, vr: s.vr,
         sq: a.sq, em: a.em || null, cat: a.cat, flags: a.flags, src: 'adsb_icao', seen: 0,
       };
@@ -120,6 +132,16 @@ export class Simulator {
   area(lat, lon, r) {
     const ac = this.snapshot().filter((a) => distanceNm(lat, lon, a.lat, a.lon) <= r);
     return { now: Date.now(), ac, center: [lat, lon], radius: r, capped: r > 250 };
+  }
+
+  world() {
+    return { now: Date.now(), asOf: Date.now(), interval: 15000, source: 'Simulation', error: null, ac: this.snapshot() };
+  }
+
+  airports() {
+    return AIRPORTS.map(([lat, lon, iata, icao, name], i) => ({
+      name, icao, iata, city: name, country: null, elev: null, lat, lon, size: i < 6 ? 3 : 2, sched: true,
+    }));
   }
 
   military() {

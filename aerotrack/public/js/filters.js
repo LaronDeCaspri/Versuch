@@ -15,6 +15,9 @@ export const DEFAULT_FILTERS = {
 export class Filters {
   constructor(saved = {}) {
     Object.assign(this, structuredClone(DEFAULT_FILTERS), saved);
+    // Klassen, die es beim Speichern noch nicht gab, standardmäßig einschalten
+    const known = new Set(saved.known || ['airliner', 'heavy', 'bizjet', 'light', 'heli', 'mil', 'glider', 'ground', 'other']);
+    for (const c of Object.keys(CLASSES)) if (!known.has(c) && !this.classes.includes(c)) this.classes.push(c);
     this.compile();
   }
 
@@ -45,7 +48,7 @@ export class Filters {
 
   toJSON() {
     const { classes, altMin, altMax, spdMin, text, hideGround, onlyEmergency } = this;
-    return { classes, altMin, altMax, spdMin, text, hideGround, onlyEmergency };
+    return { classes, altMin, altMax, spdMin, text, hideGround, onlyEmergency, known: Object.keys(CLASSES) };
   }
 
   match(ac) {

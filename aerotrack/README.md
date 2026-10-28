@@ -18,6 +18,22 @@ npm test           # Unit-Tests
 
 Node.js ≥ 18. Port per `PORT=…`, alternative readsb-kompatible API per `ADSB_API=…`.
 
+## Weltweite Ansicht (OpenSky)
+
+adsb.lol liefert pro Abfrage nur 250 NM (ca. 460 km) um die Kartenmitte. Ist der Ausschnitt größer, lädt AeroTrack zusätzlich einen weltweiten Schnappschuss von [OpenSky Network](https://opensky-network.org) (ohne Typ/Kennzeichen; Militär-Kennung kommt von adsb.lol). Hineinzoomen liefert wieder Live-Daten im Sekundentakt.
+
+| Variable | Zweck |
+|---|---|
+| `OPENSKY_CLIENT_ID` / `OPENSKY_CLIENT_SECRET` | Kostenloses OpenSky-Konto (API-Client). Ohne: Aktualisierung alle 15 min, mit: alle 90 s |
+| `OPENSKY_INTERVAL` | Eigenes Intervall in Sekunden (Kontingent beachten) |
+
+## Flugplätze, Schnellfilter, Routenlinie
+
+- **Flugplätze** aus [OurAirports](https://ourairports.com/data/) (gemeinfrei), beim ersten Start heruntergeladen und in `data/airports.json` gespeichert. Je nach Zoom große → kleine Plätze; Klick zeigt Codes, Ort und Anzahl Luftfahrzeuge/Fahrzeuge am Boden.
+- **Schnellfilter-Leiste** unter der Suche: Klick schaltet eine Gruppe an/aus, **Doppelklick** (Handy: **lange drücken**) zeigt **nur** diese Gruppe, „Alle“ setzt zurück.
+- **Routenlinie**: Beim ausgewählten Flug Start → Position (durchgezogen) → Ziel (gestrichelt) auf dem Großkreis.
+- **Drohnen / Flughafenfahrzeuge** werden erkannt (ADS-B-Kategorie UAV bzw. C1/C2), sind aber selten: Kleine Drohnen senden kein ADS-B, und nur wenige Flughäfen lassen Fahrzeuge öffentlich senden.
+
 ## Push-Benachrichtigungen (auch bei geschlossenem Tab)
 
 Im Tab **Alarme → „Push auf diesem Gerät aktivieren“**. Danach prüft der **Server** alle 30 s für jedes Gerät dessen Watchlist und Zone und schickt eine Web-Push-Meldung; ein Klick darauf öffnet den Flug.
@@ -72,6 +88,8 @@ Per Push gemeldet werden Watchlist-Treffer, Einflüge in die Zone und Notfall-Sq
 
 - Flugdaten: [adsb.lol](https://adsb.lol), Open Database License (ODbL) – Namensnennung in der App vorhanden.
 - Fotos: [Planespotters.net](https://www.planespotters.net) Public API – Fotograf und Link werden angezeigt.
+- Weltübersicht: OpenSky Network (nicht-kommerzielle Nutzung).
+- Flugplätze: OurAirports (Public Domain).
 - Kartenkacheln: Esri (Dunkel, Hell, Satellit), OpenStreetMap. Ländergrenzen: Natural Earth (world-atlas) als Ersatzkarte unter den Kacheln.
 - Niederschlagsradar: [RainViewer](https://www.rainviewer.com).
 

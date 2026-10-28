@@ -34,6 +34,30 @@ export function destination(lat, lon, brg, distNm) {
   return [toDeg(p2), ((toDeg(l2) + 540) % 360) - 180];
 }
 
+// Punkte entlang des Großkreises; Längengrade fortlaufend (ohne Sprung an ±180°),
+// damit Linien über die Datumsgrenze nicht quer über die Karte gezogen werden.
+export function greatCircle(lat1, lon1, lat2, lon2, n = 64) {
+  const p1 = toRad(lat1), l1 = toRad(lon1), p2 = toRad(lat2), l2 = toRad(lon2);
+  const d = 2 * Math.asin(Math.sqrt(Math.sin((p2 - p1) / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin((l2 - l1) / 2) ** 2));
+  if (d === 0) return [[lat1, lon1], [lat2, lon2]];
+  const pts = [];
+  let prevLon = lon1;
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const a = Math.sin((1 - f) * d) / Math.sin(d);
+    const b = Math.sin(f * d) / Math.sin(d);
+    const x = a * Math.cos(p1) * Math.cos(l1) + b * Math.cos(p2) * Math.cos(l2);
+    const y = a * Math.cos(p1) * Math.sin(l1) + b * Math.cos(p2) * Math.sin(l2);
+    const z = a * Math.sin(p1) + b * Math.sin(p2);
+    let lon = toDeg(Math.atan2(y, x));
+    while (lon - prevLon > 180) lon -= 360;
+    while (lon - prevLon < -180) lon += 360;
+    prevLon = lon;
+    pts.push([toDeg(Math.atan2(z, Math.hypot(x, y))), lon]);
+  }
+  return pts;
+}
+
 export const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // Farbskala Höhe (ft) -> RGB. Bodennahe warm, Reiseflughöhe kühl.

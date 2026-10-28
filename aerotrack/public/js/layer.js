@@ -3,7 +3,7 @@
 // Objekten deutlich schneller ist als einzelne DOM-Marker.
 
 import { CLASSES, isEmergencySquawk } from './classify.js';
-import { altColor } from './geo.js';
+import { altColor, greatCircle } from './geo.js';
 
 // Eigene Silhouetten, Nase zeigt nach oben, Koordinaten in [-1, 1].
 const SHAPES = {
@@ -13,6 +13,7 @@ const SHAPES = {
   delta: new Path2D('M0,-1 L0.12,-0.55 L0.15,-0.1 L0.86,0.55 L0.86,0.7 L0.15,0.6 L0.12,0.84 L0.32,0.98 L-0.32,0.98 L-0.12,0.84 L-0.15,0.6 L-0.86,0.7 L-0.86,0.55 L-0.15,-0.1 L-0.12,-0.55 Z'),
   heli: new Path2D('M0,-0.55 C0.22,-0.55 0.25,-0.2 0.22,0.05 C0.18,0.25 0.08,0.3 0.04,0.3 L0.03,0.9 L0.2,0.95 L0.2,1 L-0.2,1 L-0.2,0.95 L-0.03,0.9 L-0.04,0.3 C-0.08,0.3 -0.18,0.25 -0.22,0.05 C-0.25,-0.2 -0.22,-0.55 0,-0.55 Z'),
   glider: new Path2D('M0,-0.7 L0.05,-0.6 L0.05,-0.3 L1,-0.25 L1,-0.17 L0.05,-0.15 L0.03,0.75 L0.25,0.8 L0.25,0.88 L-0.25,0.88 L-0.25,0.8 L-0.03,0.75 L-0.05,-0.15 L-1,-0.17 L-1,-0.25 L-0.05,-0.3 L-0.05,-0.6 Z'),
+  drone: new Path2D('M0,-0.75 C0.1,-0.75 0.12,-0.6 0.1,-0.4 L0.1,-0.22 L1,-0.16 L1,-0.04 L0.08,0 L0.06,0.6 L0.4,0.92 L0.34,1 L0,0.78 L-0.34,1 L-0.4,0.92 L-0.06,0.6 L-0.08,0 L-1,-0.04 L-1,-0.16 L-0.1,-0.22 L-0.1,-0.4 C-0.12,-0.6 -0.1,-0.75 0,-0.75 Z'),
   ground: new Path2D('M-0.32,-0.55 L0.32,-0.55 L0.32,0.55 L-0.32,0.55 Z'),
 };
 const ROTOR = new Path2D('M0.8,0 A0.8,0.8 0 1 1 -0.8,0 A0.8,0.8 0 1 1 0.8,0');
@@ -86,6 +87,8 @@ export class AircraftLayer {
     this.drawn = drawn;
     this.visibleCount = drawn.length;
 
+    const route = selected && this.ctx.route?.(selected.hex);
+    if (route) this.drawRoute(selected, route);
     if (settings.allTrails) for (const ac of drawn) this.drawTrail(ac, 0.35, 1.2, false);
     if (selected) this.drawTrail(selected, 1, 3, true);
 
@@ -113,6 +116,52 @@ export class AircraftLayer {
       const c = map.latLngToContainerPoint([selected.pos.lat, selected.pos.lon]);
       if (Math.hypot(c.x - this.w / 2, c.y - this.h / 2) > 2) map.panTo([selected.pos.lat, selected.pos.lon], { animate: false });
     }
+  }
+
+  // Linie Start → aktuelle Position (durchgezogen) → Ziel (gestrichelt), auf dem Großkreis.
+  drawRoute(ac, { from, to }) {
+    const { g, map } = this;
+    const pos = ac.pos || ac;
+    const line = (pts) => {
+      g.beginPath();
+      pts.forEach(([lat, lon], i) => {
+        const p = map.latLngToContainerPoint([lat, lon]);
+        i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y);
+      });
+      g.stroke();
+    };
+    g.save();
+    g.lineCap = 'round';
+    g.lineWidth = 2;
+    g.strokeStyle = 'rgba(56,189,248,0.55)';
+    line(greatCircle(from.lat, from.lon, pos.lat, pos.lon));
+    g.setLineDash([7, 6]);
+    g.strokeStyle = 'rgba(226,232,240,0.7)';
+    line(greatCircle(pos.lat, pos.lon, to.lat, to.lon));
+    g.setLineDash([]);
+    g.font = '700 11px Inter, system-ui, sans-serif';
+    g.textBaseline = 'middle';
+    for (const ap of [from, to]) {
+      const p = map.latLngToContainerPoint([ap.lat, ap.lon]);
+      g.beginPath();
+      g.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      g.fillStyle = '#0b1222';
+      g.fill();
+      g.lineWidth = 2;
+      g.strokeStyle = ap === from ? '#38bdf8' : '#e2e8f0';
+      g.stroke();
+      const code = ap.iata || ap.icao || '';
+      if (code) {
+        const w = g.measureText(code).width + 10;
+        g.fillStyle = 'rgba(2,6,23,0.8)';
+        g.beginPath();
+        g.roundRect(p.x + 8, p.y - 9, w, 18, 4);
+        g.fill();
+        g.fillStyle = '#f8fafc';
+        g.fillText(code, p.x + 13, p.y);
+      }
+    }
+    g.restore();
   }
 
   drawTrail(ac, alpha, width, byAltitude) {
