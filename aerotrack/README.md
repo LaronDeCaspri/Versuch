@@ -12,6 +12,8 @@ npm run demo       # Simulierte Daten, funktioniert offline
 npm test           # Unit-Tests
 ```
 
+**Auf dem Handy ansehen:** Laptop und Handy im selben WLAN, `npm start` auf dem Laptop, dann die beim Start angezeigte Adresse `http://<IP>:8080` im Handy-Browser öffnen. Ohne HTTPS gehen dort Push und „Mein Standort“ nicht – dafür „Kartenmitte“ verwenden.
+
 Node.js ≥ 18. Port per `PORT=…`, alternative readsb-kompatible API per `ADSB_API=…`.
 
 ## Push-Benachrichtigungen (auch bei geschlossenem Tab)

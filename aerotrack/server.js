@@ -2,6 +2,7 @@
 // (vermeidet CORS-Probleme, bündelt Requests über einen Cache).
 
 import http from 'node:http';
+import { networkInterfaces } from 'node:os';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,4 +141,10 @@ const server = http.createServer(async (req, res) => {
 await push.init();
 server.listen(PORT, () => {
   console.log(`AeroTrack läuft auf http://localhost:${PORT}${DEMO ? '  (DEMO – simulierte Daten)' : ''}`);
+  // Adressen im lokalen Netz, z. B. zum Öffnen auf dem Handy im selben WLAN
+  for (const list of Object.values(networkInterfaces())) {
+    for (const n of list || []) {
+      if (n.family === 'IPv4' && !n.internal) console.log(`Im WLAN erreichbar:   http://${n.address}:${PORT}`);
+    }
+  }
 });
