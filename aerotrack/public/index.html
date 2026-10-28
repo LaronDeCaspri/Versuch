@@ -7,6 +7,10 @@
   <meta name="description" content="Live-Flugtracker auf Basis offener ADS-B-Daten">
   <meta name="theme-color" content="#070b16">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-1.2 -1.2 2.4 2.4'%3E%3Cpath fill='%2338bdf8' d='M0,-1 C0.08,-1 0.1,-0.86 0.1,-0.7 L0.1,-0.22 L0.96,0.24 L0.96,0.38 L0.1,0.14 L0.08,0.64 L0.36,0.84 L0.36,0.95 L0,0.88 L-0.36,0.95 L-0.36,0.84 L-0.08,0.64 L-0.1,0.14 L-0.96,0.38 L-0.96,0.24 L-0.1,-0.22 L-0.1,-0.7 C-0.1,-0.86 -0.08,-1 0,-1 Z'/%3E%3C/svg%3E">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="/app.css">
 </head>
@@ -105,7 +109,7 @@
 
     <section data-pane="alerts">
       <div class="notice" id="notif-state"></div>
-      <h3>Watchlist <span class="muted small">weltweit, alle 20 s geprüft</span></h3>
+      <h3>Watchlist <span class="muted small">weltweit geprüft</span></h3>
       <form class="watch-form" id="watch-form">
         <select id="watch-kind" class="input" aria-label="Art"></select>
         <input id="watch-value" class="input" placeholder="z. B. D-AIMA" aria-label="Wert" required>
@@ -124,7 +128,7 @@
       <input type="range" id="zone-km" min="2" max="200" step="1">
       <h4>Nur melden für</h4>
       <select id="zone-cls" class="input"></select>
-      <label class="check"><input type="checkbox" id="squawk-on"> Notfall-Squawks im Kartenbereich melden</label>
+      <label class="check"><input type="checkbox" id="squawk-on"> Notfall-Squawks melden (Karte; per Push: Zone &amp; Watchlist)</label>
       <h3>Ereignisse</h3>
       <ul class="list log" id="alert-log"><li class="muted small">Noch keine Ereignisse.</li></ul>
     </section>

@@ -8,6 +8,7 @@ import { distanceNm, escapeHtml, fmtAlt, fmtSpeed, nightPolygon } from './geo.js
 import { AircraftLayer } from './layer.js';
 import { Panel } from './panel.js';
 import * as prefs from './prefs.js';
+import { PushClient } from './push.js';
 import { Store } from './store.js';
 
 const AREA_INTERVAL = 3000;
@@ -36,9 +37,17 @@ const store = new Store();
 const filters = new Filters(saved.filters);
 const alerts = new Alerts(saved.alerts, { notify });
 
+const push = new PushClient();
+let lastRules = JSON.stringify(alerts.toJSON());
+
 function persist() {
   const c = map.getCenter();
   prefs.save({ settings, filters: filters.toJSON(), alerts: alerts.toJSON(), view: [c.lat, c.lng, map.getZoom()] });
+  const rules = JSON.stringify(alerts.toJSON());
+  if (rules !== lastRules) {
+    lastRules = rules;
+    push.sync(alerts.toJSON());
+  }
 }
 
 // ---------- Karte ----------
@@ -69,8 +78,9 @@ const BASEMAPS = {
 function initialView() {
   const m = location.hash.match(/^#(\d{1,2})\/(-?[\d.]+)\/(-?[\d.]+)(?:\/([0-9a-f~]{6,7}))?/i);
   if (m) return { zoom: +m[1], center: [+m[2], +m[3]], hex: m[4]?.toLowerCase() };
-  if (saved.view) return { zoom: saved.view[2], center: [saved.view[0], saved.view[1]] };
-  return { zoom: 7, center: [50.6, 9.5] };
+  const ac = location.hash.match(/^#ac\/([0-9a-f~]{6,7})$/i)?.[1]?.toLowerCase();
+  if (saved.view) return { zoom: saved.view[2], center: [saved.view[0], saved.view[1]], hex: ac };
+  return { zoom: 7, center: [50.6, 9.5], hex: ac };
 }
 
 const view = initialView();
@@ -692,20 +702,42 @@ $('#squawk-on').addEventListener('change', (e) => {
   persist();
 });
 
+const PUSH_TEXT = {
+  on: 'Push ist <b>aktiv</b>: Alarme aus Watchlist und Zone kommen auch bei geschlossenem Tab, solange der AeroTrack-Server läuft.',
+  off: 'Push ist aus. Ohne Push meldet die App nur, solange dieser Tab geöffnet ist.',
+  denied: 'Benachrichtigungen sind im Browser blockiert. Erlaube sie in den Website-Einstellungen.',
+  install: 'Auf iPhone/iPad funktioniert Push nur, wenn AeroTrack über „Teilen → Zum Home-Bildschirm“ installiert und von dort geöffnet wird.',
+  unsupported: 'Dieser Browser unterstützt kein Web-Push. Alarme erscheinen nur in der App.',
+  insecure: 'Push braucht HTTPS (oder localhost). Aktuell nicht verfügbar.',
+};
+
 function renderNotifState() {
-  const el = $('#notif-state');
-  if (!('Notification' in window)) {
-    el.textContent = 'Dieser Browser unterstützt keine Systembenachrichtigungen. Alarme erscheinen nur in der App.';
-    return;
-  }
-  if (Notification.permission === 'granted') {
-    el.innerHTML = 'Systembenachrichtigungen sind <b>aktiv</b>, solange dieser Tab geöffnet ist.';
-  } else if (Notification.permission === 'denied') {
-    el.textContent = 'Systembenachrichtigungen sind im Browser blockiert. Alarme erscheinen nur in der App.';
-  } else {
-    el.innerHTML = 'Systembenachrichtigungen sind aus. <button class="btn sm" id="notif-ask">Aktivieren</button>';
-    $('#notif-ask').addEventListener('click', () => Notification.requestPermission().then(renderNotifState));
-  }
+  const st = push.state;
+  const btn = st === 'on'
+    ? '<div class="row"><button class="btn sm" id="push-test">Test senden</button><button class="btn sm ghost" id="push-off">Deaktivieren</button></div>'
+    : st === 'off' ? '<div class="row"><button class="btn sm" id="push-on">Push auf diesem Gerät aktivieren</button></div>' : '';
+  $('#notif-state').innerHTML = `<div>${PUSH_TEXT[st]}</div>${btn}`;
+  $('#notif-state').classList.toggle('ok', st === 'on');
+  $('#push-on')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      await push.enable(alerts.toJSON());
+      lastRules = JSON.stringify(alerts.toJSON());
+      toast({ level: 'info', title: 'Push aktiviert', body: 'Du wirst auch bei geschlossenem Tab benachrichtigt.' });
+    } catch (err) {
+      toast({ level: 'warn', title: 'Push nicht aktiviert', body: err.message });
+    }
+    renderNotifState();
+  });
+  $('#push-off')?.addEventListener('click', async () => {
+    await push.disable();
+    renderNotifState();
+  });
+  $('#push-test')?.addEventListener('click', () =>
+    push.test().then(
+      () => toast({ level: 'info', title: 'Test gesendet', body: 'Die Meldung sollte gleich erscheinen.' }),
+      (err) => toast({ level: 'warn', title: 'Test fehlgeschlagen', body: err.message }),
+    ));
 }
 
 function renderLog() {
@@ -726,7 +758,7 @@ function notify(entry) {
   renderLog();
   renderWatch();
   if (drawer.hidden || activeTab !== 'alerts') $('#alert-badge').hidden = false;
-  if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+  if (push.state !== 'on' && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
     try {
       const n = new Notification(entry.title, { body: entry.body, tag: entry.hex });
       n.onclick = () => {
@@ -826,6 +858,13 @@ updateWeather();
 updateZone();
 setInterval(updateNight, 5 * 60_000);
 setInterval(afterTick, 1000);
+
+push.init().then(renderNotifState, () => {});
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data?.type !== 'select' || !e.data.hex) return;
+  pendingHex = e.data.hex;
+  trySelectPending();
+});
 
 api.meta().then((m) => {
   state.demo = !!m.demo;

@@ -14,6 +14,29 @@ npm test           # Unit-Tests
 
 Node.js ≥ 18. Port per `PORT=…`, alternative readsb-kompatible API per `ADSB_API=…`.
 
+## Push-Benachrichtigungen (auch bei geschlossenem Tab)
+
+Im Tab **Alarme → „Push auf diesem Gerät aktivieren“**. Danach prüft der **Server** alle 30 s für jedes Gerät dessen Watchlist und Zone und schickt eine Web-Push-Meldung; ein Klick darauf öffnet den Flug.
+
+Voraussetzungen:
+
+- **Der Server muss dauerhaft laufen** (z. B. auf einem VPS oder Raspberry Pi mit `systemd`/`pm2`). Läuft er nicht, kommt nichts an.
+- **HTTPS** mit gültigem Zertifikat (z. B. Caddy oder nginx + Let's Encrypt davor). Ausnahme: `localhost`.
+- **iPhone/iPad**: nur ab iOS 16.4 und nur, wenn AeroTrack über *Teilen → Zum Home-Bildschirm* installiert und von dort geöffnet wurde.
+- **Desktop**: Der Browser muss laufen (Fenster darf zu sein). Android erhält Push auch bei geschlossenem Browser.
+
+Konfiguration:
+
+| Variable | Zweck |
+|---|---|
+| `VAPID_SUBJECT` | Kontaktadresse für Push-Dienste, z. B. `mailto:du@example.org` (sollte gesetzt werden) |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Optional feste Schlüssel; sonst beim ersten Start erzeugt und in `data/vapid.json` gespeichert |
+| `DATA_DIR` | Speicherort für Schlüssel und Abonnements (Standard `./data`) |
+
+Gespeichert werden je Gerät: Push-Endpunkt, Watchlist und Zone (inkl. Koordinaten). Wird das Abonnement im Browser widerrufen, löscht der Server es beim nächsten Versand. Wer `data/vapid.json` verliert, macht alle bestehenden Abonnements ungültig.
+
+Per Push gemeldet werden Watchlist-Treffer, Einflüge in die Zone und Notfall-Squawks von Flugzeugen in Zone oder Watchlist. Typ-Einträge der Watchlist wirken nur in der geöffneten App (weltweite Typ-Abfragen wären zu groß).
+
 ## Funktionen
 
 | Bereich | Umfang |
@@ -39,7 +62,7 @@ Node.js ≥ 18. Port per `PORT=…`, alternative readsb-kompatible API per `ADSB
 - **Routen**: Kommen aus einer Community-Datenbank (nach Rufzeichen) und können falsch sein; unsichere Routen sind markiert.
 - **Militär**: Sichtbar ist nur, was mit eingeschaltetem Transponder fliegt (Transport, Tanker, Aufklärung). Kampfeinsätze, Drohnen und Raketen erscheinen nicht.
 - **Privatjets**: Werden angezeigt, auch solche auf der LADD-Sperrliste. Jets mit **PIA** (wechselnde anonyme ICAO-Adresse) lassen sich nicht über Zeit einem Eigentümer zuordnen.
-- **Benachrichtigungen**: Nur solange der Tab geöffnet ist (kein Push-Server).
+- **Push**: Prüfintervall 30 s; Meldungen können je nach Push-Dienst zusätzlich verzögert eintreffen.
 
 ## Datenquellen und Lizenzen
 
@@ -60,6 +83,9 @@ public/js/main.js   Verdrahtung von Karte, Polling und UI
 public/js/layer.js  Canvas-Renderer
 public/js/store.js  Zustand, Positionsvorhersage, Spuren
 public/js/panel.js  Detailpanel
-public/js/alerts.js Watchlist, Zone, Notfälle
+public/js/alerts.js Watchlist, Zone, Notfälle (auch serverseitig genutzt)
+public/js/push.js   Push-Abonnement im Browser
+public/sw.js        Service Worker (Anzeige der Push-Meldungen)
+lib/push.js         Serverseitige Alarmprüfung und Web-Push-Versand
 public/js/filters.js, classify.js, country.js, geo.js, prefs.js, api.js
 ```

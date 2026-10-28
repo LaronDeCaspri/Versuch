@@ -9,8 +9,11 @@
     "demo": "DEMO=1 node server.js",
     "test": "node --test test/*.test.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "leaflet": "1.9.4"
+    "leaflet": "1.9.4",
+    "web-push": "3.6.7"
   }
 }
