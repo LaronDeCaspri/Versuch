@@ -14,6 +14,8 @@ npm test           # Unit-Tests
 
 **Auf dem Handy ansehen:** Laptop und Handy im selben WLAN, `npm start` auf dem Laptop, dann die beim Start angezeigte Adresse `http://<IP>:8080` im Handy-Browser öffnen. Ohne HTTPS gehen dort Push und „Mein Standort“ nicht – dafür „Kartenmitte“ verwenden.
 
+**Eigenständige Vorschau (ohne Server):** `node scripts/build-artifact.mjs` erzeugt `dist/aerotrack.html` – eine einzelne Datei mit simuliertem Verkehr und Vektorkarte (Ländergrenzen und -namen, Anzeige des überflogenen Landes). Keine Live-Daten, kein Push.
+
 Node.js ≥ 18. Port per `PORT=…`, alternative readsb-kompatible API per `ADSB_API=…`.
 
 ## Push-Benachrichtigungen (auch bei geschlossenem Tab)

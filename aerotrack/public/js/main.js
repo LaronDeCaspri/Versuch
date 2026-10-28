@@ -9,6 +9,7 @@ import { AircraftLayer } from './layer.js';
 import { Panel } from './panel.js';
 import * as prefs from './prefs.js';
 import { PushClient } from './push.js';
+import { labelPoint } from './overfly.js';
 import { Store } from './store.js';
 
 const AREA_INTERVAL = 3000;
@@ -98,7 +99,46 @@ L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
 map.attributionControl.setPrefix(false);
 
 let baseLayer = null;
+// Eigenständige Variante (ohne Kachelserver): Länderumrisse als Vektorkarte.
+const STATIC = globalThis.AEROTRACK_STATIC || null;
+if (STATIC) document.body.classList.add('is-static');
+
+// Ländernamen; kleine Länder erst bei stärkerem Zoom, damit nichts überlappt.
+function addCountryLabels() {
+  const labels = STATIC.world.features
+    .map((f) => ({ name: f.properties?.name, pt: labelPoint(f) }))
+    .filter((l) => l.name && l.pt)
+    .map(({ name, pt }) => ({
+      minZoom: pt[2] > 60 ? 3 : pt[2] > 8 ? 5 : 7,
+      marker: L.marker([pt[0], pt[1]], {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({ className: 'country-label', html: `<span>${escapeHtml(name)}</span>`, iconSize: null }),
+      }),
+    }));
+  const sync = () => {
+    const z = map.getZoom();
+    for (const l of labels) {
+      const show = z >= l.minZoom;
+      if (show && !map.hasLayer(l.marker)) l.marker.addTo(map);
+      else if (!show && map.hasLayer(l.marker)) map.removeLayer(l.marker);
+    }
+  };
+  map.on('zoomend', sync);
+  sync();
+}
+
 function setBasemap(key) {
+  if (STATIC) {
+    baseLayer ||= L.geoJSON(STATIC.world, {
+      style: { color: '#4a6290', weight: 1.1, fillColor: '#13203d', fillOpacity: 1 },
+      interactive: false,
+      attribution: 'Grenzen: Natural Earth',
+    }).addTo(map);
+    addCountryLabels();
+    settings.basemap = 'dark';
+    return;
+  }
   settings.basemap = BASEMAPS[key] ? key : 'dark';
   const b = BASEMAPS[settings.basemap];
   if (baseLayer) map.removeLayer(baseLayer);
@@ -348,7 +388,12 @@ function afterTick() {
 function updateHash() {
   const c = map.getCenter();
   const h = `#${map.getZoom()}/${c.lat.toFixed(4)}/${c.lng.toFixed(4)}${state.selected ? `/${state.selected}` : ''}`;
-  if (location.hash !== h) history.replaceState(null, '', h);
+  if (location.hash === h) return;
+  try {
+    history.replaceState(null, '', h);
+  } catch {
+    // eingebettete Ansichten können den Verlauf sperren
+  }
 }
 
 // Tooltip und Auswahl per Klick auf die Canvas-Ebene

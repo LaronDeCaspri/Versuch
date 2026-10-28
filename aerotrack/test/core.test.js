@@ -91,3 +91,14 @@ test('Simulator liefert gültige Daten', () => {
   for (const a of area.ac) assert.ok(Number.isFinite(a.lat) && Number.isFinite(a.lon) && a.hex);
   assert.ok(s.military().ac.every((a) => a.flags & 1));
 });
+
+test('countryAt: Land unter einer Position', async () => {
+  const { countryAt } = await import('../public/js/overfly.js');
+  const { feature } = await import('topojson-client');
+  const { default: topo } = await import('world-atlas/countries-50m.json', { with: { type: 'json' } });
+  const world = feature(topo, topo.objects.countries);
+  assert.equal(countryAt(50.1, 8.7, world), 'Germany');
+  assert.equal(countryAt(48.86, 2.35, world), 'France');
+  assert.equal(countryAt(54.5, 3.0, world), 'Über dem Meer');
+  assert.equal(countryAt(50, 8, null), null);
+});

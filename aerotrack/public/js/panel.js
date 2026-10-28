@@ -4,6 +4,7 @@
 import { api } from './api.js';
 import { CLASSES, FLAG, SQUAWK_TEXT } from './classify.js';
 import { countryOf } from './country.js';
+import { countryAt } from './overfly.js';
 import { distanceNm, escapeHtml, fmtAlt, fmtDist, fmtDuration, fmtSpeed, fmtVr } from './geo.js';
 
 const routeCache = new Map();
@@ -84,6 +85,7 @@ export class Panel {
         <dt>ICAO-Hex</dt><dd class="mono">${escapeHtml(ac.hex.toUpperCase())}</dd>
         <dt>Registriert in</dt><dd>${country ? `${country.flag} ${country.name}` : '–'}</dd>
         <dt>Baujahr</dt><dd>${escapeHtml(ac.year || '–')}</dd>
+        <dt>Überfliegt</dt><dd data-f="over">–</dd>
         <dt>Position</dt><dd class="mono" data-f="pos"></dd>
         <dt>Datenquelle</dt><dd data-f="src"></dd>
         <dt>Letztes Signal</dt><dd data-f="seen"></dd>
@@ -115,6 +117,10 @@ export class Panel {
     this.f('sq').textContent = ac.sq || '–';
     const p = ac.pos || ac;
     this.f('pos').textContent = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
+    const over = countryAt(p.lat, p.lon);
+    const overEl = this.f('over');
+    overEl.textContent = over ?? '–';
+    overEl.hidden = overEl.previousElementSibling.hidden = over == null;
     this.f('src').textContent = srcLabel(ac.src);
     const age = Math.round((Date.now() - ac.fixT) / 1000);
     this.f('seen').textContent = age <= 1 ? 'gerade eben' : `vor ${age} s`;
